@@ -149,3 +149,15 @@ def test_security_headers(tmp_path: Path) -> None:
     assert "frame-ancestors 'none'" in resp.headers["content-security-policy"]
     assert "http" not in resp.headers["content-security-policy"]  # no external sources
     assert "cdn" not in resp.text.lower()
+
+
+def test_referrer_policy_lets_browsers_send_the_real_origin(tmp_path: Path) -> None:
+    # "no-referrer" makes Chromium send `Origin: null` on form posts, which is refused.
+    ui = make_ui(tmp_path)
+    assert ui.client.get("/setup").headers["referrer-policy"] == "same-origin"
+
+
+def test_null_origin_post_is_forbidden(tmp_path: Path) -> None:
+    ui = make_ui(tmp_path)
+    resp = ui.client.post("/setup/signout", data={"csrf": ui.csrf()}, headers={"Origin": "null"})
+    assert resp.status_code == 403

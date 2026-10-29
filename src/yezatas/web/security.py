@@ -35,7 +35,9 @@ SECURITY_HEADERS = {
     ),
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    # Not "no-referrer": with it, Chromium browsers send `Origin: null` on form posts, which the
+    # Origin check below rightly refuses. "same-origin" still keeps the referrer off other sites.
+    "Referrer-Policy": "same-origin",
 }
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 KEY_BYTES = 32
