@@ -1,0 +1,37 @@
+# Secrets and credentials: never commit
+.env
+.env.*
+*.env
+client_secret*.json
+client_secrets*.json
+token*.json
+*.token
+credentials/
+config/credentials/
+
+# Local channel data
+catalog/
+*.sqlite
+*.sqlite3
+*.db
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Tools and editors
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
