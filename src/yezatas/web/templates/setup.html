@@ -210,14 +210,18 @@
       <p class="gnote gafter">Google says new settings can take 5 minutes to a few hours to work. If the sign-in in step 5 fails with an "invalid client" error, wait a few minutes and try again.</p>
     </div>
     <div class="slide" data-slide>
-      <p class="guide-label">Google shows the new client. Click <strong>Download JSON</strong>.</p>
+      <p class="guide-label">Google shows the new client. Click <strong>Download JSON</strong> <em>before</em> you click OK.</p>
       <div class="gpanel">
         <p class="gtitle">OAuth client created</p>
-        <div class="gfield gplain"><span class="glabel">Client ID</span><span class="gvalue">1234…apps.googleusercontent.com</span></div>
-        <div class="gfield gplain"><span class="glabel">Client secret</span><span class="gvalue">••••••••••••</span></div>
-        <div class="gfoot"><button type="button" class="gbtn primary" data-slide-next>Download JSON</button><span class="gbtn">OK</span></div>
+        <p class="gbanner ginfo">OAuth access is restricted to the test users listed on your OAuth consent screen</p>
+        <div class="grow"><span>Client ID</span><span class="gsecret">••••••••.apps.googleusercontent.com</span></div>
+        <p class="gbanner gwarn">You will no longer be able to view or download the client secret once you close this dialog.</p>
+        <div class="grow"><span>Client secret</span><span class="gsecret">••••••••••••</span></div>
+        <div class="grow"><span>Status</span><span>Enabled</span></div>
+        <div class="gfoot gspread"><button type="button" class="gbtn primary" data-slide-next>Download JSON</button><span class="gbtn">OK</span></div>
       </div>
-      <p class="gnote gafter">Closed it already? Click the client's name on the Clients page, then the download icon next to the client secret.</p>
+      <p class="gnote gafter">Closed it without downloading? Open the client on the Clients page, click <strong>Add secret</strong>, and download the new one. Or delete the client and create a new one.</p>
+      <p class="gnote gafter"><strong>Keep the ID and secret private.</strong> If you take a screenshot of this dialog, crop it above "Client ID".</p>
     </div>
     <div class="slide" data-slide>
       <p class="guide-label">Last: upload the downloaded file below.</p>
