@@ -2,9 +2,54 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
 
 MAX_RESULTS = 50
+
+
+@dataclass(frozen=True)
+class ApiErrorInfo:
+    """What a failed YouTube API call said: HTTP status, machine reasons and the message."""
+
+    status: int | None
+    reasons: tuple[str, ...]
+    message: str
+
+    @property
+    def reason(self) -> str:
+        return self.reasons[0] if self.reasons else ""
+
+
+def api_error_info(exc: BaseException) -> ApiErrorInfo:
+    """Pull status, reasons and message out of a googleapiclient HttpError (duck-typed).
+
+    Reasons come from `error.errors[].reason` (for example `quotaExceeded`) and from the
+    `ErrorInfo` entries in `error.details[].reason` (for example `SERVICE_DISABLED`). Anything
+    that cannot be parsed yields empty reasons rather than raising.
+    """
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    try:
+        status = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        status = None
+    content = getattr(exc, "content", b"")
+    if isinstance(content, bytes):
+        content = content.decode("utf-8", errors="replace")
+    reasons: list[str] = []
+    message = ""
+    try:
+        error = json.loads(content).get("error")
+    except (ValueError, AttributeError, TypeError):
+        error = None
+    if isinstance(error, dict):
+        message = str(error.get("message") or "")
+        for entry in (error.get("errors") or []) + (error.get("details") or []):
+            reason = entry.get("reason") if isinstance(entry, dict) else None
+            if isinstance(reason, str) and reason not in reasons:
+                reasons.append(reason)
+    return ApiErrorInfo(status, tuple(reasons), message)
 
 
 class YouTubeReader(Protocol):

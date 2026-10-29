@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Yezatas{% endblock %}
+{% block content %}
+<section class="card done">
+  <h2>Your catalog is ready</h2>
+  <p>{{ latest_pull.videos }} videos were pulled on {{ latest_pull.when }}. They are stored on this
+     computer only.</p>
+  <p>More tools will appear here soon. Nothing in Yezatas changes your channel without your approval.</p>
+  <p><a class="button secondary" href="/setup">Open the setup checklist</a></p>
+</section>
+{% include "_footer.html" %}
+{% endblock %}

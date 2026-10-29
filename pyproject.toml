@@ -14,13 +14,20 @@ dependencies = [
     "google-auth",
     "google-auth-oauthlib",
     "google-api-python-client",
+    "fastapi",
+    "uvicorn",
+    "jinja2",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "httpx"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+yezatas = ["web/templates/*.html", "web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

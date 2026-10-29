@@ -163,6 +163,12 @@ class Store:
     def get_pull(self, pull_id: int) -> sqlite3.Row | None:
         return self._conn.execute("SELECT * FROM pulls WHERE id = ?", (pull_id,)).fetchone()
 
+    def latest_pull(self) -> sqlite3.Row | None:
+        """The newest finished pull, or None."""
+        return self._conn.execute(
+            "SELECT * FROM pulls WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
     # --- videos ----------------------------------------------------------
     def upsert_video(self, video: Video, pull_id: int, now: datetime | None = None) -> None:
         """Update the current state of a video and add a snapshot, in one transaction."""

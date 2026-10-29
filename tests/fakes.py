@@ -6,6 +6,7 @@ from typing import Any, Sequence
 
 CHANNEL_ID = "UC_fake_channel"
 UPLOADS_ID = "UU_fake_uploads"
+CHANNEL_TITLE = "Sample Cactus Garden"
 
 
 def make_item(n: int, views: int | None = None) -> dict[str, Any]:
@@ -36,7 +37,9 @@ def make_item(n: int, views: int | None = None) -> dict[str, Any]:
 
 
 class FakeYouTubeReader:
-    def __init__(self, video_count: int = 120, page_size: int = 50, has_channel: bool = True) -> None:
+    def __init__(self, video_count: int = 120, page_size: int = 50, has_channel: bool = True,
+                 error: Exception | None = None) -> None:
+        self.error = error  # raised by channels_mine when set
         self.items = [make_item(n) for n in range(1, video_count + 1)]
         self.page_size = page_size
         self.has_channel = has_channel
@@ -44,10 +47,21 @@ class FakeYouTubeReader:
 
     def channels_mine(self, part: str) -> dict[str, Any]:
         self.calls.append(("channels_mine", part))
+        if self.error is not None:
+            raise self.error
         if not self.has_channel:
             return {"items": []}
-        return {"items": [{"id": CHANNEL_ID,
-                           "contentDetails": {"relatedPlaylists": {"uploads": UPLOADS_ID}}}]}
+        channel: dict[str, Any] = {
+            "id": CHANNEL_ID,
+            "contentDetails": {"relatedPlaylists": {"uploads": UPLOADS_ID}},
+        }
+        parts = set(part.split(","))
+        if "snippet" in parts:
+            channel["snippet"] = {"title": CHANNEL_TITLE}
+        if "statistics" in parts:
+            channel["statistics"] = {"videoCount": str(len(self.items)), "viewCount": "12345",
+                                     "subscriberCount": "321"}
+        return {"items": [channel]}
 
     def playlist_items(self, playlist_id: str, page_token: str | None) -> dict[str, Any]:
         self.calls.append(("playlist_items", (playlist_id, page_token)))

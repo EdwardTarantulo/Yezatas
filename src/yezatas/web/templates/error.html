@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} - Yezatas{% endblock %}
+{% block content %}
+<section class="card problem">
+  <h2>{{ heading }}</h2>
+  <p>{{ text }}</p>
+  <p><a class="button secondary" href="/setup#step-client">Back to setup</a></p>
+</section>
+{% endblock %}

@@ -8,6 +8,10 @@ It takes about 10 minutes and costs nothing: the YouTube Data API is free within
 
 > Do every step while signed in to the **Google account that owns (or manages) the channel** you want to use.
 
+**Easiest way:** run `python -m yezatas ui`. The setup screen walks you through the same steps below, with a direct
+link to each Google Cloud page, an upload button for the client file, the sign-in and a connection check. This page is
+the written version, for reference and troubleshooting.
+
 ## 1. Create a Google Cloud project
 
 1. Open <https://console.cloud.google.com/>.

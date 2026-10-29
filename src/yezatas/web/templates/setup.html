@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Set up - Yezatas{% endblock %}
+
+{% macro card(step) %}
+<section class="card {{ step.status }}{% if current == step.key %} current{% endif %}{% if not step.enabled %} locked{% endif %}" id="step-{{ step.key }}">
+  <header class="card-head">
+    <span class="num" aria-hidden="true">{{ step.number }}</span>
+    <h2>{{ step.title }}</h2>
+    <span class="pill {{ step.status }}">{{ step.pill }}</span>
+  </header>
+  {% if step.status == 'problem' and step.note %}
+  <p class="fix" role="alert"><strong>What to fix:</strong> {{ step.note }}</p>
+  {% endif %}
+  {{ caller() }}
+</section>
+{% endmacro %}
+
+{% macro post_button(action, label, style='primary', disabled=false) %}
+<form method="post" action="{{ action }}" class="inline">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button type="submit" class="button {{ style }}"{% if disabled %} disabled{% endif %}>{{ label }}</button>
+</form>
+{% endmacro %}
+
+{% block content %}
+<p class="intro">Connect your channel in seven short steps. Yezatas only <strong>reads</strong> your
+  channel here. Nothing is changed on YouTube. Use the Google account that owns the channel for every step.</p>
+
+{% for item in flash %}
+<div class="flash {{ item.kind }}" role="status">
+  {{ item.text }}
+  {% if item.step %}<a href="#step-{{ item.step }}">Go to the step</a>{% endif %}
+</div>
+{% endfor %}
+
+{% call card(steps.project) %}
+  <p>Google Cloud is where you create your own free key for talking to YouTube. Create a project
+    with any name, for example <code>yezatas-local</code>, and make sure it is selected in the
+    project picker at the top.</p>
+  <p><a class="button secondary" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer">Open Google Cloud: new project</a></p>
+  <p class="hint">Yezatas cannot see this step. It counts as done once your client file (step 4) is valid.</p>
+{% endcall %}
+
+{% call card(steps.api) %}
+  <p>Open the page below, check the project name at the top, then click <strong>Enable</strong> for
+    the YouTube Data API v3.</p>
+  <p><a class="button secondary" href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener noreferrer">Open the YouTube Data API v3 page</a></p>
+  <p class="hint">
+    {% if steps.api.status == 'done' %}Confirmed: YouTube answered a real request.
+    {% else %}Yezatas finds out in step 6. If the API is off, this step turns red and tells you what to do.{% endif %}
+  </p>
+{% endcall %}
+
+{% call card(steps.consent) %}
+  <p>Set up the consent screen. It is the page Google shows when you sign in.</p>
+  <ul>
+    <li>User type: <strong>External</strong>.</li>
+    <li>App name: anything, for example <code>Yezatas</code>. Only you will see it. Add your email as the support and developer contact.</li>
+    <li>Add the Google account that owns your channel as a <strong>Test user</strong> (on the Audience page). Without this, Google blocks the sign-in.</li>
+    <li>Leave the app in <strong>Testing</strong>. That is fine for personal use, but Google expires the sign-in after <strong>7 days</strong>. Then you just sign in again.</li>
+  </ul>
+  <p><a class="button secondary" href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener noreferrer">Open the consent screen setup</a></p>
+  <p class="hint">If the page looks different, go to APIs &amp; Services, then OAuth consent screen.</p>
+{% endcall %}
+
+{% call card(steps.client) %}
+  <p>Create an <strong>OAuth client</strong> of type <strong>Desktop app</strong>, then download its JSON file.</p>
+  <ol>
+    <li>Open the Clients page and click <strong>Create client</strong>.</li>
+    <li>Application type: <strong>Desktop app</strong>. Any name works.</li>
+    <li>Click <strong>Create</strong>, then <strong>Download JSON</strong>.</li>
+  </ol>
+  <p><a class="button secondary" href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener noreferrer">Open the Clients page</a></p>
+
+  {% if client %}
+  <p class="saved">Saved: project <strong>{{ client.project_id }}</strong>, client <code>{{ client.client_id_short }}</code></p>
+  {% endif %}
+
+  <form method="post" action="/setup/client" enctype="multipart/form-data" class="upload">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="client_file">{% if client %}Replace it with another file{% else %}Upload the downloaded file{% endif %}
+      <span class="hint">(JSON, up to {{ max_kb }} KB)</span></label>
+    <input type="file" id="client_file" name="client_file" accept=".json,application/json" required>
+    {% if client %}
+    <label class="check"><input type="checkbox" name="replace" value="yes"> Replace the saved file (this also signs you out)</label>
+    {% endif %}
+    <button type="submit" class="button primary">Upload</button>
+  </form>
+  <p class="hint">Or save the file yourself as <code>{{ client_path }}</code> and reload this page.
+    Keep this file private: never share it or post it online.</p>
+{% endcall %}
+
+{% call card(steps.signin) %}
+  {% if not steps.signin.enabled %}
+    <p>Add your client file first (step 4).</p>
+  {% elif signin.running %}
+    <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+      <span id="signin-msg">{{ signin.message or 'Waiting for you to finish in the browser tab…' }}</span></p>
+    <p>A Google page opened in your browser. Pick the channel's account and allow read-only access.
+      Google may warn that the app is not verified. That is expected for your own project: click
+      <strong>Continue</strong> (or <strong>Advanced</strong>, then go to the app).</p>
+    <p class="hint">If you do not see the tab, look behind your other windows. This stops waiting after 5 minutes.</p>
+    {{ post_button('/setup/signin/cancel', 'Cancel', 'secondary') }}
+  {% elif signed_in %}
+    <p>You are signed in with read-only access. Yezatas saved a sign-in token on this computer.</p>
+    {{ post_button('/setup/signout', 'Sign out', 'secondary') }}
+  {% else %}
+    <p>This opens a Google page in your browser. You choose the account and allow
+      <strong>read-only</strong> access to your YouTube data. Yezatas never sees your password.</p>
+    {{ post_button('/setup/signin', 'Sign in with Google') }}
+  {% endif %}
+{% endcall %}
+
+{% call card(steps.check) %}
+  {% if not steps.check.enabled %}
+    <p>Sign in first (step 5).</p>
+  {% elif check and check.ok %}
+    <p>Connected to <strong>{{ check.channel_title or 'your channel' }}</strong>:
+      {{ check.video_count }} public video{{ '' if check.video_count == 1 else 's' }},
+      uploads playlist {{ 'found' if check.has_uploads else 'not found' }}.</p>
+    {% if not check.has_uploads %}
+    <p class="fix">This channel has no uploads playlist yet, so there is nothing to pull.</p>
+    {% endif %}
+    {{ post_button('/setup/check', 'Check again', 'secondary') }}
+  {% else %}
+    <p>One small request asks YouTube for your channel. It costs 1 quota unit.</p>
+    {{ post_button('/setup/check', 'Check the connection') }}
+  {% endif %}
+{% endcall %}
+
+{% call card(steps.pull) %}
+  <p><strong>Read-only:</strong> this copies your video titles, descriptions, tags and stats to this
+    computer. Nothing is changed on YouTube.</p>
+  {% if pull.running %}
+    <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+      <span id="pull-msg">{{ pull.message or 'Starting…' }}</span></p>
+  {% elif not steps.pull.enabled or not estimate %}
+    <p>Check the connection first (step 6).</p>
+  {% else %}
+    {% set batches = (check.video_count + 49) // 50 %}
+    <p>Estimated cost: <strong>{{ estimate.units }}</strong> quota units
+      (1 for the channel, {{ [1, batches]|max }} for the video list, {{ batches }} for video details).
+      Left today: <strong>{{ quota.remaining }}</strong> of {{ quota.budget }}.
+      <span class="hint">Private videos are not in the count above, so the real cost can be a little higher.</span></p>
+    {% if pull_result %}
+    <p class="result">Done: <strong>{{ pull_result.video_count }}</strong> videos stored,
+      {{ pull_result.units_used }} quota units used.</p>
+    {% elif latest_pull %}
+    <p class="result">Last pull: <strong>{{ latest_pull.videos }}</strong> videos on {{ latest_pull.when }}.</p>
+    {% endif %}
+    {% if not estimate.fits %}
+    <p class="fix">Not enough quota left for this today. It resets at midnight Pacific time.</p>
+    {% endif %}
+    {{ post_button('/setup/pull', 'Pull again' if latest_pull else 'Pull my catalog', 'primary', not estimate.fits) }}
+  {% endif %}
+{% endcall %}
+
+{% include "_footer.html" %}
+{% endblock %}

@@ -19,6 +19,10 @@ as it lands; the git history is the detailed record.
   and the **catalog pull**: every upload's title, description, tags, stats, privacy, language, localizations and
   thumbnails go into the local catalog, with a snapshot per pull and every API call charged to the quota guard first.
   CLI: `python -m yezatas signin | pull | quota`.
+- **2026-10-29**: **local web UI** (`python -m yezatas ui`; 127.0.0.1 only, one-time link, session cookie, CSRF and
+  Host checks) with a **setup screen**: a 7-step guided connection to YouTube with links to each Google Cloud page,
+  client file upload and validation, sign-in, a connection check with specific fixes for common errors, and a
+  read-only catalog pull with its quota cost shown first.
 
 ## Setup
 
