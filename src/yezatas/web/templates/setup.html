@@ -73,17 +73,42 @@
 {% endfor %}
 
 {% call card(steps.project) %}
-  <p>Google Cloud is where you create your own free key for talking to YouTube. Create a project
-    with any name, for example <code>yezatas-local</code>, and make sure it is selected in the
-    project picker at the top.</p>
+  <p>Google Cloud is where you create your own free key for talking to YouTube. Open the page and
+    fill it in like this:</p>
   <p><a class="button secondary" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer">Open Google Cloud: new project</a></p>
+  <div class="guide">
+    <div class="gpanel">
+      <p class="gtitle">New Project</p>
+      <div class="gfield"><span class="glabel">Project name *</span><span class="gvalue">Yezatas</span></div>
+      <p class="gnote">Type this, or any name. Google makes up the Project ID below it: leave that as it is.</p>
+      <div class="gfield gplain"><span class="glabel">Parent resource *</span><span class="gvalue">No organization</span></div>
+      <p class="gnote">Leave it as it is.</p>
+      <div class="gfoot"><span class="gbtn primary">Create</span><span class="gbtn">Cancel</span></div>
+    </div>
+    <p class="gnote gafter">A yellow note about your project quota may show at the top. You can ignore it.
+      After <strong>Create</strong>, check that the new project is selected in the project picker at the top.</p>
+  </div>
   <p class="hint">Yezatas cannot see this step. It counts as done once your client file (step 4) is valid.</p>
 {% endcall %}
 
 {% call card(steps.api) %}
-  <p>Open the page below, check the project name at the top, then click <strong>Enable</strong> for
-    the YouTube Data API v3.</p>
+  <p>Open the page below and check that your new project is the one selected at the top. Then:</p>
   <p><a class="button secondary" href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener noreferrer">Open the YouTube Data API v3 page</a></p>
+  <div class="guide">
+    <div class="gpanel">
+      <p class="gtitle">Product details</p>
+      <div class="gproduct">
+        <svg class="gapi" viewBox="0 0 48 48" aria-hidden="true"><rect x="4" y="4" width="40" height="40" rx="8"/><path d="M15 17h18M15 24h18M15 31h11"/></svg>
+        <div>
+          <p class="gproduct-name">YouTube Data API v3</p>
+          <p class="gnote">Google</p>
+          <div class="gfoot"><span class="gbtn primary">Enable</span><span class="gbtn">Try this API</span></div>
+          <p class="gnote">Click <strong>Enable</strong>.</p>
+        </div>
+      </div>
+    </div>
+    <p class="gnote gafter">If the button says <strong>Manage</strong> instead, the API is already on for this project.</p>
+  </div>
   <p class="hint">
     {% if steps.api.status == 'done' %}Confirmed: YouTube answered a real request.
     {% else %}Yezatas finds out in step 6. If the API is off, this step turns red and tells you what to do.{% endif %}

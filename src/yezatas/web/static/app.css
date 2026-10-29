@@ -276,3 +276,13 @@ button.gbtn { cursor: pointer; }
 .gempty-title { font-size: 1.15rem; margin: 0 0 6px; }
 .gempty .gnote { margin: 0 auto 14px; max-width: 420px; }
 .gdone { margin: 14px 0 0; }
+
+/* Single-screen pictures (steps 1 and 2) */
+.gafter { margin: 8px 0 12px 2px; }
+.gfield.gplain .gvalue { color: var(--text); font-weight: 400; }
+.gproduct { display: flex; gap: 18px; align-items: flex-start; }
+.gproduct-name { font-size: 1.3rem; margin: 0 0 2px; }
+.gproduct .gfoot { margin: 12px 0 8px; }
+.gapi { width: 64px; height: 64px; flex: none; }
+.gapi rect { fill: var(--todo-bg); }
+.gapi path { stroke: var(--muted); stroke-width: 3; stroke-linecap: round; fill: none; }
