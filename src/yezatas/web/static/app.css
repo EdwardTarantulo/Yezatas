@@ -205,7 +205,6 @@ form.inline { display: inline; }
   padding: 4px 0 10px 24px;
   border-left: 1px solid var(--line);
 }
-.gstep:not(.open) .gstep-body { display: none; }
 .gfield {
   position: relative;
   border: 1px solid var(--muted);
@@ -257,3 +256,23 @@ button.gbtn { cursor: pointer; }
 .gpath { margin: 0 0 8px; }
 .gtestusers { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .gtestusers .gfield { flex: 1 1 260px; margin: 6px 0; }
+
+/* Slider: one slide at a time once app.js runs; without JS every slide is shown. */
+.guide:not(.js) .slider-nav { display: none; }
+.guide:not(.js) .slide + .slide { margin-top: 20px; }
+.slide .guide-label { margin-top: 4px; }
+.slider-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.slider-nav .gbtn:disabled { opacity: 0.35; cursor: default; }
+.dots { display: flex; gap: 8px; }
+.dot {
+  width: 10px; height: 10px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: var(--line);
+  cursor: pointer;
+}
+.dot.active { background: var(--accent); }
+.gempty { text-align: center; padding: 28px 18px; }
+.gfolder { width: 72px; height: 54px; fill: var(--accent); opacity: 0.8; margin-bottom: 10px; }
+.gempty-title { font-size: 1.15rem; margin: 0 0 6px; }
+.gempty .gnote { margin: 0 auto 14px; max-width: 420px; }
+.gdone { margin: 14px 0 0; }

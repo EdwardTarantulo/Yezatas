@@ -22,6 +22,45 @@
 </form>
 {% endmacro %}
 
+{# A picture of Google's 4-part "Project configuration" form with part `open` expanded. #}
+{% macro gwizard(open) %}
+<div class="gpanel">
+  <p class="gtitle">Project configuration</p>
+  <ol class="gsteps">
+    {% set parts = ['App Information', 'Audience', 'Contact Information', 'Finish'] %}
+    {% for title in parts %}
+    <li class="gstep{% if loop.index == open %} open{% endif %}">
+      <button type="button" class="gstep-head" data-slide-goto="{{ loop.index }}"><span class="gnum">{{ loop.index }}</span>{{ title }}</button>
+      {% if loop.index == open %}
+      <div class="gstep-body">
+        {% if open == 1 %}
+        <div class="gfield"><span class="glabel">App name *</span><span class="gvalue">Yezatas</span></div>
+        <p class="gnote">Type this, or any name. Only you will see it.</p>
+        <div class="gfield"><span class="glabel">User support email *</span><span class="gvalue">your email<span class="gcaret" aria-hidden="true">▾</span></span></div>
+        <p class="gnote">Pick your email from the list.</p>
+        {% elif open == 2 %}
+        <div class="gradio off"><span class="gdot" aria-hidden="true"></span><span><strong>Internal</strong><br><span class="gsmall">Only for Google Workspace organizations. Skip it.</span></span></div>
+        <div class="gradio on"><span class="gdot" aria-hidden="true"></span><span><strong>External</strong><br><span class="gsmall">Choose this one.</span></span></div>
+        {% elif open == 3 %}
+        <div class="gfield"><span class="glabel">Email addresses *</span><span class="gvalue">your email</span></div>
+        <p class="gnote">Google writes here about changes to the project.</p>
+        {% else %}
+        <div class="gcheck"><span class="gbox" aria-hidden="true">✓</span><span>I agree to the Google API Services: User Data Policy.</span></div>
+        <p class="gnote">Tick the box, then click <strong>Create</strong> below.</p>
+        {% endif %}
+        {% if open < 4 %}<button type="button" class="gbtn" data-slide-next>Next</button>{% endif %}
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  <div class="gfoot">
+    {% if open == 4 %}<button type="button" class="gbtn primary" data-slide-next>Create</button>{% else %}<span class="gbtn primary">Create</span>{% endif %}
+    <span class="gbtn">Cancel</span>
+  </div>
+</div>
+{% endmacro %}
+
 {% block content %}
 <p class="intro">Connect your channel in seven short steps. Yezatas only <strong>reads</strong> your
   channel here. Nothing is changed on YouTube. Use the Google account that owns the channel for every step.</p>
@@ -52,65 +91,46 @@
 {% endcall %}
 
 {% call card(steps.consent) %}
-  <p>The consent screen is the page Google shows when you sign in. Open the setup page, and if it
-    says <em>"Google Auth Platform not configured yet"</em>, click <strong>Get started</strong>.</p>
+  <p>The consent screen is the page Google shows when you sign in. Open the setup page, then follow
+    the slides below: they show what Google shows you, with the values to enter.</p>
   <p><a class="button secondary" href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener noreferrer">Open the consent screen setup</a></p>
 
-  <div class="guide" data-guide>
-    <p class="guide-label">Google shows this form. Fill it in like this:</p>
-    <div class="gpanel">
-      <p class="gtitle">Project configuration</p>
-      <ol class="gsteps">
-        <li class="gstep open" data-gstep>
-          <button type="button" class="gstep-head"><span class="gnum">1</span>App Information</button>
-          <div class="gstep-body">
-            <div class="gfield"><span class="glabel">App name *</span><span class="gvalue">Yezatas</span></div>
-            <p class="gnote">Type this, or any name. Only you will see it.</p>
-            <div class="gfield"><span class="glabel">User support email *</span><span class="gvalue">your email<span class="gcaret" aria-hidden="true">▾</span></span></div>
-            <p class="gnote">Pick your email from the list.</p>
-            <button type="button" class="gbtn" data-gnext>Next</button>
-          </div>
-        </li>
-        <li class="gstep" data-gstep>
-          <button type="button" class="gstep-head"><span class="gnum">2</span>Audience</button>
-          <div class="gstep-body">
-            <div class="gradio off"><span class="gdot" aria-hidden="true"></span><span><strong>Internal</strong><br><span class="gsmall">Only for Google Workspace organizations. Skip it.</span></span></div>
-            <div class="gradio on"><span class="gdot" aria-hidden="true"></span><span><strong>External</strong><br><span class="gsmall">Choose this one.</span></span></div>
-            <button type="button" class="gbtn" data-gnext>Next</button>
-          </div>
-        </li>
-        <li class="gstep" data-gstep>
-          <button type="button" class="gstep-head"><span class="gnum">3</span>Contact Information</button>
-          <div class="gstep-body">
-            <div class="gfield"><span class="glabel">Email addresses *</span><span class="gvalue">your email</span></div>
-            <p class="gnote">Google writes here about changes to the project.</p>
-            <button type="button" class="gbtn" data-gnext>Next</button>
-          </div>
-        </li>
-        <li class="gstep" data-gstep>
-          <button type="button" class="gstep-head"><span class="gnum">4</span>Finish</button>
-          <div class="gstep-body">
-            <div class="gcheck"><span class="gbox" aria-hidden="true">✓</span><span>I agree to the Google API Services: User Data Policy.</span></div>
-            <p class="gnote">Tick the box, then click <strong>Create</strong> below.</p>
-          </div>
-        </li>
-      </ol>
-      <div class="gfoot"><span class="gbtn primary">Create</span><span class="gbtn">Cancel</span></div>
-    </div>
-
-    <p class="guide-label">Then add yourself as a test user. Without this, Google blocks the sign-in:</p>
-    <div class="gpanel">
-      <p class="gpath">Left menu: <strong>Audience</strong> <span aria-hidden="true">›</span> scroll to <strong>Test users</strong></p>
-      <div class="gtestusers">
-        <span class="gbtn">+ Add users</span>
-        <div class="gfield"><span class="glabel">Email</span><span class="gvalue">the account that owns your channel</span></div>
-        <span class="gbtn primary">Save</span>
+  <div class="guide" data-slider aria-roledescription="slides" aria-label="Consent screen setup, step by step">
+    <div class="slide" data-slide>
+      <p class="guide-label">First, Google shows this. Click <strong>Get started</strong>.</p>
+      <div class="gpanel gempty">
+        <svg class="gfolder" viewBox="0 0 64 48" aria-hidden="true"><path d="M4 8a4 4 0 0 1 4-4h14l6 6h28a4 4 0 0 1 4 4v26a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z"/></svg>
+        <p class="gempty-title">Google Auth Platform not configured yet</p>
+        <p class="gnote">If you see the Overview page with charts instead, this part is already done: skip to the test users slide.</p>
+        <button type="button" class="gbtn primary" data-slide-next>Get started</button>
       </div>
-      <p class="gnote">Brand Account channel? Add the Google account you sign in with to manage it.</p>
     </div>
+    {% for part in range(1, 5) %}
+    <div class="slide" data-slide>
+      <p class="guide-label">Fill in part {{ part }} of Google's form like this, then click <strong>{{ 'Create' if part == 4 else 'Next' }}</strong>.</p>
+      {{ gwizard(part) }}
+    </div>
+    {% endfor %}
+    <div class="slide" data-slide>
+      <p class="guide-label">Last: add yourself as a test user. Without this, Google blocks the sign-in.</p>
+      <div class="gpanel">
+        <p class="gpath">Left menu: <strong>Audience</strong> <span aria-hidden="true">›</span> scroll to <strong>Test users</strong></p>
+        <div class="gtestusers">
+          <span class="gbtn">+ Add users</span>
+          <div class="gfield"><span class="glabel">Email</span><span class="gvalue">the account that owns your channel</span></div>
+          <span class="gbtn primary">Save</span>
+        </div>
+        <p class="gnote">Brand Account channel? Add the Google account you sign in with to manage it.</p>
+      </div>
+      <p class="gdone">Done with step 3. Leave the app in <strong>Testing</strong>: that is fine for personal use, but Google ends the sign-in after <strong>7 days</strong>, and then you just sign in again.</p>
+    </div>
+    <nav class="slider-nav" aria-label="Slides">
+      <button type="button" class="gbtn" data-slide-prev>‹ Back</button>
+      <span class="dots" data-dots></span>
+      <button type="button" class="gbtn" data-slide-next>Next ›</button>
+    </nav>
   </div>
 
-  <p>Leave the app in <strong>Testing</strong>. That is fine for personal use, but Google expires the sign-in after <strong>7 days</strong>. Then you just sign in again.</p>
   <p class="hint">If Google's page looks different, go to APIs &amp; Services, then OAuth consent screen.</p>
 {% endcall %}
 

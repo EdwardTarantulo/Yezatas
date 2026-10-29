@@ -12,17 +12,40 @@
     });
   });
 
-  // Guides that picture Google's multi-part forms: one part open at a time, like Google's.
-  document.querySelectorAll("[data-guide]").forEach(function (guide) {
-    var steps = Array.prototype.slice.call(guide.querySelectorAll("[data-gstep]"));
-    function open(i) {
-      steps.forEach(function (s, j) { s.classList.toggle("open", j === i); });
-    }
-    steps.forEach(function (step, i) {
-      step.querySelector(".gstep-head").addEventListener("click", function () { open(i); });
-      var next = step.querySelector("[data-gnext]");
-      if (next) next.addEventListener("click", function () { open(i + 1); });
+  // Slide guides: one screen at a time, Back / Next and dots. Without JS every slide is shown.
+  document.querySelectorAll("[data-slider]").forEach(function (slider) {
+    var slides = Array.prototype.slice.call(slider.querySelectorAll("[data-slide]"));
+    var dots = slider.querySelector("[data-dots]");
+    var prev = slider.querySelector(".slider-nav [data-slide-prev]");
+    var next = slider.querySelector(".slider-nav [data-slide-next]");
+    var current = 0;
+    slides.forEach(function (_, i) {
+      var dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = "dot";
+      dot.setAttribute("aria-label", "Slide " + (i + 1) + " of " + slides.length);
+      dot.addEventListener("click", function () { show(i); });
+      dots.appendChild(dot);
     });
+    function show(i) {
+      current = Math.max(0, Math.min(slides.length - 1, i));
+      slides.forEach(function (s, j) { s.hidden = j !== current; });
+      Array.prototype.forEach.call(dots.children, function (d, j) {
+        d.classList.toggle("active", j === current);
+        if (j === current) d.setAttribute("aria-current", "step"); else d.removeAttribute("aria-current");
+      });
+      prev.disabled = current === 0;
+      next.disabled = current === slides.length - 1;
+    }
+    slider.addEventListener("click", function (e) {
+      var el = e.target.closest("button");
+      if (!el || !slider.contains(el)) return;
+      if (el.hasAttribute("data-slide-next")) show(current + 1);
+      else if (el.hasAttribute("data-slide-prev")) show(current - 1);
+      else if (el.hasAttribute("data-slide-goto")) show(Number(el.getAttribute("data-slide-goto")));
+    });
+    slider.classList.add("js");
+    show(0);
   });
 
   // Coming back with the Back button must not show disabled buttons or stale state.
