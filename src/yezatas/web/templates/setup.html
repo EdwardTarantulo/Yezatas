@@ -53,12 +53,14 @@
 
 {% call card(steps.consent) %}
   <p>Set up the consent screen. It is the page Google shows when you sign in.</p>
-  <ul>
-    <li>User type: <strong>External</strong>.</li>
-    <li>App name: anything, for example <code>Yezatas</code>. Only you will see it. Add your email as the support and developer contact.</li>
-    <li>Add the Google account that owns your channel as a <strong>Test user</strong> (on the Audience page). Without this, Google blocks the sign-in.</li>
-    <li>Leave the app in <strong>Testing</strong>. That is fine for personal use, but Google expires the sign-in after <strong>7 days</strong>. Then you just sign in again.</li>
-  </ul>
+  <ol>
+    <li>If Google says <em>"Google Auth Platform not configured yet"</em>, click <strong>Get started</strong>.</li>
+    <li><strong>App information:</strong> app name, for example <code>Yezatas</code> (only you will see it), and your email as the user support email.</li>
+    <li><strong>Audience:</strong> choose <strong>External</strong>.</li>
+    <li><strong>Contact information:</strong> your email again. Then agree to the policy and click <strong>Create</strong>.</li>
+    <li>Open <strong>Audience</strong> in the left menu. Under <strong>Test users</strong>, click <strong>Add users</strong> and add the Google account that owns your channel. Without this, Google blocks the sign-in.</li>
+  </ol>
+  <p>Leave the app in <strong>Testing</strong>. That is fine for personal use, but Google expires the sign-in after <strong>7 days</strong>. Then you just sign in again.</p>
   <p><a class="button secondary" href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener noreferrer">Open the consent screen setup</a></p>
   <p class="hint">If the page looks different, go to APIs &amp; Services, then OAuth consent screen.</p>
 {% endcall %}
