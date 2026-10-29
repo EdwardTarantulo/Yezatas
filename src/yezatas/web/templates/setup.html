@@ -260,6 +260,9 @@
     <p>A Google page opened in your browser. Pick the channel's account and allow read-only access.
       Google may warn that the app is not verified. That is expected for your own project: click
       <strong>Continue</strong> (or <strong>Advanced</strong>, then go to the app).</p>
+    <p>Google says <strong>"Access blocked: … has not completed the Google verification process"</strong>
+      (Error 403: access_denied)? The account you picked is not on the Test users list. Add that exact
+      email in step 3 (Audience, Test users, Save), click <strong>Cancel</strong> here, then sign in again.</p>
     <p class="hint">If you do not see the tab, look behind your other windows. This stops waiting after 5 minutes.</p>
     {{ post_button('/setup/signin/cancel', 'Cancel', 'secondary') }}
   {% elif signed_in %}
