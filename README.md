@@ -11,6 +11,10 @@ Everything in this repository was written during the build window (Oct 27 – No
 as it lands; the git history is the detailed record.
 
 - **2026-10-29**: repository created: license, README, `.gitignore` (secrets and channel data are never committed).
+- **2026-10-29**: Google Cloud OAuth setup guide ([docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md)).
+- **2026-10-29**: project skeleton, local SQLite catalog (current video state plus a snapshot per pull, as the backup
+  for restores) and the **quota guard**: a daily ledger that resets at midnight Pacific, a cost preview before every
+  action, and a refusal for anything over the budget.
 
 ## Setup
 
