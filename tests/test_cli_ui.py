@@ -38,3 +38,20 @@ def test_ui_command_reports_a_port_in_use(
         port = busy.getsockname()[1]
         assert main(["ui", "--port", str(port), "--no-browser"]) == 1
     assert "already in use" in capsys.readouterr().err
+
+
+def test_ui_command_without_port_skips_a_busy_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("YEZATAS_HOME", str(tmp_path / "home"))
+    calls: dict[str, Any] = {}
+    monkeypatch.setattr("uvicorn.run", lambda app, **kw: calls.update(app=app, **kw))
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        taken = busy.getsockname()[1]
+        monkeypatch.setattr("yezatas.__main__.DEFAULT_UI_PORT", taken)
+        assert main(["ui", "--no-browser"]) == 0
+    assert calls["port"] != taken
+    assert taken < calls["port"] < taken + 20
+    assert f"http://127.0.0.1:{calls['port']}/?t=" in capsys.readouterr().out

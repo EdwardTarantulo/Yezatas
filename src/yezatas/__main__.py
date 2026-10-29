@@ -10,23 +10,42 @@ from .config import Config, ensure_dirs, load_config
 from .store import Store
 
 
-def _run_ui(config: Config, port: int, open_browser: bool) -> int:
+DEFAULT_UI_PORT = 8765
+AUTO_PORT_TRIES = 20
+
+
+def _port_free(port: int) -> bool:
     import socket
 
+    with socket.socket() as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _run_ui(config: Config, port: int | None, open_browser: bool) -> int:
     import uvicorn
 
     from .web.app import create_app
 
-    if not 1 <= port <= 65535:
+    if port is None:
+        # No port asked for: take the first free one from the default up, since other local
+        # tools often sit on common ports.
+        candidates = range(DEFAULT_UI_PORT, DEFAULT_UI_PORT + AUTO_PORT_TRIES)
+        port = next((p for p in candidates if _port_free(p)), None)
+        if port is None:
+            print(f"Ports {candidates[0]}-{candidates[-1]} are all in use. "
+                  "Pick one with: python -m yezatas ui --port N", file=sys.stderr)
+            return 1
+    elif not 1 <= port <= 65535:
         print(f"Port must be between 1 and 65535, got {port}.", file=sys.stderr)
         return 1
-    with socket.socket() as probe:  # fail early with a clear message if the port is taken
-        try:
-            probe.bind(("127.0.0.1", port))
-        except OSError:
-            print(f"Port {port} is already in use. Try: python -m yezatas ui --port {port + 1}",
-                  file=sys.stderr)
-            return 1
+    elif not _port_free(port):  # fail early with a clear message if the port is taken
+        print(f"Port {port} is already in use. Try another one, or leave out --port to let "
+              "Yezatas pick a free port.", file=sys.stderr)
+        return 1
     app = create_app(config, port=port, open_browser=open_browser)
     print("Yezatas is starting. Open this link in your browser (it signs this browser in):")
     print(f"  {app.state.start_url}", flush=True)
@@ -39,7 +58,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="yezatas", description="Yezatas YouTube channel assistant")
     sub = parser.add_subparsers(dest="command", required=True)
     ui = sub.add_parser("ui", help="open the local web UI (setup screen)")
-    ui.add_argument("--port", type=int, default=8765, help="port on 127.0.0.1 (default 8765)")
+    ui.add_argument("--port", type=int, default=None,
+                    help="port on 127.0.0.1 (default: first free port from 8765)")
     ui.add_argument("--no-browser", action="store_true", help="do not open the browser")
     sub.add_parser("signin", help="sign in to YouTube (read-only access)")
     sub.add_parser("pull", help="pull the channel's videos into the local catalog")
