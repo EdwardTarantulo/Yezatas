@@ -46,12 +46,8 @@ def test_ui_command_without_port_skips_a_busy_default(
     monkeypatch.setenv("YEZATAS_HOME", str(tmp_path / "home"))
     calls: dict[str, Any] = {}
     monkeypatch.setattr("uvicorn.run", lambda app, **kw: calls.update(app=app, **kw))
-    with socket.socket() as busy:
-        busy.bind(("127.0.0.1", 0))
-        busy.listen()
-        taken = busy.getsockname()[1]
-        monkeypatch.setattr("yezatas.__main__.DEFAULT_UI_PORT", taken)
-        assert main(["ui", "--no-browser"]) == 0
-    assert calls["port"] != taken
-    assert taken < calls["port"] < taken + 20
+    taken = {8765, 8766}
+    monkeypatch.setattr("yezatas.__main__._port_free", lambda port: port not in taken)
+    assert main(["ui", "--no-browser"]) == 0
+    assert calls["port"] == 8767
     assert f"http://127.0.0.1:{calls['port']}/?t=" in capsys.readouterr().out

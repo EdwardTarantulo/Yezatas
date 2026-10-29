@@ -3,15 +3,19 @@
 The server binds 127.0.0.1 only. On top of that:
 - the Host header must be 127.0.0.1:PORT or localhost:PORT (blocks DNS rebinding);
 - every page needs a session cookie, which is only issued in exchange for the per-run token that
-  the CLI prints and puts in the URL it opens;
+  the CLI prints and puts in the URL it opens. The cookie is signed with a key kept on disk, so
+  restarting Yezatas does not sign out tabs that are already open;
 - state-changing requests are POST only and carry a per-session CSRF token.
 """
 
 from __future__ import annotations
 
+import hashlib
 import hmac
+import os
 import secrets
-import threading
+import sys
+from pathlib import Path
 from typing import Awaitable, Callable
 from urllib.parse import parse_qsl, urlencode
 
@@ -19,7 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 from starlette.templating import Jinja2Templates
 
-COOKIE_NAME = "yezatas_session"
+COOKIE_PREFIX = "yezatas_session_"
 TOKEN_PARAM = "t"
 CSRF_FIELD = "csrf"
 CSRF_HEADER = "x-csrf-token"
@@ -34,32 +38,63 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "no-referrer",
 }
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+KEY_BYTES = 32
+
+
+def load_session_key(path: Path) -> bytes:
+    """The cookie-signing key, created on first use. Unreadable or damaged: a key for this run only."""
+    try:
+        key = path.read_bytes()
+        if len(key) == KEY_BYTES:
+            return key
+    except OSError:
+        pass
+    key = secrets.token_bytes(KEY_BYTES)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(key)
+        if sys.platform != "win32":
+            os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+    return key
 
 
 class Sessions:
-    """Session ids issued for this run, each with its own CSRF token."""
+    """Signed session cookies. Stateless: the CSRF token is derived from the session id and key."""
 
-    def __init__(self, token: str, port: int) -> None:
+    def __init__(self, token: str, port: int, key: bytes) -> None:
         self.token = token
+        self.key = key
+        # Browsers share cookies between ports, so two instances must not overwrite each other's.
+        self.cookie_name = f"{COOKIE_PREFIX}{port}"
         self.allowed_hosts = frozenset({f"127.0.0.1:{port}", f"localhost:{port}"})
         self.allowed_origins = frozenset(f"http://{h}" for h in self.allowed_hosts)
-        self._csrf: dict[str, str] = {}
-        self._lock = threading.Lock()
 
     def token_ok(self, candidate: str) -> bool:
         return hmac.compare_digest(candidate.encode(), self.token.encode())
 
+    def _sign(self, label: str, sid: str) -> str:
+        return hmac.new(self.key, f"{label}:{sid}".encode(), hashlib.sha256).hexdigest()
+
     def new_session(self) -> str:
+        """A new cookie value: `sid.signature`."""
         sid = secrets.token_urlsafe(32)
-        with self._lock:
-            self._csrf[sid] = secrets.token_urlsafe(32)
+        return f"{sid}.{self._sign('session', sid)}"
+
+    def session_id(self, cookie: str | None) -> str | None:
+        """The session id if the cookie was signed with our key, else None."""
+        if not cookie or "." not in cookie:
+            return None
+        sid, sig = cookie.rsplit(".", 1)
+        if not sid or not hmac.compare_digest(sig.encode(), self._sign("session", sid).encode()):
+            return None
         return sid
 
-    def csrf_for(self, sid: str | None) -> str | None:
-        if not sid:
-            return None
-        with self._lock:
-            return self._csrf.get(sid)
+    def csrf_for(self, sid: str) -> str:
+        return self._sign("csrf", sid)
 
 
 def verify_csrf(request: Request, submitted: str | None) -> None:
@@ -109,14 +144,14 @@ def install_security(app: FastAPI, sessions: Sessions, templates: Jinja2Template
             target = request.url.path + (f"?{urlencode(rest)}" if rest else "")
             redirect = RedirectResponse(target, status_code=303)
             redirect.set_cookie(
-                COOKIE_NAME, sessions.new_session(), httponly=True, samesite="strict", path="/"
+                sessions.cookie_name, sessions.new_session(), httponly=True, samesite="strict",
+                path="/",
             )
             return redirect
 
-        sid = request.cookies.get(COOKIE_NAME)
-        csrf = sessions.csrf_for(sid)
-        if csrf is None:
+        sid = sessions.session_id(request.cookies.get(sessions.cookie_name))
+        if sid is None:
             return forbidden(request)
         request.state.session_id = sid
-        request.state.csrf = csrf
+        request.state.csrf = sessions.csrf_for(sid)
         return await call_next(request)

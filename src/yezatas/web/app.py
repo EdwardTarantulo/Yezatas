@@ -31,7 +31,7 @@ from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, parse_client_fi
                          read_saved_client, save_client_file)
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
 from .jobs import Job, JobSnapshot, Report
-from .security import CSRF_FIELD, Sessions, install_security, verify_csrf
+from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 
 DEFAULT_PORT = 8765
@@ -226,7 +226,7 @@ def create_app(
     token = token or secrets.token_urlsafe(32)
     start_url = f"http://127.0.0.1:{port}/?t={token}"
     state = WebState(config, sign_in, reader_factory, credentials_loader, clock, sign_in_timeout)
-    sessions = Sessions(token, port)
+    sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
 
     @asynccontextmanager

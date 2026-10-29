@@ -2,7 +2,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from webhelpers import BASE_URL, PORT, TOKEN, make_ui
+from webhelpers import BASE_URL, PORT, TOKEN, make_config, make_ui
+from yezatas.web.app import create_app
 
 
 def test_no_cookie_is_forbidden(tmp_path: Path) -> None:
@@ -49,8 +50,41 @@ def test_wrong_token_is_forbidden_and_sets_no_cookie(tmp_path: Path) -> None:
 
 def test_forged_cookie_is_forbidden(tmp_path: Path) -> None:
     ui = make_ui(tmp_path, signed_in_browser=False)
-    ui.client.cookies.set("yezatas_session", "made-up")
+    ui.client.cookies.set(f"yezatas_session_{PORT}", "made-up")
     assert ui.client.get("/setup").status_code == 403
+    ui.client.cookies.set(f"yezatas_session_{PORT}", "made-up.0123abcd")
+    assert ui.client.get("/setup").status_code == 403
+
+
+def test_cookie_name_includes_the_port(tmp_path: Path) -> None:
+    ui = make_ui(tmp_path)
+    assert f"yezatas_session_{PORT}" in ui.client.cookies
+
+
+def test_open_tab_stays_signed_in_after_a_restart(tmp_path: Path) -> None:
+    ui = make_ui(tmp_path)
+    csrf = ui.csrf()
+    restarted = create_app(ui.config, port=PORT, token="new-run-token", open_browser=False)
+    tab = TestClient(restarted, base_url=BASE_URL, cookies=dict(ui.client.cookies))
+    assert tab.get("/setup").status_code == 200
+    resp = tab.post("/setup/signout", data={"csrf": csrf}, follow_redirects=False)
+    assert resp.status_code == 303
+
+
+def test_a_cookie_from_another_home_is_forbidden(tmp_path: Path) -> None:
+    ui = make_ui(tmp_path)
+    other = create_app(make_config(tmp_path / "other"), port=PORT, token=TOKEN, open_browser=False)
+    tab = TestClient(other, base_url=BASE_URL, cookies=dict(ui.client.cookies))
+    assert tab.get("/setup").status_code == 403
+
+
+def test_session_key_is_created_once_and_reused(tmp_path: Path) -> None:
+    ui = make_ui(tmp_path)
+    key_file = ui.config.credentials_dir / "session.key"
+    first = key_file.read_bytes()
+    assert len(first) == 32
+    make_ui(tmp_path, config=ui.config)
+    assert key_file.read_bytes() == first
 
 
 def test_bad_host_is_rejected(tmp_path: Path) -> None:

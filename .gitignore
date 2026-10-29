@@ -6,6 +6,7 @@ client_secret*.json
 client_secrets*.json
 token*.json
 *.token
+*.key
 credentials/
 config/credentials/
 

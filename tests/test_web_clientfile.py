@@ -85,7 +85,8 @@ def test_upload_valid_file_is_saved_and_secret_never_shown(tmp_path: Path) -> No
     assert FAKE_SECRET not in ui.setup_html()
     assert "card done" in step_class(html, "client")
     # No leftover temp files next to the saved file.
-    assert [p.name for p in ui.config.credentials_dir.iterdir()] == ["client_secrets.json"]
+    assert sorted(p.name for p in ui.config.credentials_dir.iterdir()) == [
+        "client_secrets.json", "session.key"]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions only")
