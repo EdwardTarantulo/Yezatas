@@ -286,3 +286,30 @@ button.gbtn { cursor: pointer; }
 .gapi { width: 64px; height: 64px; flex: none; }
 .gapi rect { fill: var(--todo-bg); }
 .gapi path { stroke: var(--muted); stroke-width: 3; stroke-linecap: round; fill: none; }
+
+/* Step 4 pictures */
+.gtoolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.gtoolbar .gtitle { margin: 0 8px 0 0; }
+.gdim { opacity: 0.45; }
+.gsub { margin: 0 0 6px; }
+.gtable {
+  display: grid; grid-template-columns: 1fr 1fr;
+  padding: 6px 10px; margin-bottom: 6px;
+  background: var(--card); border-bottom: 1px solid var(--line);
+  font-size: 0.9rem; font-weight: 600; color: var(--muted);
+}
+.gmenu {
+  list-style: none; margin: 4px 0 10px; padding: 4px 0;
+  max-width: 400px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card);
+}
+.gmenu li { margin: 0; padding: 6px 14px; color: var(--muted); }
+.gmenu li.pick { padding: 0; }
+.gmenu li.pick button {
+  display: block; width: 100%;
+  padding: 6px 14px; border: 0; border-left: 3px solid var(--accent);
+  background: var(--working-bg); color: var(--accent);
+  font: inherit; font-weight: 600; text-align: left; cursor: pointer;
+}
+.gcheck.gunchecked .gbox { background: none; border: 2px solid var(--muted); }

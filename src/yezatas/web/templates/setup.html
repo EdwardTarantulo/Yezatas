@@ -161,13 +161,69 @@
 {% endcall %}
 
 {% call card(steps.client) %}
-  <p>Create an <strong>OAuth client</strong> of type <strong>Desktop app</strong>, then download its JSON file.</p>
-  <ol>
-    <li>Open the Clients page and click <strong>Create client</strong>.</li>
-    <li>Application type: <strong>Desktop app</strong>. Any name works.</li>
-    <li>Click <strong>Create</strong>, then <strong>Download JSON</strong>.</li>
-  </ol>
+  <p>Create an <strong>OAuth client</strong> of type <strong>Desktop app</strong>, download its JSON
+    file, and upload it here. Open the Clients page, then follow the slides:</p>
   <p><a class="button secondary" href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener noreferrer">Open the Clients page</a></p>
+
+  <div class="guide" data-slider aria-roledescription="slides" aria-label="Create the OAuth client, step by step">
+    <nav class="slider-nav" aria-label="Slides">
+      <button type="button" class="gbtn" data-slide-prev>‹ Back</button>
+      <span class="dots" data-dots></span>
+      <button type="button" class="gbtn" data-slide-next>Next ›</button>
+    </nav>
+    <div class="slide" data-slide>
+      <p class="guide-label">On the Clients page, click <strong>+ Create client</strong>.</p>
+      <div class="gpanel">
+        <div class="gtoolbar">
+          <span class="gtitle">Clients</span>
+          <button type="button" class="gbtn primary" data-slide-next>+ Create client</button>
+          <span class="gbtn gdim">Delete</span>
+        </div>
+        <p class="gsub">OAuth 2.0 Client IDs</p>
+        <div class="gtable"><span>Name</span><span>Creation date</span></div>
+        <p class="gnote">No OAuth clients to display</p>
+      </div>
+    </div>
+    <div class="slide" data-slide>
+      <p class="guide-label">Open <strong>Application type</strong> and pick <strong>Desktop app</strong>, the last one.</p>
+      <div class="gpanel">
+        <p class="gtitle">Create OAuth client ID</p>
+        <div class="gfield"><span class="glabel">Application type *</span><span class="gvalue">&nbsp;<span class="gcaret" aria-hidden="true">▾</span></span></div>
+        <ul class="gmenu">
+          <li>Web application</li><li>Android</li><li>Chrome Extension</li><li>iOS</li><li>TVs and Limited Input devices</li>
+          <li class="pick"><button type="button" data-slide-next>Desktop app</button></li>
+        </ul>
+        <p class="gnote">Not <em>Web application</em>: Yezatas runs on your computer, so it needs a Desktop app client.</p>
+      </div>
+    </div>
+    <div class="slide" data-slide>
+      <p class="guide-label">Check the form, then click <strong>Create</strong>.</p>
+      <div class="gpanel">
+        <p class="gtitle">Create OAuth client ID</p>
+        <div class="gfield gplain"><span class="glabel">Application type *</span><span class="gvalue">Desktop app<span class="gcaret" aria-hidden="true">▾</span></span></div>
+        <div class="gfield"><span class="glabel">Name *</span><span class="gvalue">Yezatas desktop</span></div>
+        <p class="gnote">Any name works; Google suggests "Desktop client 1". Only you see it.</p>
+        <div class="gcheck gunchecked"><span class="gbox" aria-hidden="true"></span><span>Use this client for an AI-powered agent</span></div>
+        <p class="gnote">Leave this box empty.</p>
+        <div class="gfoot"><button type="button" class="gbtn primary" data-slide-next>Create</button><span class="gbtn">Cancel</span></div>
+      </div>
+      <p class="gnote gafter">Google says new settings can take 5 minutes to a few hours to work. If the sign-in in step 5 fails with an "invalid client" error, wait a few minutes and try again.</p>
+    </div>
+    <div class="slide" data-slide>
+      <p class="guide-label">Google shows the new client. Click <strong>Download JSON</strong>.</p>
+      <div class="gpanel">
+        <p class="gtitle">OAuth client created</p>
+        <div class="gfield gplain"><span class="glabel">Client ID</span><span class="gvalue">1234…apps.googleusercontent.com</span></div>
+        <div class="gfield gplain"><span class="glabel">Client secret</span><span class="gvalue">••••••••••••</span></div>
+        <div class="gfoot"><button type="button" class="gbtn primary" data-slide-next>Download JSON</button><span class="gbtn">OK</span></div>
+      </div>
+      <p class="gnote gafter">Closed it already? Click the client's name on the Clients page, then the download icon next to the client secret.</p>
+    </div>
+    <div class="slide" data-slide>
+      <p class="guide-label">Last: upload the downloaded file below.</p>
+      <p>Its name starts with <code>client_secret_</code> and ends with <code>.json</code>, usually in your Downloads folder. Yezatas checks it and keeps it in its own folder. Don't share this file or post it anywhere.</p>
+    </div>
+  </div>
 
   {% if client %}
   <p class="saved">Saved: project <strong>{{ client.project_id }}</strong>, client <code>{{ client.client_id_short }}</code></p>
