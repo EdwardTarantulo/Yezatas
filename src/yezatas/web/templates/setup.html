@@ -96,6 +96,12 @@
   <p><a class="button secondary" href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener noreferrer">Open the consent screen setup</a></p>
 
   <div class="guide" data-slider aria-roledescription="slides" aria-label="Consent screen setup, step by step">
+    {# Above the slides, so the buttons stay put when slides differ in height. #}
+    <nav class="slider-nav" aria-label="Slides">
+      <button type="button" class="gbtn" data-slide-prev>‹ Back</button>
+      <span class="dots" data-dots></span>
+      <button type="button" class="gbtn" data-slide-next>Next ›</button>
+    </nav>
     <div class="slide" data-slide>
       <p class="guide-label">First, Google shows this. Click <strong>Get started</strong>.</p>
       <div class="gpanel gempty">
@@ -124,11 +130,6 @@
       </div>
       <p class="gdone">Done with step 3. Leave the app in <strong>Testing</strong>: that is fine for personal use, but Google ends the sign-in after <strong>7 days</strong>, and then you just sign in again.</p>
     </div>
-    <nav class="slider-nav" aria-label="Slides">
-      <button type="button" class="gbtn" data-slide-prev>‹ Back</button>
-      <span class="dots" data-dots></span>
-      <button type="button" class="gbtn" data-slide-next>Next ›</button>
-    </nav>
   </div>
 
   <p class="hint">If Google's page looks different, go to APIs &amp; Services, then OAuth consent screen.</p>

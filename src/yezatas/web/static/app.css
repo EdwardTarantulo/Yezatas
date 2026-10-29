@@ -261,7 +261,7 @@ button.gbtn { cursor: pointer; }
 .guide:not(.js) .slider-nav { display: none; }
 .guide:not(.js) .slide + .slide { margin-top: 20px; }
 .slide .guide-label { margin-top: 4px; }
-.slider-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.slider-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 12px; }
 .slider-nav .gbtn:disabled { opacity: 0.35; cursor: default; }
 .dots { display: flex; gap: 8px; }
 .dot {
