@@ -52,17 +52,66 @@
 {% endcall %}
 
 {% call card(steps.consent) %}
-  <p>Set up the consent screen. It is the page Google shows when you sign in.</p>
-  <ol>
-    <li>If Google says <em>"Google Auth Platform not configured yet"</em>, click <strong>Get started</strong>.</li>
-    <li><strong>App information:</strong> app name, for example <code>Yezatas</code> (only you will see it), and your email as the user support email.</li>
-    <li><strong>Audience:</strong> choose <strong>External</strong>.</li>
-    <li><strong>Contact information:</strong> your email again. Then agree to the policy and click <strong>Create</strong>.</li>
-    <li>Open <strong>Audience</strong> in the left menu. Under <strong>Test users</strong>, click <strong>Add users</strong> and add the Google account that owns your channel. Without this, Google blocks the sign-in.</li>
-  </ol>
-  <p>Leave the app in <strong>Testing</strong>. That is fine for personal use, but Google expires the sign-in after <strong>7 days</strong>. Then you just sign in again.</p>
+  <p>The consent screen is the page Google shows when you sign in. Open the setup page, and if it
+    says <em>"Google Auth Platform not configured yet"</em>, click <strong>Get started</strong>.</p>
   <p><a class="button secondary" href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener noreferrer">Open the consent screen setup</a></p>
-  <p class="hint">If the page looks different, go to APIs &amp; Services, then OAuth consent screen.</p>
+
+  <div class="guide" data-guide>
+    <p class="guide-label">Google shows this form. Fill it in like this:</p>
+    <div class="gpanel">
+      <p class="gtitle">Project configuration</p>
+      <ol class="gsteps">
+        <li class="gstep open" data-gstep>
+          <button type="button" class="gstep-head"><span class="gnum">1</span>App Information</button>
+          <div class="gstep-body">
+            <div class="gfield"><span class="glabel">App name *</span><span class="gvalue">Yezatas</span></div>
+            <p class="gnote">Type this, or any name. Only you will see it.</p>
+            <div class="gfield"><span class="glabel">User support email *</span><span class="gvalue">your email<span class="gcaret" aria-hidden="true">▾</span></span></div>
+            <p class="gnote">Pick your email from the list.</p>
+            <button type="button" class="gbtn" data-gnext>Next</button>
+          </div>
+        </li>
+        <li class="gstep" data-gstep>
+          <button type="button" class="gstep-head"><span class="gnum">2</span>Audience</button>
+          <div class="gstep-body">
+            <div class="gradio off"><span class="gdot" aria-hidden="true"></span><span><strong>Internal</strong><br><span class="gsmall">Only for Google Workspace organizations. Skip it.</span></span></div>
+            <div class="gradio on"><span class="gdot" aria-hidden="true"></span><span><strong>External</strong><br><span class="gsmall">Choose this one.</span></span></div>
+            <button type="button" class="gbtn" data-gnext>Next</button>
+          </div>
+        </li>
+        <li class="gstep" data-gstep>
+          <button type="button" class="gstep-head"><span class="gnum">3</span>Contact Information</button>
+          <div class="gstep-body">
+            <div class="gfield"><span class="glabel">Email addresses *</span><span class="gvalue">your email</span></div>
+            <p class="gnote">Google writes here about changes to the project.</p>
+            <button type="button" class="gbtn" data-gnext>Next</button>
+          </div>
+        </li>
+        <li class="gstep" data-gstep>
+          <button type="button" class="gstep-head"><span class="gnum">4</span>Finish</button>
+          <div class="gstep-body">
+            <div class="gcheck"><span class="gbox" aria-hidden="true">✓</span><span>I agree to the Google API Services: User Data Policy.</span></div>
+            <p class="gnote">Tick the box, then click <strong>Create</strong> below.</p>
+          </div>
+        </li>
+      </ol>
+      <div class="gfoot"><span class="gbtn primary">Create</span><span class="gbtn">Cancel</span></div>
+    </div>
+
+    <p class="guide-label">Then add yourself as a test user. Without this, Google blocks the sign-in:</p>
+    <div class="gpanel">
+      <p class="gpath">Left menu: <strong>Audience</strong> <span aria-hidden="true">›</span> scroll to <strong>Test users</strong></p>
+      <div class="gtestusers">
+        <span class="gbtn">+ Add users</span>
+        <div class="gfield"><span class="glabel">Email</span><span class="gvalue">the account that owns your channel</span></div>
+        <span class="gbtn primary">Save</span>
+      </div>
+      <p class="gnote">Brand Account channel? Add the Google account you sign in with to manage it.</p>
+    </div>
+  </div>
+
+  <p>Leave the app in <strong>Testing</strong>. That is fine for personal use, but Google expires the sign-in after <strong>7 days</strong>. Then you just sign in again.</p>
+  <p class="hint">If Google's page looks different, go to APIs &amp; Services, then OAuth consent screen.</p>
 {% endcall %}
 
 {% call card(steps.client) %}

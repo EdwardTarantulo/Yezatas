@@ -12,6 +12,19 @@
     });
   });
 
+  // Guides that picture Google's multi-part forms: one part open at a time, like Google's.
+  document.querySelectorAll("[data-guide]").forEach(function (guide) {
+    var steps = Array.prototype.slice.call(guide.querySelectorAll("[data-gstep]"));
+    function open(i) {
+      steps.forEach(function (s, j) { s.classList.toggle("open", j === i); });
+    }
+    steps.forEach(function (step, i) {
+      step.querySelector(".gstep-head").addEventListener("click", function () { open(i); });
+      var next = step.querySelector("[data-gnext]");
+      if (next) next.addEventListener("click", function () { open(i + 1); });
+    });
+  });
+
   // Coming back with the Back button must not show disabled buttons or stale state.
   window.addEventListener("pageshow", function (e) { if (e.persisted) window.location.reload(); });
 
