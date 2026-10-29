@@ -32,6 +32,13 @@ def test_client_file_unlocks_sign_in() -> None:
     assert compute_steps(CLIENT, "", False, IDLE, None, IDLE, False)[4].enabled
 
 
+def test_steps_2_and_3_wait_for_proof_once_the_client_file_is_in() -> None:
+    steps = {s.key: s for s in compute_steps(CLIENT, "", False, IDLE, None, IDLE, False)}
+    assert steps["api"].status == "unverified" and steps["consent"].status == "unverified"
+    assert steps["api"].pill == "Not checked yet"
+    assert statuses()["api"] == "todo" and statuses()["consent"] == "todo"
+
+
 def test_invalid_client_file_is_a_problem_on_step_4() -> None:
     steps = compute_steps(None, "This is not JSON.", False, IDLE, None, IDLE, False)
     assert steps[3].status == "problem" and steps[3].note == "This is not JSON."
@@ -53,7 +60,7 @@ def test_sign_in_running_and_failed() -> None:
     assert s["consent"] == "problem" and s["signin"] == "problem"
     cancelled = JobSnapshot("failed", "Sign-in cancelled.", "cancelled")
     s = statuses(client=CLIENT, signin=cancelled)
-    assert s["signin"] == "todo" and s["consent"] == "todo"
+    assert s["signin"] == "todo" and s["consent"] == "unverified"
 
 
 def test_checked_connection_unlocks_pull_and_confirms_api() -> None:
@@ -73,7 +80,7 @@ def test_api_disabled_is_a_problem_on_step_2_and_6() -> None:
 def test_other_check_failures_stay_on_step_6() -> None:
     check = CheckState(False, "no_channel", "No channel here.")
     steps = {s.key: s for s in compute_steps(CLIENT, "", True, IDLE, check, IDLE, False)}
-    assert steps["check"].note == "No channel here." and steps["api"].status == "todo"
+    assert steps["check"].note == "No channel here." and steps["api"].status == "unverified"
     auth_check = CheckState(False, "auth", "Sign in again.")
     steps = {s.key: s for s in compute_steps(CLIENT, "", True, IDLE, auth_check, IDLE, False)}
     assert steps["signin"].status == "problem"

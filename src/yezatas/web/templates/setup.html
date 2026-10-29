@@ -111,7 +111,7 @@
   </div>
   <p class="hint">
     {% if steps.api.status == 'done' %}Confirmed: YouTube answered a real request.
-    {% else %}Yezatas finds out in step 6. If the API is off, this step turns red and tells you what to do.{% endif %}
+    {% else %}Yezatas checks this in step 6. If the API is off, this step turns red and tells you what to do.{% endif %}
   </p>
 {% endcall %}
 
@@ -158,6 +158,10 @@
   </div>
 
   <p class="hint">If Google's page looks different, go to APIs &amp; Services, then OAuth consent screen.</p>
+  <p class="hint">
+    {% if steps.consent.status == 'done' %}Confirmed: you signed in, so the consent screen and test user work.
+    {% else %}Yezatas checks this when you sign in (step 5). If something is missing, this step turns red and tells you what to do.{% endif %}
+  </p>
 {% endcall %}
 
 {% call card(steps.client) %}

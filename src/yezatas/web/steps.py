@@ -9,7 +9,8 @@ from ..youtube import MAX_RESULTS
 from .clientfile import ClientInfo
 from .jobs import JobSnapshot
 
-PILLS = {"done": "Done", "todo": "To do", "problem": "Problem", "working": "Working"}
+PILLS = {"done": "Done", "todo": "To do", "problem": "Problem", "working": "Working",
+         "unverified": "Not checked yet"}
 
 
 @dataclass(frozen=True)
@@ -30,7 +31,7 @@ class Step:
     number: int
     key: str
     title: str
-    status: str  # done | todo | problem | working
+    status: str  # done | todo | problem | working | unverified (a later step will confirm it)
     note: str = ""  # the problem and its fix, shown when status is "problem"
     enabled: bool = True  # False while an earlier step blocks this one
 
@@ -73,6 +74,8 @@ def compute_steps(
         s2 = Step(2, "api", "Enable the YouTube Data API v3", "problem", message)
     elif check_ok or pulled:
         s2 = Step(2, "api", "Enable the YouTube Data API v3", "done")
+    elif client:  # the user has moved on; step 6 will confirm it
+        s2 = Step(2, "api", "Enable the YouTube Data API v3", "unverified")
     else:
         s2 = Step(2, "api", "Enable the YouTube Data API v3", "todo")
 
@@ -82,6 +85,9 @@ def compute_steps(
                   "problem", signin.message)
     elif signed_in:
         s3 = Step(3, "consent", "Set up the consent screen and add yourself as a test user", "done")
+    elif client:  # the user has moved on; signing in (step 5) will confirm it
+        s3 = Step(3, "consent", "Set up the consent screen and add yourself as a test user",
+                  "unverified")
     else:
         s3 = Step(3, "consent", "Set up the consent screen and add yourself as a test user", "todo")
 
