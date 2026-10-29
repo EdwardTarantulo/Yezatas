@@ -9,7 +9,12 @@ description = "Self-hosted YouTube channel assistant"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["tzdata"]
+dependencies = [
+    "tzdata",
+    "google-auth",
+    "google-auth-oauthlib",
+    "google-api-python-client",
+]
 
 [project.optional-dependencies]
 dev = ["pytest"]

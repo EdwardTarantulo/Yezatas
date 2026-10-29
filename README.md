@@ -15,6 +15,10 @@ as it lands; the git history is the detailed record.
 - **2026-10-29**: project skeleton, local SQLite catalog (current video state plus a snapshot per pull, as the backup
   for restores) and the **quota guard**: a daily ledger that resets at midnight Pacific, a cost preview before every
   action, and a refusal for anything over the budget.
+- **2026-10-29**: **YouTube sign-in** (OAuth on the creator's own Cloud project, read-only scope, token saved locally)
+  and the **catalog pull**: every upload's title, description, tags, stats, privacy, language, localizations and
+  thumbnails go into the local catalog, with a snapshot per pull and every API call charged to the quota guard first.
+  CLI: `python -m yezatas signin | pull | quota`.
 
 ## Setup
 
