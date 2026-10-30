@@ -139,3 +139,25 @@ class FakeYouTubeWriter(FakeYouTubeReader):
         new.update(copy.deepcopy(body["snippet"]))
         item["snippet"] = new
         return {"id": body["id"], "snippet": copy.deepcopy(new)}
+
+
+class FakeModelClient:
+    """A scripted model: no network. Each script item is a ModelReply, an exception to raise, or a
+    callable(messages, tools, response_format) returning either. Records every call it got."""
+
+    def __init__(self, script: Sequence[Any], model: str = "muse-spark-1.3") -> None:
+        self.model = model
+        self.script = list(script)
+        self.calls: list[dict[str, Any]] = []  # messages are copied: the agent keeps appending
+
+    def complete(self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None,
+                 response_format: dict[str, Any] | None = None) -> Any:
+        self.calls.append({"messages": copy.deepcopy(messages), "tools": tools,
+                           "response_format": response_format})
+        assert self.script, "the fake model ran out of scripted replies"
+        item = self.script.pop(0)
+        if callable(item):
+            item = item(messages, tools, response_format)
+        if isinstance(item, Exception):
+            raise item
+        return item
