@@ -1,4 +1,4 @@
-"""Page models for the dashboard, the content table and the video page.
+"""Page models for the dashboard, the content table, the video page and the changes pages.
 
 Pure functions: they take videos and scorecards and return plain data for the templates, so
 nothing here touches the disk or YouTube. Formatting (view counts, dates) lives here too.
@@ -8,11 +8,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Mapping, Sequence
+from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 from urllib.parse import urlencode
 
+from .. import edits
+from ..diffs import DraftDiff, diff_draft
+from ..push import PushItem
 from ..seo import CATEGORIES, CheckResult, Scorecard, fix_priority
-from ..store import Video
+from ..store import DraftRow, PushRecord, Video
+from ..validate import Issue, has_errors
 
 PAGE_SIZE = 50
 MAX_QUERY_CHARS = 200
@@ -361,3 +365,180 @@ def group_checks(card: Scorecard) -> list[CheckGroup]:
             earned=sum(c.points for c in live), possible=sum(c.max_points for c in live),
         ))
     return groups
+
+
+# --- changes (drafts), push confirmation and history ------------------------------------------
+ORIGIN_LABELS = {"manual": "Edited by you", "restore": "Restored text"}
+
+# operation -> plain label, for the quota table on the push page
+QUOTA_LABELS = {
+    "videos.list": "Read the live text of your videos first",
+    "videos.update": "Update one video",
+}
+
+# push item status -> (label, pill class)
+PUSH_STATUS_LABELS: dict[str, tuple[str, str]] = {
+    "pushed": ("Pushed", "done"),
+    "conflict": ("Changed in Studio, not pushed", "warn"),
+    "failed": ("Failed", "problem"),
+    "skipped": ("Skipped", "warn"),
+    "missing": ("Missing on YouTube", "problem"),
+    "not_attempted": ("Not attempted", ""),
+}
+HISTORY_STATUS_LABELS: dict[str, tuple[str, str]] = {
+    "pushed": ("Pushed", "done"),
+    "conflict": ("Changed in Studio, not pushed", "warn"),
+    "failed": ("Failed", "problem"),
+    "pending": ("Unfinished", "warn"),
+}
+
+
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def summarize_diff(diff: DraftDiff) -> str:
+    """One line on what a draft changes, for example 'title; description (2 lines added)'."""
+    parts: list[str] = []
+    if diff.title_changed:
+        parts.append("title")
+    if diff.description.changed:
+        bits = []
+        if diff.description.added:
+            bits.append(f"{_count(diff.description.added, 'line')} added")
+        if diff.description.removed:
+            bits.append(f"{diff.description.removed} removed")
+        parts.append("description" + (f" ({', '.join(bits)})" if bits else ""))
+    if diff.tags.changed:
+        bits = []
+        if diff.tags.added:
+            bits.append(f"{len(diff.tags.added)} added")
+        if diff.tags.removed:
+            bits.append(f"{len(diff.tags.removed)} removed")
+        if diff.tags.reordered:
+            bits.append("new order")
+        parts.append("tags" + (f" ({', '.join(bits)})" if bits else ""))
+    return "Changes: " + "; ".join(parts) if parts else "No changes."
+
+
+@dataclass(frozen=True)
+class ChangeCard:
+    """A draft with everything the changes page and the push page show about it."""
+
+    row: DraftRow
+    video: Video
+    diff: DraftDiff
+    errors: tuple[Issue, ...]
+    warnings: tuple[Issue, ...]
+    stale: bool
+    ready: bool  # approved, current and error-free: this one would be pushed
+    approve_block: str  # why Approve is unavailable ("" when it is available)
+    fingerprint: str
+    summary: str
+    origin: str
+
+    @property
+    def video_id(self) -> str:
+        return self.row.video_id
+
+    @property
+    def thumb(self) -> str:
+        return thumb_url(self.video)
+
+    @property
+    def views_text(self) -> str:
+        return format_count(self.video.view_count)
+
+    @property
+    def issues(self) -> tuple[Issue, ...]:
+        return self.errors + self.warnings
+
+    @property
+    def approved(self) -> bool:
+        return self.ready
+
+
+def build_change_card(row: DraftRow, video: Video) -> ChangeCard:
+    issues = edits.issues_for(row)
+    errors = tuple(i for i in issues if i.severity == "error")
+    warnings = tuple(i for i in issues if i.severity != "error")
+    stale = edits.is_stale(row, video)
+    block = ""
+    if stale:
+        block = "Update the draft to YouTube's new text first."
+    elif has_errors(issues):
+        block = "Fix the errors first."
+    diff = diff_draft(row.base, row.draft)
+    origin = row.note or ORIGIN_LABELS.get(row.source, row.source.capitalize())
+    return ChangeCard(
+        row=row, video=video, diff=diff, errors=errors, warnings=warnings, stale=stale,
+        ready=row.approved_at is not None and not block, approve_block=block,
+        fingerprint=edits.fingerprint(row), summary=summarize_diff(diff), origin=origin,
+    )
+
+
+def change_cards(pairs: Iterable[tuple[DraftRow, Video]]) -> list[ChangeCard]:
+    return [build_change_card(row, video) for row, video in pairs]
+
+
+def plan_lines(lines: Iterable[tuple[str, int, int]]) -> list[dict[str, Any]]:
+    return [{"label": QUOTA_LABELS.get(op, op), "operation": op, "count": count, "units": units}
+            for op, count, units in lines]
+
+
+def push_results(items: Iterable[PushItem], titles: Mapping[str, str]) -> list[dict[str, Any]]:
+    """Rows for the result list of a finished push."""
+    rows = []
+    for item in items:
+        label, tone = PUSH_STATUS_LABELS.get(item.status, (item.status, ""))
+        rows.append({"video_id": item.video_id, "title": titles.get(item.video_id) or item.video_id,
+                     "status": item.status, "label": label, "tone": tone,
+                     "message": item.message})
+    return rows
+
+
+@dataclass(frozen=True)
+class Backup:
+    title: str
+    description: str
+    tags: tuple[str, ...]
+
+
+def backup_of_record(record: PushRecord) -> Backup | None:
+    """The saved text of a push record, or None when it has no title to restore."""
+    before = record.before
+    title = before.get("title")
+    if not isinstance(title, str) or not title.strip():
+        return None
+    description = before.get("description")
+    tags = before.get("tags")
+    return Backup(
+        title,
+        description if isinstance(description, str) else "",
+        tuple(t for t in tags if isinstance(t, str)) if isinstance(tags, list) else (),
+    )
+
+
+@dataclass(frozen=True)
+class HistoryRow:
+    record: PushRecord
+    title: str
+    when: str
+    label: str
+    tone: str
+    backup: Backup | None
+    has_draft: bool  # restore is refused while this video has a draft
+
+
+def history_rows(records: Iterable[PushRecord], titles: Mapping[str, str],
+                 fmt_time: Callable[[str], str],
+                 draft_ids: Collection[str] = ()) -> list[HistoryRow]:
+    rows = []
+    for record in records:
+        label, tone = HISTORY_STATUS_LABELS.get(record.status, (record.status, ""))
+        rows.append(HistoryRow(
+            record=record, title=titles.get(record.video_id) or record.video_id,
+            when=fmt_time(record.started_at), label=label, tone=tone,
+            backup=backup_of_record(record), has_draft=record.video_id in draft_ids,
+        ))
+    return rows

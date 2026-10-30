@@ -2,7 +2,7 @@
 {% from "_macros.html" import icon, mark %}
 {% block body_class %}app{% endblock %}
 {% block body %}
-{% set nav = [('dashboard', 'Dashboard', '/'), ('content', 'Content', '/videos'), ('setup', 'Setup', '/setup')] %}
+{% set nav = [('dashboard', 'Dashboard', '/'), ('content', 'Content', '/videos'), ('changes', 'Changes', '/changes'), ('history', 'History', '/history'), ('setup', 'Setup', '/setup')] %}
 <header class="topbar">
   <a class="brand" href="/" aria-label="Yezatas home">{{ mark() }}<span class="brand-name">Yezatas</span></a>
   <form class="search" action="/videos" method="get" role="search">
@@ -15,10 +15,13 @@
 <div class="layout">
   <nav class="sidebar" aria-label="Main">
     {% for key, label, href in nav %}
-    <a class="nav-item{% if active|default('') == key %} active{% endif %}" href="{{ href }}"{% if active|default('') == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span></a>
+    <a class="nav-item{% if active|default('') == key %} active{% endif %}" href="{{ href }}"{% if active|default('') == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span>{% if key == 'changes' and draft_count|default(0) %}<span class="nav-count" id="nav-drafts">{{ draft_count }}<span class="visually-hidden"> draft{{ '' if draft_count == 1 else 's' }}</span></span>{% endif %}</a>
     {% endfor %}
   </nav>
   <main class="main">
+    {% for item in shell_flash|default([]) %}
+    <div class="flash {{ item.kind }}" role="{{ 'alert' if item.kind == 'error' else 'status' }}">{{ item.text }}</div>
+    {% endfor %}
     {% block content %}{% endblock %}
   </main>
 </div>

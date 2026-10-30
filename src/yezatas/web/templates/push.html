@@ -1,0 +1,119 @@
+{% extends "shell.html" %}
+{% from "_macros.html" import post_form %}
+{% block title %}Push to YouTube - Yezatas{% endblock %}
+{% block content %}
+<p class="backlink"><a href="/changes">Changes</a></p>
+<h1 class="page-title">Push to YouTube</h1>
+
+{% if push.status == 'running' %}
+<section class="card" id="push-progress" aria-labelledby="h-progress">
+  <h2 id="h-progress">Pushing your changes</h2>
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="push-msg" role="status" aria-live="polite">{{ push.message or 'Starting…' }}</span></p>
+  <p class="hint">Keep this window open. Yezatas saves YouTube's current text in History before it changes each video.</p>
+</section>
+
+{% elif push.status == 'done' %}
+<section class="card" id="push-result" aria-labelledby="h-result">
+  <h2 id="h-result">Push finished</h2>
+  <p>
+    {{ report.count('pushed') }} pushed{% if report.count('conflict') %}, {{ report.count('conflict') }} changed in Studio{% endif %}{% if report.count('failed') %}, {{ report.count('failed') }} failed{% endif %}{% if report.count('skipped') %}, {{ report.count('skipped') }} skipped{% endif %}{% if report.count('missing') %}, {{ report.count('missing') }} missing{% endif %}{% if report.count('not_attempted') %}, {{ report.count('not_attempted') }} not attempted{% endif %}.
+    Quota used: {{ report.units_used }} units.
+  </p>
+  {% if results %}
+  <ul class="results">
+    {% for r in results %}
+    <li class="result-row" id="r-{{ r.video_id }}">
+      <span class="pill {{ r.tone }}">{{ r.label }}</span>
+      <div class="result-main">
+        <a href="/videos/{{ r.video_id|urlencode }}">{{ r.title }}</a>
+        <p class="muted">{{ r.message }}</p>
+        {% if r.status == 'conflict' %}<p><a href="/changes#d-{{ r.video_id|urlencode }}">Review the draft against the new text</a></p>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No videos were part of this push.</p>
+  {% endif %}
+  <div class="actions">
+    {{ post_form('/changes/push/done', csrf, 'Done', 'primary') }}
+    <a class="button secondary" href="/history">See History</a>
+  </div>
+</section>
+
+{% elif push.status == 'failed' %}
+<section class="card problem notice" id="push-failed">
+  <h2>The push stopped</h2>
+  <p>{{ push.message }}</p>
+  <p class="hint">Check History to see whether any video was changed before it stopped.</p>
+  <div class="actions">
+    {{ post_form('/changes/push/done', csrf, 'Back to the confirmation', 'primary') }}
+    <a class="button secondary" href="/history">See History</a>
+  </div>
+</section>
+
+{% else %}
+{% if not ready %}
+<section class="empty-state" id="nothing-to-push">
+  <h2>Nothing approved yet</h2>
+  <p class="muted">Approve at least one draft on the Changes page, then come back here to push it.</p>
+  <p><a class="button secondary" href="/changes">Go to Changes</a></p>
+</section>
+{% else %}
+<section class="card" id="push-list" aria-labelledby="h-list">
+  <h2 id="h-list">{{ ready|length }} approved change{{ '' if ready|length == 1 else 's' }} will be sent to YouTube</h2>
+  <ul class="push-items">
+    {% for c in ready %}
+    <li><a href="/changes#d-{{ c.video_id|urlencode }}">{{ c.row.title }}</a><br><span class="muted">{{ c.summary }}</span></li>
+    {% endfor %}
+  </ul>
+  {% if waiting %}<p class="hint">{{ waiting }} other draft{{ '' if waiting == 1 else 's' }} {{ 'is' if waiting == 1 else 'are' }} not approved and will stay as {{ 'a draft' if waiting == 1 else 'drafts' }}.</p>{% endif %}
+</section>
+
+<section class="card" id="push-cost" aria-labelledby="h-cost">
+  <h2 id="h-cost">Quota cost</h2>
+  <table class="plain-table">
+    <thead><tr><th scope="col">What</th><th scope="col" class="num-col">Calls</th><th scope="col" class="num-col">Units</th></tr></thead>
+    <tbody>
+      {% for line in plan.lines %}
+      <tr><td>{{ line.label }} <span class="muted">({{ line.operation }})</span></td><td class="num-col">{{ line.count }}</td><td class="num-col">{{ line.units }}</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><th scope="row">Total</th><td></td><td class="num-col"><strong>{{ plan.total }}</strong></td></tr></tfoot>
+  </table>
+  <p>Left today: {{ plan.remaining }} of {{ plan.budget }} units ({{ plan.used }} used).
+    {% if plan.fits %}This push fits.{% else %}<strong>This push does not fit today's quota.</strong> Push fewer videos, or wait: the quota resets at midnight Pacific time.{% endif %}</p>
+</section>
+
+{% if write.status == 'running' %}
+<section class="card" id="allow-waiting" aria-labelledby="h-allow">
+  <h2 id="h-allow">Waiting for Google</h2>
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="write-msg" role="status" aria-live="polite">{{ write.message or 'Waiting for you to finish in the browser tab…' }}</span></p>
+  <p>A Google page opened in your browser. Pick the channel's account and allow Yezatas to edit your videos. If you do not see the tab, look behind your other windows. This stops waiting after 5 minutes.</p>
+  {{ post_form('/changes/allow-edits/cancel', csrf, 'Cancel', 'secondary') }}
+</section>
+{% elif not has_write %}
+<section class="card" id="allow-edits" aria-labelledby="h-allow">
+  <h2 id="h-allow">Yezatas needs permission to edit your videos</h2>
+  {% if write.status == 'failed' %}<p class="flash error" role="alert">{{ write.message }}</p>{% endif %}
+  <p>So far Yezatas could only read your channel. Pushing changes needs permission to edit your videos, so Google will show its "not verified" screen again, the same as during setup: choose Continue, then allow access.</p>
+  <p class="hint">This replaces the read-only sign-in with one that can edit. Reading still works.</p>
+  {{ post_form('/changes/allow-edits', csrf, 'Allow Yezatas to edit your videos', 'primary') }}
+</section>
+{% elif plan.fits %}
+<section class="card" id="push-confirm" aria-labelledby="h-confirm">
+  <h2 id="h-confirm">Confirm</h2>
+  <p>Before each video is changed, Yezatas saves YouTube's current text in History, so you can restore it. A video that was edited in YouTube Studio since your last pull is left alone.</p>
+  <form method="post" action="/changes/push">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for c in ready %}<input type="hidden" name="fp_{{ c.video_id }}" value="{{ c.fingerprint }}">{% endfor %}
+    <p><label class="check-label"><input type="checkbox" name="confirm" value="yes" required> I approve publishing {{ 'this change' if ready|length == 1 else 'these ' ~ ready|length ~ ' changes' }} to YouTube</label></p>
+    <div class="actions"><button type="submit" class="button primary">Push to YouTube</button> <a class="button secondary" href="/changes">Back to Changes</a></div>
+  </form>
+</section>
+{% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}

@@ -4,6 +4,10 @@
 {% block content %}
 <h1 class="page-title">Channel dashboard</h1>
 
+{% if draft_count %}
+<p class="flash" id="drafts-note">{{ draft_count }} change{{ '' if draft_count == 1 else 's' }} waiting for review <a href="/changes">Review changes</a></p>
+{% endif %}
+
 <div class="dash-grid">
   <section class="card dash-card area-seo" id="card-seo" aria-labelledby="h-seo">
     <h2 id="h-seo">SEO score</h2>

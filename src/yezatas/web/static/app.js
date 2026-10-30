@@ -1,5 +1,5 @@
-// Polls /api/status while a sign-in or a catalog pull is running, then reloads the page
-// when a job finishes. Also stops double submits. No external code.
+// Polls /api/status while a sign-in, a catalog pull or a push is running, then reloads the page
+// when a job finishes. Also stops double submits and shows character counters. No external code.
 (function () {
   "use strict";
 
@@ -48,6 +48,22 @@
     show(0);
   });
 
+  // Edit form: a live count next to the title and description fields (the server still validates).
+  document.querySelectorAll("[data-count-for]").forEach(function (field) {
+    var out = document.getElementById(field.getAttribute("data-count-for"));
+    if (!out) return;
+    var limit = Number(field.getAttribute("data-count-limit"));
+    var unit = field.getAttribute("data-count-unit");
+    var encoder = window.TextEncoder ? new TextEncoder() : null;
+    function update() {
+      var n = unit === "bytes" && encoder ? encoder.encode(field.value).length : field.value.length;
+      out.textContent = n + " of " + limit + " " + unit + (n > limit ? ": too long for YouTube" : "");
+      out.classList.toggle("over", n > limit);
+    }
+    field.addEventListener("input", update);
+    update();
+  });
+
   // Coming back with the Back button must not show disabled buttons or stale state.
   window.addEventListener("pageshow", function (e) { if (e.persisted) window.location.reload(); });
 
@@ -65,11 +81,13 @@
     fetch("/api/status", { credentials: "same-origin", headers: { "X-CSRF-Token": csrf } })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("status " + r.status)); })
       .then(function (s) {
-        var running = s.signin.status === "running" || s.pull.status === "running";
+        var jobs = ["signin", "pull", "write", "push"];
+        var running = jobs.some(function (name) { return s[name] && s[name].status === "running"; });
         if (running) {
           seenRunning = true;
-          show("signin-msg", s.signin.status === "running" ? s.signin.message : "");
-          show("pull-msg", s.pull.status === "running" ? s.pull.message : "");
+          jobs.forEach(function (name) {
+            show(name + "-msg", s[name] && s[name].status === "running" ? s[name].message : "");
+          });
           setTimeout(poll, 1500);
         } else {
           window.location.reload();

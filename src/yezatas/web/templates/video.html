@@ -1,5 +1,5 @@
 {% extends "shell.html" %}
-{% from "_macros.html" import icon, thumb %}
+{% from "_macros.html" import icon, thumb, issue_list %}
 {% block title %}{{ video.title }} - Yezatas{% endblock %}
 {% block content %}
 <p class="backlink"><a href="/videos">{{ icon('back') }}<span>Content</span></a></p>
@@ -19,6 +19,36 @@
     <span class="big-number band-text {{ entry.band }}"><span class="avg">{{ card.score }}</span><span class="out-of"> / 100</span></span>
     <span class="muted">SEO score</span>
   </div>
+</section>
+
+<section class="card edit-card" id="edit" aria-labelledby="h-edit">
+  <div class="card-title-row">
+    <h2 id="h-edit">Edit title, description and tags</h2>
+    {% if change %}<a class="button secondary" href="/changes#d-{{ video.video_id|urlencode }}">Review changes</a>{% endif %}
+  </div>
+  <p class="muted">Saving makes a draft. Nothing is sent to YouTube until you approve it on the Changes page and confirm the push.</p>
+  {% if change and change.stale %}<p class="flash">YouTube's text changed since this draft was started. Review it on the Changes page.</p>{% endif %}
+  {% if change %}{{ issue_list(change.errors, change.warnings) }}{% endif %}
+  <form class="edit-form" method="post" action="/videos/{{ video.video_id|urlencode }}/draft">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field">
+      <label for="f-title">Title</label>
+      <input id="f-title" type="text" name="title" value="{{ form.title }}" autocomplete="off" data-count-limit="{{ title_limit }}" data-count-unit="characters" data-count-for="c-title">
+      <p class="hint counter" id="c-title" aria-live="off">Up to {{ title_limit }} characters. No &lt; or &gt;.</p>
+    </div>
+    <div class="field">
+      <label for="f-description">Description</label>
+      <textarea id="f-description" name="description" rows="14" data-count-limit="{{ description_limit }}" data-count-unit="bytes" data-count-for="c-description">
+{{ form.description }}</textarea>
+      <p class="hint counter" id="c-description" aria-live="off">Up to {{ description_limit }} bytes. No &lt; or &gt;.</p>
+    </div>
+    <div class="field">
+      <label for="f-tags">Tags</label>
+      <input id="f-tags" type="text" name="tags" value="{{ form.tags }}" autocomplete="off">
+      <p class="hint">Separate tags with commas, like in YouTube Studio.</p>
+    </div>
+    <div class="actions"><button type="submit" class="button primary">Save as draft</button></div>
+  </form>
 </section>
 
 {% for group in groups %}

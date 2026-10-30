@@ -11,6 +11,8 @@
 {%- elif name == 'close' -%}<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>
 {%- elif name == 'partial' -%}<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.2v.1"/>
 {%- elif name == 'minus' -%}<circle cx="12" cy="12" r="9"/><path d="M8.5 12h7"/>
+{%- elif name == 'changes' -%}<path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>
+{%- elif name == 'history' -%}<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>
 {%- elif name == 'back' -%}<path d="M15 5l-7 7 7 7"/>
 {%- elif name == 'external' -%}<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>
 {%- endif -%}
@@ -19,3 +21,52 @@
 {% macro score_badge(score, band) %}<span class="badge {{ band }}" title="SEO score {{ score }} of 100">{{ score }}</span>{% endmacro %}
 
 {% macro thumb(url, size='') %}{% if url %}<img class="thumb {{ size }}" src="{{ url }}" alt="" loading="lazy" width="320" height="180">{% else %}<span class="thumb empty {{ size }}" aria-hidden="true"></span>{% endif %}{% endmacro %}
+
+{# Validation issues of a draft: errors block approval, warnings do not. Text is plain, escaped. #}
+{% macro issue_list(errors, warnings) %}{% if errors or warnings %}
+<ul class="issues">
+  {% for i in errors %}<li class="issue error"><strong>Error:</strong> {{ i.message }}</li>{% endfor %}
+  {% for i in warnings %}<li class="issue warning"><strong>Warning:</strong> {{ i.message }}</li>{% endfor %}
+</ul>
+{% endif %}{% endmacro %}
+
+{# The difference between a draft and its base. Unchanged parts are not shown.
+   Every change carries a text marker or hidden label, so it reads without colour. #}
+{% macro diff_view(diff) %}
+{% if diff.title_changed %}
+<div class="diff-block">
+  <h3 class="diff-h">Title</h3>
+  <p class="diff-title">{% for seg in diff.title %}{% if seg.kind == 'same' %}{{ seg.text }}{% elif seg.kind == 'added' %}<ins class="seg added">{% if seg.text.strip() %}<span class="visually-hidden">[added: </span>{% endif %}{{ seg.text }}{% if seg.text.strip() %}<span class="visually-hidden">]</span>{% endif %}</ins>{% else %}<del class="seg removed">{% if seg.text.strip() %}<span class="visually-hidden">[removed: </span>{% endif %}{{ seg.text }}{% if seg.text.strip() %}<span class="visually-hidden">]</span>{% endif %}</del>{% endif %}{% endfor %}</p>
+</div>
+{% endif %}
+{% if diff.description.changed %}
+<div class="diff-block">
+  <h3 class="diff-h">Description <span class="muted">+{{ diff.description.added }} / &minus;{{ diff.description.removed }} lines</span></h3>
+  <table class="difflines">
+    <caption class="visually-hidden">Description changes: {{ diff.description.added }} lines added, {{ diff.description.removed }} removed</caption>
+    <tbody>
+      {% for line in diff.description.lines %}
+      {% if line.kind == 'gap' %}
+      <tr class="dl gap"><td colspan="4">&hellip; {{ line.text }}</td></tr>
+      {% else %}
+      <tr class="dl {{ line.kind }}"><td class="no">{% if line.old_no is not none %}{{ line.old_no }}{% endif %}</td><td class="no">{% if line.new_no is not none %}{{ line.new_no }}{% endif %}</td><td class="mark" aria-hidden="true">{% if line.kind == 'added' %}+{% elif line.kind == 'removed' %}&minus;{% endif %}</td><td class="ltext"><span class="visually-hidden">{{ 'Added line: ' if line.kind == 'added' else 'Removed line: ' if line.kind == 'removed' else 'Unchanged line: ' }}</span>{{ line.text }}</td></tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% if diff.tags.changed %}
+<div class="diff-block">
+  <h3 class="diff-h">Tags</h3>
+  <ul class="tag-chips">
+    {% for t in diff.tags.removed %}<li class="tagchip removed"><span class="visually-hidden">Removed tag: </span><span aria-hidden="true">&minus; </span>{{ t }}</li>{% endfor %}
+    {% for t in diff.tags.added %}<li class="tagchip added"><span class="visually-hidden">Added tag: </span><span aria-hidden="true">+ </span>{{ t }}</li>{% endfor %}
+    {% for t in diff.tags.kept %}<li class="tagchip kept"><span class="visually-hidden">Unchanged tag: </span>{{ t }}</li>{% endfor %}
+  </ul>
+  {% if diff.tags.reordered %}<p class="muted">The order of the tags changed.</p>{% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro post_form(action, csrf, label, kind='secondary', disabled=false, describedby='') %}<form class="inline" method="post" action="{{ action }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button {{ kind }}"{% if disabled %} disabled{% endif %}{% if describedby %} aria-describedby="{{ describedby }}"{% endif %}>{{ label }}</button></form>{% endmacro %}

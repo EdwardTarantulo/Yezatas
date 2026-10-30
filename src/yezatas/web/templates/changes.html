@@ -1,0 +1,68 @@
+{% extends "shell.html" %}
+{% from "_macros.html" import thumb, diff_view, issue_list, post_form %}
+{% block title %}Changes - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Changes</h1>
+<p class="intro">Your edits wait here as drafts. Nothing reaches YouTube until you approve a draft and confirm the push.</p>
+
+{% if push_status != 'idle' %}
+<p class="flash" id="push-banner">{% if push_status == 'running' %}A push to YouTube is running.{% else %}A push to YouTube has finished.{% endif %} <a href="/changes/push">See the {{ 'progress' if push_status == 'running' else 'result' }}</a></p>
+{% endif %}
+
+{% if cards %}
+<section class="card summary-bar" id="summary" aria-label="Summary">
+  <p class="summary-text"><strong>{{ cards|length }} draft{{ '' if cards|length == 1 else 's' }}, {{ approved_count }} approved</strong></p>
+  {% if approved_count %}
+  <a class="button primary" href="/changes/push">Review and push {{ approved_count }} approved</a>
+  {% else %}
+  <span class="button primary disabled" aria-disabled="true">Review and push 0 approved</span>
+  {% endif %}
+</section>
+
+{% for c in cards %}
+{% set vid = c.video.video_id %}
+<article class="card change{% if c.stale %} stale{% endif %}" id="d-{{ vid }}" aria-labelledby="dt-{{ vid }}">
+  <header class="change-head">
+    <a class="vthumb" href="/videos/{{ vid|urlencode }}" tabindex="-1" aria-hidden="true">{{ thumb(c.thumb, 'sm') }}</a>
+    <div class="change-info">
+      <h2 id="dt-{{ vid }}"><a href="/videos/{{ vid|urlencode }}">{{ c.video.title }}</a></h2>
+      <p class="muted">{{ c.views_text }} views &middot; {{ c.origin }}</p>
+      <p class="change-summary">{{ c.summary }}</p>
+    </div>
+    {% if c.ready %}<span class="pill done">Approved</span>{% else %}<span class="pill">Not approved</span>{% endif %}
+  </header>
+
+  {% if c.stale %}
+  <div class="stale-note" role="note">
+    <p><strong>YouTube's text changed since you started this draft (edited in Studio or pulled again). Review it against the new text.</strong></p>
+    <p class="hint">The diff below still compares your draft with the old text. Using the new text as the base keeps your draft and clears its approval.</p>
+    <div class="actions">
+      {{ post_form('/changes/' ~ (vid|urlencode) ~ '/rebase', csrf, 'Use the new text as the base', 'primary') }}
+      {{ post_form('/changes/' ~ (vid|urlencode) ~ '/discard', csrf, 'Discard', 'secondary') }}
+    </div>
+  </div>
+  {% endif %}
+
+  {{ issue_list(c.errors, c.warnings) }}
+  {{ diff_view(c.diff) }}
+
+  <div class="actions">
+    {% if c.ready %}
+      {{ post_form('/changes/' ~ (vid|urlencode) ~ '/unapprove', csrf, 'Unapprove', 'secondary') }}
+    {% else %}
+      {{ post_form('/changes/' ~ (vid|urlencode) ~ '/approve', csrf, 'Approve', 'primary', c.approve_block != '', 'why-' ~ vid) }}
+    {% endif %}
+    <a class="button secondary" href="/videos/{{ vid|urlencode }}#edit">Edit</a>
+    {% if not c.stale %}{{ post_form('/changes/' ~ (vid|urlencode) ~ '/discard', csrf, 'Discard', 'secondary') }}{% endif %}
+  </div>
+  {% if c.approve_block and not c.ready %}<p class="hint" id="why-{{ vid }}">Approve is unavailable: {{ c.approve_block }}</p>{% endif %}
+</article>
+{% endfor %}
+{% else %}
+<section class="empty-state" id="no-drafts">
+  <h2>No changes waiting</h2>
+  <p class="muted">When you edit a video's title, description or tags, the draft appears here for review. Pick a video in Content to start.</p>
+  <p><a class="button secondary" href="/videos">Go to Content</a></p>
+</section>
+{% endif %}
+{% endblock %}

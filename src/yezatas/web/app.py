@@ -1,7 +1,9 @@
-"""The Yezatas web app: the setup screen, the SEO dashboard, the content table and video pages.
+"""The Yezatas web app: the setup screen, the SEO dashboard, the content table, video pages and
+the edit, review and push screens.
 
-Everything here is read-only towards YouTube. Background jobs open their own Store, because a
-SQLite connection must not cross threads.
+Pages only read from YouTube through the catalog pull. The one write is `POST /changes/push`,
+which sends drafts the creator approved and ticked a confirmation box for. Background jobs open
+their own Store, because a SQLite connection must not cross threads.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Sequence
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -23,21 +25,23 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
-from .. import auth
+from .. import auth, edits, push
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
 from ..quota import QuotaGuard
 from ..seo import score_catalog
 from ..store import Store
-from ..youtube import GoogleYouTubeReader, YouTubeReader
+from ..youtube import GoogleYouTubeReader, GoogleYouTubeWriter, YouTubeReader, YouTubeWriter
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
                          parse_client_file, read_saved_client, save_client_file)
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
 from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
-from .views import (Entry, build_listing, dashboard_model, format_count, format_date, group_checks,
-                    make_entries, thumb_url)
+from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
+from .views import (Entry, build_listing, change_cards, dashboard_model, format_count,
+                    format_date, group_checks, history_rows, make_entries, plan_lines,
+                    push_results, thumb_url)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -48,10 +52,14 @@ SIGN_IN_TIMEOUT_MESSAGE = (
 )
 API_PAGE_URL = "https://console.cloud.google.com/apis/library/youtube.googleapis.com"
 UPLOAD_BODY_LIMIT = MAX_CLIENT_FILE_BYTES + 16 * 1024  # file plus multipart overhead
+# Generous caps on the edit form. YouTube's own limits are far lower; the validator reports those.
+FORM_LIMITS = {"title": 1000, "description": 50_000, "tags": 5000}
+HISTORY_LIMIT = 100
 
 HERE = Path(__file__).parent
 
 ReaderFactory = Callable[[Any], YouTubeReader]
+WriterFactory = Callable[[Any], YouTubeWriter]
 CredentialsLoader = Callable[[Config], Any]
 
 
@@ -95,6 +103,15 @@ def _local_time(iso_utc: str) -> str:
         return iso_utc
 
 
+def sign_in_with_write_access(config: Config) -> Any:
+    """The default write sign-in: the same browser flow as setup, asking to edit videos."""
+    return auth.sign_in(config, scopes=(auth.WRITE,))
+
+
+def load_write_credentials(config: Config) -> Any:
+    return auth.load_credentials(config, scopes=(auth.WRITE,))
+
+
 def _job_json(snap: JobSnapshot) -> dict[str, Any]:
     return {"status": snap.status, "message": snap.message, "error_kind": snap.error_kind}
 
@@ -110,15 +127,24 @@ class WebState:
         credentials_loader: CredentialsLoader,
         clock: Callable[[], float],
         sign_in_timeout: float,
+        write_sign_in: Callable[[Config], Any],
+        write_credentials_loader: CredentialsLoader,
+        writer_factory: WriterFactory,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
         self._reader_factory = reader_factory
         self._credentials_loader = credentials_loader
+        self._write_sign_in = write_sign_in
+        self._write_credentials_loader = write_credentials_loader
+        self._writer_factory = writer_factory
         self.signin_job = Job(
             map_sign_in_error, sign_in_timeout, SIGN_IN_TIMEOUT_MESSAGE, clock
         )
         self.pull_job = Job(map_api_error)
+        self.write_job = Job(map_sign_in_error, sign_in_timeout, SIGN_IN_TIMEOUT_MESSAGE, clock)
+        self.push_job = Job(map_api_error)
+        self._push_seen: JobSnapshot | None = None  # the finished push the creator dismissed
         self._lock = threading.Lock()
         self._check_lock = threading.Lock()
         self._check: CheckState | None = None
@@ -209,6 +235,44 @@ class WebState:
 
         return self.pull_job.start(work)
 
+    # --- write access and push --------------------------------------------------------------
+    def write_credentials(self) -> Any:
+        """Credentials that may edit videos, or None. Never raises."""
+        try:
+            return self._write_credentials_loader(self.config)
+        except Exception:  # noqa: BLE001 - a broken token file just means "sign in again"
+            return None
+
+    def start_write_sign_in(self) -> bool:
+        def work(report: Report) -> None:
+            report("Waiting for you to finish in the browser tab…")
+            self._write_sign_in(self.config)
+
+        return self.write_job.start(work)
+
+    def start_push(self, approved: dict[str, str], creds: Any) -> bool:
+        def work(report: Report) -> push.PushReport:
+            writer = self._writer_factory(creds)
+            with Store(self.config.catalog_db) as store:
+                guard = QuotaGuard(store, self.config.daily_quota_budget)
+                return push.push_drafts(writer, store, guard, approved, report)
+
+        return self.push_job.start(work)
+
+    def push_snapshot(self) -> JobSnapshot:
+        """The push job's state, or idle once the creator dismissed a finished result."""
+        snap = self.push_job.snapshot()
+        with self._lock:
+            if snap is self._push_seen:
+                return JobSnapshot("idle")
+        return snap
+
+    def dismiss_push_result(self) -> None:
+        snap = self.push_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._push_seen = snap
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -234,12 +298,16 @@ def create_app(
     open_browser: bool = True,
     sign_in_timeout: float = SIGN_IN_TIMEOUT_SECONDS,
     clock: Callable[[], float] = time.monotonic,
+    write_sign_in: Callable[[Config], Any] = sign_in_with_write_access,
+    write_credentials_loader: CredentialsLoader = load_write_credentials,
+    writer_factory: WriterFactory = GoogleYouTubeWriter,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
     token = token or secrets.token_urlsafe(32)
     start_url = f"http://127.0.0.1:{port}/?t={token}"
-    state = WebState(config, sign_in, reader_factory, credentials_loader, clock, sign_in_timeout)
+    state = WebState(config, sign_in, reader_factory, credentials_loader, clock, sign_in_timeout,
+                     write_sign_in, write_credentials_loader, writer_factory)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -328,10 +396,33 @@ def create_app(
             "quota": {"used": used, "remaining": remaining, "budget": config.daily_quota_budget},
         }
 
+    def draft_ids() -> frozenset[str]:
+        with Store(config.catalog_db) as store:
+            return frozenset(row.video_id for row in store.list_drafts())
+
     def render(request: Request, name: str, extra: dict[str, Any],
                status_code: int = 200) -> Response:
-        context = {"csrf": request.state.csrf, **extra}
+        context: dict[str, Any] = {"csrf": request.state.csrf, "draft_count": len(draft_ids()),
+                                   **extra}
+        # The setup page shows its own flash messages next to the step they belong to.
+        if "flash" not in extra and "shell_flash" not in extra:
+            context["shell_flash"] = state.pop_flash(request.state.session_id)
         return templates.TemplateResponse(request, name, context, status_code=status_code)
+
+    def see_other(url: str) -> RedirectResponse:
+        return RedirectResponse(url, status_code=303)
+
+    def flash(request: Request, kind: str, text: str) -> None:
+        state.add_flash(request.state.session_id, kind, text)
+
+    def video_not_found(request: Request) -> Response:
+        return render(request, "error.html", {
+            "layout": "shell.html", "active": "content",
+            "heading": "Video not found",
+            "text": "There is no video with this id in your pulled catalog. It may have been "
+                    "removed from your channel, or the catalog is out of date.",
+            "link_url": "/videos", "link_text": "Back to Content",
+        }, status_code=404)
 
     # --- pages ------------------------------------------------------------------------------
     @app.get("/")
@@ -352,7 +443,7 @@ def create_app(
             return back_to_setup()
         listing = build_listing(data["entries"], dict(request.query_params))
         return render(request, "videos.html", {"active": "content", "listing": listing,
-                                               "q": listing.q})
+                                               "q": listing.q, "draft_ids": draft_ids()})
 
     @app.get("/videos/{video_id}")
     def video_page(request: Request, video_id: str) -> Response:
@@ -362,15 +453,17 @@ def create_app(
         entry: Entry | None = next((e for e in data["entries"] if e.video.video_id == video_id),
                                    None)
         if entry is None:
-            return render(request, "error.html", {
-                "layout": "shell.html", "active": "content",
-                "heading": "Video not found",
-                "text": "There is no video with this id in your pulled catalog. It may have been "
-                        "removed from your channel, or the catalog is out of date.",
-                "link_url": "/videos", "link_text": "Back to Content",
-            }, status_code=404)
+            return video_not_found(request)
         video = entry.video
+        with Store(config.catalog_db) as store:
+            row = store.get_draft(video_id)
+        card = change_cards([(row, video)])[0] if row is not None else None
+        text = ((row.title, row.description, row.tags) if row is not None
+                else (video.title, video.description, tuple(video.tags)))
         return render(request, "video.html", {
+            "change": card,
+            "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
+            "title_limit": TITLE_LIMIT, "description_limit": DESCRIPTION_BYTE_LIMIT,
             "active": "content", "entry": entry, "video": video, "card": entry.card,
             "groups": group_checks(entry.card),
             "big_thumb": thumb_url(video, ("high", "medium", "default")),
@@ -391,6 +484,8 @@ def create_app(
         return JSONResponse({
             "signin": _job_json(state.signin_job.snapshot()),
             "pull": _job_json(state.pull_job.snapshot()),
+            "write": _job_json(state.write_job.snapshot()),
+            "push": _job_json(state.push_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
 
@@ -501,5 +596,217 @@ def create_app(
         if not state.start_pull():
             state.add_flash(sid, "error", "A pull is already running.", "pull")
         return back_to_setup("pull")
+
+    # --- edit, review, push, history -----------------------------------------------------------
+    def changes_data() -> list[Any]:
+        """Every pending draft as a card, most viewed video first (worker thread)."""
+        with Store(config.catalog_db) as store:
+            return change_cards(edits.pending(store))
+
+    def titles_of(ids: Sequence[str]) -> dict[str, str]:
+        with Store(config.catalog_db) as store:
+            found = {i: store.get_video(i) for i in ids}
+        return {i: v.title for i, v in found.items() if v is not None}
+
+    @app.get("/changes")
+    def changes_page(request: Request) -> Response:
+        cards = changes_data()
+        return render(request, "changes.html", {
+            "active": "changes", "cards": cards,
+            "approved_count": sum(1 for c in cards if c.ready),
+            "push_status": state.push_snapshot().status,
+        })
+
+    async def change_step(request: Request, work: Callable[[Store], str], anchor: str = "") -> Response:
+        """Run one draft step in a worker thread; a refused step becomes an error flash."""
+        await read_form(request)
+
+        def run() -> tuple[str, str]:
+            with Store(config.catalog_db) as store:
+                try:
+                    return "ok", work(store)
+                except edits.DraftError as exc:
+                    return "error", str(exc)
+
+        kind, message = await run_in_threadpool(run)
+        flash(request, kind, message)
+        return see_other("/changes" + (f"#d-{quote(anchor)}" if anchor else ""))
+
+    @app.post("/changes/{video_id}/approve")
+    async def approve_draft(request: Request, video_id: str) -> Response:
+        def work(store: Store) -> str:
+            edits.approve(store, video_id)
+            return "Approved. It is sent to YouTube only after you review and push."
+
+        return await change_step(request, work, video_id)
+
+    @app.post("/changes/{video_id}/unapprove")
+    async def unapprove_draft(request: Request, video_id: str) -> Response:
+        def work(store: Store) -> str:
+            edits.unapprove(store, video_id)
+            return "Approval removed."
+
+        return await change_step(request, work, video_id)
+
+    @app.post("/changes/{video_id}/discard")
+    async def discard_draft(request: Request, video_id: str) -> Response:
+        def work(store: Store) -> str:
+            return "Draft discarded." if edits.discard(store, video_id) else "There was no draft."
+
+        return await change_step(request, work)
+
+    @app.post("/changes/{video_id}/rebase")
+    async def rebase_draft(request: Request, video_id: str) -> Response:
+        def work(store: Store) -> str:
+            if edits.rebase(store, video_id) is None:
+                return ("The draft now matches the text on YouTube, so it was removed. "
+                        "Nothing is left to push.")
+            return ("The draft now builds on YouTube's current text. Review the changes and "
+                    "approve again.")
+
+        return await change_step(request, work, video_id)
+
+    @app.post("/videos/{video_id}/draft")
+    async def save_video_draft(request: Request, video_id: str) -> Response:
+        form = await read_form(request)
+        fields = {name: str(form.get(name) or "") for name in FORM_LIMITS}
+        if any(len(fields[name]) > limit for name, limit in FORM_LIMITS.items()):
+            flash(request, "error", "That text is far longer than YouTube allows, so it was not "
+                  "saved. Shorten the title, description or tags.")
+            return see_other(f"/videos/{quote(video_id)}#edit")
+
+        def work() -> edits.SaveResult:
+            with Store(config.catalog_db) as store:
+                return edits.save_draft(store, video_id, fields["title"], fields["description"],
+                                        fields["tags"].split(","))
+
+        try:
+            result = await run_in_threadpool(work)
+        except edits.DraftError:
+            return video_not_found(request)
+        if result.discarded:
+            flash(request, "info", "This text is the same as the one on YouTube, so no draft "
+                  "was kept.")
+            return see_other(f"/videos/{quote(video_id)}#edit")
+        flash(request, "ok", "Draft saved. Nothing is sent to YouTube until you approve it "
+              "and push.")
+        return see_other(f"/changes#d-{quote(video_id)}")
+
+    # --- push -------------------------------------------------------------------------------
+    def push_page_data() -> dict[str, Any]:
+        push_snap = state.push_snapshot()
+        write_snap = state.write_job.snapshot()
+        data: dict[str, Any] = {
+            "active": "changes", "push": push_snap, "write": write_snap,
+            "poll": push_snap.running or write_snap.running,
+            "ready": [], "waiting": 0, "plan": None, "has_write": False, "results": [],
+            "report": None,
+        }
+        if push_snap.status == "done" and isinstance(push_snap.result, push.PushReport):
+            report = push_snap.result
+            data["report"] = report
+            data["results"] = push_results(report.items,
+                                           titles_of([i.video_id for i in report.items]))
+            return data
+        if push_snap.status != "idle":
+            return data
+        cards = changes_data()
+        ready = [c for c in cards if c.ready]
+        data["ready"] = ready
+        data["waiting"] = len(cards) - len(ready)
+        if ready:
+            with Store(config.catalog_db) as store:
+                preview = QuotaGuard(store, config.daily_quota_budget).preview(
+                    push.push_units(len(ready)))
+            data["plan"] = {"lines": plan_lines(preview.lines), "total": preview.total,
+                            "used": preview.used, "remaining": preview.remaining,
+                            "fits": preview.fits, "budget": config.daily_quota_budget}
+            data["has_write"] = state.write_credentials() is not None
+        return data
+
+    @app.get("/changes/push")
+    def push_page(request: Request) -> Response:
+        return render(request, "push.html", push_page_data())
+
+    @app.post("/changes/push")
+    async def start_push(request: Request) -> Response:
+        form = await read_form(request)
+        back = see_other("/changes/push")
+        if form.get("confirm") != "yes":
+            flash(request, "error", "Tick the box to confirm that you approve publishing these "
+                  "changes. Nothing was sent to YouTube.")
+            return back
+        approved = {str(k)[3:]: str(v) for k, v in form.multi_items()
+                    if str(k).startswith("fp_") and len(str(k)) > 3}
+        if not approved:
+            flash(request, "error", "There is nothing to push. Approve a draft first.")
+            return back
+        creds = await run_in_threadpool(state.write_credentials)
+        if creds is None:
+            flash(request, "error", "Yezatas does not have permission to edit your videos yet. "
+                  "Allow it first. Nothing was sent to YouTube.")
+            return back
+        if not state.start_push(approved, creds):
+            flash(request, "error", "A push is already running.")
+        return back
+
+    @app.post("/changes/push/done")
+    async def dismiss_push(request: Request) -> Response:
+        await read_form(request)
+        state.dismiss_push_result()
+        return see_other("/changes")
+
+    @app.post("/changes/allow-edits")
+    async def allow_edits(request: Request) -> Response:
+        await read_form(request)
+        client, _ = read_saved_client(config)
+        if client is None:
+            flash(request, "error", "Add the OAuth client file first, in Setup (step 5).")
+        elif not state.start_write_sign_in():
+            flash(request, "error", "A sign-in is already waiting for you in the browser.")
+        return see_other("/changes/push")
+
+    @app.post("/changes/allow-edits/cancel")
+    async def cancel_allow_edits(request: Request) -> Response:
+        await read_form(request)
+        state.write_job.cancel("Sign-in cancelled.")
+        return see_other("/changes/push")
+
+    # --- history ----------------------------------------------------------------------------
+    @app.get("/history")
+    def history_page(request: Request) -> Response:
+        with Store(config.catalog_db) as store:
+            records = store.list_pushes(limit=HISTORY_LIMIT)
+            drafts = {row.video_id for row in store.list_drafts()}
+            titles = {}
+            for record in records:
+                video = store.get_video(record.video_id)
+                if video is not None:
+                    titles[record.video_id] = video.title
+        return render(request, "history.html", {
+            "active": "history", "rows": history_rows(records, titles, _local_time, drafts),
+            "limit": HISTORY_LIMIT,
+        })
+
+    @app.post("/history/{push_id}/restore")
+    async def restore_text(request: Request, push_id: int) -> Response:
+        await read_form(request)
+
+        def work() -> tuple[str, str, str]:
+            with Store(config.catalog_db) as store:
+                record = store.get_push(push_id)
+                try:
+                    result = edits.restore_draft(store, push_id)
+                except edits.DraftError as exc:
+                    return "error", str(exc), "/history"
+            if result.discarded:
+                return "info", "That text is already on YouTube; nothing to restore.", "/history"
+            anchor = f"#d-{quote(record.video_id)}" if record is not None else ""
+            return ("ok", f"Restore draft made from push #{push_id}. Nothing changes on YouTube "
+                    "until you approve and push it.", "/changes" + anchor)
+
+        kind, message, target = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other(target)
 
     return app

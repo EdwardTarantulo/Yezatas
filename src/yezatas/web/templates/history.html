@@ -1,0 +1,40 @@
+{% extends "shell.html" %}
+{% from "_macros.html" import post_form %}
+{% block title %}History - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">History</h1>
+<p class="intro">Before every push, Yezatas saves YouTube's text here. Restoring makes a draft; nothing changes on YouTube until you approve and push it.</p>
+
+{% if rows %}
+<ul class="history">
+  {% for r in rows %}
+  <li class="card history-row" id="p-{{ r.record.id }}">
+    <div class="history-head">
+      <span class="pill {{ r.tone }}">{{ r.label }}</span>
+      <a class="history-title" href="/videos/{{ r.record.video_id|urlencode }}">{{ r.title }}</a>
+      <span class="muted history-when">Push #{{ r.record.id }} &middot; {{ r.when }}</span>
+    </div>
+    {% if r.record.message %}<p class="muted">{{ r.record.message }}</p>{% endif %}
+    {% if r.backup %}
+    <details class="backup">
+      <summary>Show the saved text</summary>
+      <dl class="backup-text">
+        <dt>Title</dt><dd>{{ r.backup.title }}</dd>
+        <dt>Description</dt><dd><pre>{{ r.backup.description }}</pre></dd>
+        <dt>Tags</dt><dd>{% if r.backup.tags %}{{ r.backup.tags|join(', ') }}{% else %}<span class="muted">No tags</span>{% endif %}</dd>
+      </dl>
+    </details>
+    <div class="actions">{{ post_form('/history/' ~ r.record.id ~ '/restore', csrf, 'Restore this text', 'secondary') }}{% if r.has_draft %} <span class="hint">This video already has a draft: push or discard it before restoring.</span>{% endif %}</div>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if rows|length >= limit %}<p class="hint">Showing the newest {{ limit }} records.</p>{% endif %}
+{% else %}
+<section class="empty-state" id="no-history">
+  <h2>Nothing pushed yet</h2>
+  <p class="muted">Every push to YouTube, and the text it replaced, will be listed here.</p>
+  <p><a class="button secondary" href="/changes">Go to Changes</a></p>
+</section>
+{% endif %}
+{% endblock %}

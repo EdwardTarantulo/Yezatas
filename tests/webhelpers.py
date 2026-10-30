@@ -167,3 +167,25 @@ def seed_catalog(config: Config, videos: list[Video]) -> None:
         for video in videos:
             store.upsert_video(video, pull_id)
         store.finish_pull(pull_id, len(videos))
+
+
+# --- a seeded catalog with a fake channel that also accepts updates (edit / changes / push) ----
+def make_push_ui(tmp_path: Path, count: int = 3, write_access: bool = True,
+                 **kwargs: Any) -> "tuple[Ui, Any]":
+    """A Ui whose catalog was pulled from a FakeYouTubeWriter; returns (ui, writer).
+
+    With `write_access` the write credentials loader returns fake credentials, otherwise None.
+    """
+    from fakes import FakeYouTubeWriter
+    from yezatas.catalog import pull_catalog
+    from yezatas.quota import QuotaGuard
+
+    writer = FakeYouTubeWriter(count)
+    loader = (lambda config: fake_creds()) if write_access else (lambda config: None)
+    kwargs.setdefault("write_credentials_loader", loader)
+    kwargs.setdefault("writer_factory", lambda creds: writer)
+    ui = make_ui(tmp_path, reader=writer, **kwargs)
+    with Store(ui.config.catalog_db) as store:
+        pull_catalog(writer, store, QuotaGuard(store, ui.config.daily_quota_budget))
+    writer.calls.clear()
+    return ui, writer

@@ -51,6 +51,7 @@
           <a class="vthumb" href="/videos/{{ e.video.video_id|urlencode }}" tabindex="-1" aria-hidden="true">{{ thumb(e.thumb, 'sm') }}</a>
           <div class="vtext">
             <a class="vtitle" href="/videos/{{ e.video.video_id|urlencode }}">{{ e.video.title }}</a>
+            {% if e.video.video_id in draft_ids %}<span class="pill working draft-pill" title="This video has a draft waiting for review">Draft</span>{% endif %}
             {% if e.snippet %}<span class="vdesc">{{ e.snippet }}</span>{% endif %}
           </div>
         </div>
