@@ -7,7 +7,7 @@ from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 
 from fakes import CHANNEL_TITLE, FakeYouTubeReader
-from webhelpers import (http_error, make_config, make_ui, step_class, write_client_file,
+from webhelpers import (client_json, http_error, make_config, make_ui, step_class, write_client_file,
                         write_token)
 from yezatas.quota import _utc_now, quota_day
 from yezatas.store import Store
@@ -294,3 +294,10 @@ def test_page_while_pull_is_running_shows_progress_and_no_second_start(tmp_path:
     gate.set()
     ui.web.pull_job.wait()
     assert ui.web.pull_job.snapshot().status == "done"
+
+
+def test_api_page_link_opens_the_client_project(tmp_path: Path) -> None:
+    ui = make_ui(tmp_path)
+    write_client_file(ui.config, client_json("my-proj-123"))
+    html = ui.setup_html()
+    assert "youtube.googleapis.com?project=my-proj-123" in html

@@ -61,6 +61,43 @@
 </div>
 {% endmacro %}
 
+{# Pictures of Google's sign-in pages: the "not verified" warning, then the access request. #}
+{% macro gsignin() %}
+<div class="guide" data-slider aria-roledescription="slides" aria-label="Google's sign-in pages">
+  <nav class="slider-nav" aria-label="Slides">
+    <button type="button" class="gbtn" data-slide-prev>‹ Back</button>
+    <span class="dots" data-dots></span>
+    <button type="button" class="gbtn" data-slide-next>Next ›</button>
+  </nav>
+  <div class="slide" data-slide>
+    <p class="guide-label">After you pick the account, Google shows this. Click <strong>Continue</strong>.</p>
+    <div class="gpanel gverify">
+      <p class="gverify-title">Google hasn't verified this app</p>
+      <p class="gnote">You've been given access to an app that's currently being tested. You should only
+        continue if you know the developer that invited you.</p>
+      <div class="gfoot gverify-foot"><button type="button" class="gbtn gpick" data-slide-next>Continue</button><span class="gbtn primary">Back to safety</span></div>
+    </div>
+    <p class="gnote gafter">Google shows this because the app is your own and in Testing. You are the
+      developer here, so click <strong>Continue</strong> (not Back to safety).</p>
+  </div>
+  <div class="slide" data-slide>
+    <p class="guide-label">Then Google asks for access. Click <strong>Continue</strong>.</p>
+    <div class="gpanel gverify">
+      <p class="gverify-title">Yezatas wants access to your Google Account</p>
+      <div>
+        <p class="gnote">When you allow this access, Yezatas will be able to</p>
+        <p class="gaccess"><svg class="geye" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>View your YouTube account.</p>
+        <p class="gnote">Make sure you trust Yezatas</p>
+      </div>
+      <div class="gfoot gverify-foot"><span class="gbtn">Cancel</span><span class="gbtn gpick">Continue</span></div>
+    </div>
+    <p class="gnote gafter"><strong>View your YouTube account</strong> is the read-only access: Yezatas can
+      read your videos but not change them. After <strong>Continue</strong>, the tab says you can close it.
+      Come back here and this step turns green.</p>
+  </div>
+</div>
+{% endmacro %}
+
 {% block content %}
 <p class="intro">Connect your channel in eight short steps. Yezatas only <strong>reads</strong> your
   channel here. Nothing is changed on YouTube. Use the Google account that owns the channel for every step.</p>
@@ -93,7 +130,11 @@
 
 {% call card(steps.api) %}
   <p>Open the page below and check that your new project is the one selected at the top. Then:</p>
-  <p><a class="button secondary" href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener noreferrer">Open the YouTube Data API v3 page</a></p>
+  <p><a class="button secondary" href="{{ api_url }}" target="_blank" rel="noopener noreferrer">Open the YouTube Data API v3 page</a></p>
+  {% if client and client.project_id != '(not given)' %}
+  <p class="hint">Your client file belongs to project <strong>{{ client.project_id }}</strong>, so the button opens that
+    project. The API must be on in this same project.</p>
+  {% endif %}
   <div class="guide">
     <div class="gpanel">
       <p class="gtitle">Product details</p>
@@ -272,8 +313,8 @@
     <p class="waiting"><span class="spinner" aria-hidden="true"></span>
       <span id="signin-msg">{{ signin.message or 'Waiting for you to finish in the browser tab…' }}</span></p>
     <p>A Google page opened in your browser. Pick the channel's account and allow read-only access.
-      Google may warn that the app is not verified. That is expected for your own project: click
-      <strong>Continue</strong> (or <strong>Advanced</strong>, then go to the app).</p>
+      Google's pages look like this:</p>
+    {{ gsignin() }}
     <p>Google says <strong>"Access blocked: … has not completed the Google verification process"</strong>
       (Error 403: access_denied)? The account you picked is not on the Test users list. Add that exact
       email in step 4 (Audience, Test users, Save), click <strong>Cancel</strong> here, then sign in again.</p>
@@ -287,6 +328,8 @@
       <strong>read-only</strong> access to your YouTube data. Yezatas never sees your password.</p>
     {{ post_button('/setup/signin', 'Sign in with Google') }}
     <p class="hint">Use the same account you added as a test user in step 4.</p>
+    <p>What Google shows next:</p>
+    {{ gsignin() }}
   {% endif %}
 {% endcall %}
 
@@ -302,8 +345,11 @@
     {% endif %}
     {{ post_button('/setup/check', 'Check again', 'secondary') }}
   {% else %}
+    {% if check and check.kind == 'api_disabled' %}
+    <p><a class="button secondary" href="{{ api_url }}" target="_blank" rel="noopener noreferrer">Open the YouTube Data API v3 page</a></p>
+    {% endif %}
     <p>One small request asks YouTube for your channel. It costs 1 quota unit.</p>
-    {{ post_button('/setup/check', 'Check the connection') }}
+    {{ post_button('/setup/check', 'Check the connection' if not check else 'Check again') }}
   {% endif %}
 {% endcall %}
 

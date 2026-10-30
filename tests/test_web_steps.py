@@ -74,11 +74,11 @@ def test_checked_connection_unlocks_pull_and_confirms_api() -> None:
     assert steps[7].enabled
 
 
-def test_api_disabled_is_a_problem_on_step_2_and_6() -> None:
+def test_api_disabled_is_a_problem_on_step_2_and_7() -> None:
     check = CheckState(False, "api_disabled", "Enable the API.")
     steps = {s.key: s for s in compute_steps(CLIENT, "", True, IDLE, check, IDLE, False)}
     assert steps["api"].status == "problem" and steps["api"].note == "Enable the API."
-    assert steps["check"].status == "problem" and "step 2" in steps["check"].note
+    assert steps["check"].status == "problem" and steps["check"].note == "Enable the API."
 
 
 def test_other_check_failures_stay_on_step_6() -> None:

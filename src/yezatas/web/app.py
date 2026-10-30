@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Sequence
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -27,8 +28,8 @@ from ..config import Config, ensure_dirs
 from ..quota import QuotaGuard
 from ..store import Store
 from ..youtube import GoogleYouTubeReader, YouTubeReader
-from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, parse_client_file,
-                         read_saved_client, save_client_file)
+from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
+                         parse_client_file, read_saved_client, save_client_file)
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
 from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
@@ -41,6 +42,7 @@ SIGN_IN_TIMEOUT_MESSAGE = (
     "account is probably not on the Test users list: add it in step 4. Otherwise just start "
     "the sign-in again."
 )
+API_PAGE_URL = "https://console.cloud.google.com/apis/library/youtube.googleapis.com"
 UPLOAD_BODY_LIMIT = MAX_CLIENT_FILE_BYTES + 16 * 1024  # file plus multipart overhead
 
 HERE = Path(__file__).parent
@@ -209,6 +211,14 @@ class WebState:
         return removed
 
 
+def _api_page_url(client: ClientInfo | None) -> str:
+    """The YouTube Data API page, opened on the client's own project when the file names one."""
+    url = API_PAGE_URL
+    if client is not None and client.project_id != "(not given)":
+        url += "?" + urlencode({"project": client.project_id})
+    return url
+
+
 def create_app(
     config: Config,
     *,
@@ -280,6 +290,7 @@ def create_app(
             "steps": {s.key: s for s in steps}, "current": current,
             "client": client, "client_exists": config.client_secrets_path.exists(),
             "client_path": str(config.client_secrets_path),
+            "api_url": _api_page_url(client),
             "signed_in": signed_in, "signin": signin, "pull": pull, "check": check,
             "estimate": estimate,
             "latest_pull": ({"videos": latest[0], "when": _local_time(latest[1])}

@@ -321,3 +321,17 @@ button.gbtn { cursor: pointer; }
 .grow > :first-child { font-weight: 600; }
 .gsecret { color: var(--muted); letter-spacing: 0.05em; overflow-wrap: anywhere; }
 .gspread { justify-content: space-between; }
+
+/* Google's "hasn't verified this app" page: title left, text right, buttons bottom right. */
+.gverify { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; padding: 22px; }
+.gverify-title { grid-row: span 2; margin: 0; font-size: 1.5rem; line-height: 1.25; }
+.gverify .gnote { margin: 0; }
+.gverify-foot { grid-column: 2; justify-content: flex-end; }
+.gaccess { display: flex; align-items: center; gap: 10px; margin: 10px 0 14px; }
+.geye { width: 22px; height: 22px; fill: none; stroke: var(--accent); stroke-width: 2; flex: none; }
+.gbtn.gpick { box-shadow: 0 0 0 2px var(--accent); color: var(--accent); font-weight: 600; }
+@media (max-width: 560px) {
+  .gverify { grid-template-columns: 1fr; }
+  .gverify-title { grid-row: auto; font-size: 1.25rem; }
+  .gverify-foot { grid-column: 1; }
+}

@@ -130,11 +130,9 @@ def compute_steps(
         s7 = Step(7, "check", title7, "todo", enabled=False)
     elif check_ok:
         s7 = Step(7, "check", title7, "done")
-    elif check_failed and check_kind not in ("api_disabled", "auth"):
-        s7 = Step(7, "check", title7, "problem", check.message)  # type: ignore[union-attr]
     elif check_failed:
-        where = "step 2" if check_kind == "api_disabled" else "step 6"
-        s7 = Step(7, "check", title7, "problem", f"The check failed. See {where}.")
+        # The full fix here too (it also shows on step 2 or 6), so nobody has to scroll up for it.
+        s7 = Step(7, "check", title7, "problem", check.message)  # type: ignore[union-attr]
     else:
         s7 = Step(7, "check", title7, "todo")
 
