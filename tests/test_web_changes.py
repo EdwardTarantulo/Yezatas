@@ -250,7 +250,13 @@ def test_push_page_without_write_access_asks_for_permission(tmp_path: Path) -> N
     save(ui, V1, approve=True)
     html = ui.client.get("/changes/push").text
     assert "Allow Yezatas to edit your videos" in html and 'action="/changes/allow-edits"' in html
-    assert "not verified" in html and "reading still works" in html.lower()
+    assert "verified this app" in html and "reading still works" in html.lower()
+    # The explainer: Google's two pages drawn as slides, what the permission is used for, how to remove it.
+    assert "aria-label=\"Google's pages for the edit permission\"" in html
+    assert "See, edit, and permanently delete your YouTube videos" in html
+    assert "videos.update</strong> for a video's title, description and" in html
+    assert "never deletes" in html and "https://myaccount.google.com/connections" in html
+    assert 'id="about-edit-access"' not in html
     assert 'action="/changes/push"' not in html and "Push to YouTube</button>" not in html
     assert "Quota cost" in html  # the cost is shown before asking for anything
     assert writer.calls == []
@@ -272,6 +278,8 @@ def test_push_page_with_write_access_shows_the_cost_and_the_form(tmp_path: Path)
     assert re.search(r'<input type="checkbox" name="confirm" value="yes" required>', html)
     assert "I approve publishing these 2 changes to YouTube" in html
     assert set(fingerprints(html)) == {V1, V2}
+    assert 'id="about-edit-access"' in html and "https://myaccount.google.com/connections" in html
+    assert "Google's pages for the edit permission" not in html  # no slides once access is given
     assert 'action="/changes/allow-edits"' not in html
     assert writer.calls == []
 

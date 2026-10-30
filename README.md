@@ -48,6 +48,9 @@ as it lands; the git history is the detailed record.
   - **Backups.** Before every update, YouTube's live text is saved as a backup. Any backup can be restored as a new draft from **History**.
   - **Studio edits.** Videos changed in YouTube Studio since the last pull are detected and skipped.
   - **Muse Code.** The diff model was built by Muse Code from a written spec.
+- **2026-10-30**: first **real push and restore** on a real channel (one tag on a private video, then put back from
+  History; 51 quota units each). The push page now explains Google's two edit-permission pages, what Yezatas does with
+  that permission (only `videos.update` on title, description and tags) and how to remove it.
 
 ## Setup
 

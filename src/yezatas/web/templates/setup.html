@@ -323,7 +323,15 @@
     <p class="hint">If you do not see the tab, look behind your other windows. This stops waiting after 5 minutes.</p>
     {{ post_button('/setup/signin/cancel', 'Cancel', 'secondary') }}
   {% elif signed_in %}
+    {% if can_edit %}
+    <p>You are signed in, and you allowed Yezatas to edit your videos when you first pushed a change. Yezatas
+      saved a sign-in token on this computer.</p>
+    <p class="hint">Sign out deletes that token. To remove the access at Google too, open
+      <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">your Google
+      Account's third-party connections</a> and remove Yezatas.</p>
+    {% else %}
     <p>You are signed in with read-only access. Yezatas saved a sign-in token on this computer.</p>
+    {% endif %}
     {{ post_button('/setup/signout', 'Sign out', 'secondary') }}
   {% else %}
     <p>This opens a Google page in your browser. You choose the account and allow

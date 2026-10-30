@@ -1,6 +1,66 @@
 {% extends "shell.html" %}
 {% from "_macros.html" import post_form %}
 {% block title %}Push to YouTube - Yezatas{% endblock %}
+
+{# Pictures of Google's two pages for the edit permission, drawn here (never screenshots, which show a channel). #}
+{% macro gedit() %}
+<div class="guide" data-slider aria-roledescription="slides" aria-label="Google's pages for the edit permission">
+  <nav class="slider-nav" aria-label="Slides">
+    <button type="button" class="gbtn" data-slide-prev>‹ Back</button>
+    <span class="dots" data-dots></span>
+    <button type="button" class="gbtn" data-slide-next>Next ›</button>
+  </nav>
+  <div class="slide" data-slide>
+    <p class="guide-label">After you pick the channel's account, Google shows this. Click <strong>Continue</strong>.</p>
+    <div class="gpanel gverify">
+      <p class="gverify-title">Google hasn't verified this app</p>
+      <p class="gnote">You've been given access to an app that's currently being tested. You should only
+        continue if you know the developer that invited you.</p>
+      <div class="gfoot gverify-foot"><button type="button" class="gbtn gpick" data-slide-next>Continue</button><span class="gbtn primary">Back to safety</span></div>
+    </div>
+    <p class="gnote gafter">The app is the one you made in your own Google Cloud project during setup, so you are
+      the developer. Google shows this for every app in Testing.</p>
+  </div>
+  <div class="slide" data-slide>
+    <p class="guide-label">Then Google asks for the new access. Click <strong>Continue</strong>.</p>
+    <div class="gpanel gverify">
+      <p class="gverify-title">Yezatas wants access to your Google Account</p>
+      <div>
+        <p class="gnote">When you allow this access, Yezatas will be able to</p>
+        <p class="gaccess"><svg class="geye" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg>See, edit, and permanently delete your YouTube videos, ratings, comments and captions</p>
+        <p class="gnote">Make sure you trust Yezatas</p>
+      </div>
+      <div class="gfoot gverify-foot"><span class="gbtn">Cancel</span><span class="gbtn gpick">Continue</span></div>
+    </div>
+    <p class="gnote gafter">The wording sounds broad because it is Google's description of the permission, not
+      a list of what Yezatas does. What Yezatas actually does with it is below. After <strong>Continue</strong>,
+      the tab says you can close it; come back here and the push confirmation appears.</p>
+  </div>
+</div>
+{% endmacro %}
+
+{# What the edit permission is used for, and how to take it back. #}
+{% macro edit_access() %}
+<div class="access-facts">
+  <h3>What Yezatas does with this permission</h3>
+  <ul>
+    <li>Google has no YouTube permission that only edits titles, descriptions and tags. This one is the narrowest
+      that allows it, so Google's text also names things Yezatas never touches.</li>
+    <li>The only change Yezatas ever sends is <strong>videos.update</strong> for a video's title, description and
+      tags, and only for drafts you approved and confirmed on this page.</li>
+    <li>Everything else is reading (your channel, your uploads list and your videos). Yezatas never deletes, uploads,
+      rates, comments or changes captions.</li>
+    <li>The permission is saved only on this computer, in your Yezatas folder.</li>
+  </ul>
+  <h3>How to remove it</h3>
+  <ul>
+    <li>On this computer: <a href="/setup#step-signin">Sign out</a> in Setup deletes the saved permission.</li>
+    <li>At Google: open <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">your
+      Google Account's third-party connections</a>, choose Yezatas and remove its access. Yezatas then has to ask
+      again before it can read or edit anything.</li>
+  </ul>
+</div>
+{% endmacro %}
 {% block content %}
 <p class="backlink"><a href="/changes">Changes</a></p>
 <h1 class="page-title">Push to YouTube</h1>
@@ -98,7 +158,10 @@
 <section class="card" id="allow-edits" aria-labelledby="h-allow">
   <h2 id="h-allow">Yezatas needs permission to edit your videos</h2>
   {% if write.status == 'failed' %}<p class="flash error" role="alert">{{ write.message }}</p>{% endif %}
-  <p>So far Yezatas could only read your channel. Pushing changes needs permission to edit your videos, so Google will show its "not verified" screen again, the same as during setup: choose Continue, then allow access.</p>
+  <p>So far Yezatas could only read your channel. Pushing changes needs permission to edit your videos. The button
+    below opens Google in your browser, which shows two pages, the same kind as during setup:</p>
+  {{ gedit() }}
+  {{ edit_access() }}
   <p class="hint">This replaces the read-only sign-in with one that can edit. Reading still works.</p>
   {{ post_form('/changes/allow-edits', csrf, 'Allow Yezatas to edit your videos', 'primary') }}
 </section>
@@ -112,6 +175,10 @@
     <p><label class="check-label"><input type="checkbox" name="confirm" value="yes" required> I approve publishing {{ 'this change' if ready|length == 1 else 'these ' ~ ready|length ~ ' changes' }} to YouTube</label></p>
     <div class="actions"><button type="submit" class="button primary">Push to YouTube</button> <a class="button secondary" href="/changes">Back to Changes</a></div>
   </form>
+  <details class="about-access" id="about-edit-access">
+    <summary>About the edit permission and how to remove it</summary>
+    {{ edit_access() }}
+  </details>
 </section>
 {% endif %}
 {% endif %}

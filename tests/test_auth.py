@@ -10,7 +10,7 @@ import pytest
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 
-from yezatas.auth import (READONLY, WRITE, MissingClientSecrets, load_credentials,
+from yezatas.auth import (READONLY, WRITE, MissingClientSecrets, can_edit, load_credentials,
                           save_credentials, sign_in, sign_out)
 from yezatas.config import Config, load_config
 
@@ -93,6 +93,18 @@ def test_load_none_when_scopes_insufficient(config: Config) -> None:
     save_credentials(config, fake_creds([WRITE]))
     assert load_credentials(config, scopes=(READONLY,)) is not None  # force-ssl covers read
     assert load_credentials(config, scopes=(WRITE,)) is not None
+
+
+def test_can_edit_reads_the_saved_scopes_only(config: Config) -> None:
+    assert not can_edit(config)  # no token
+    config.token_path.parent.mkdir(parents=True, exist_ok=True)
+    for broken in ("not json", "[]", "{}"):
+        config.token_path.write_text(broken, encoding="utf-8")
+        assert not can_edit(config)
+    save_credentials(config, fake_creds([READONLY]))
+    assert not can_edit(config)
+    save_credentials(config, fake_creds([WRITE], expired=True))
+    assert can_edit(config)  # expired is fine: nothing is refreshed here
 
 
 def test_load_refreshes_expired_and_saves(config: Config) -> None:

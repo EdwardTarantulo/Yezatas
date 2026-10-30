@@ -41,14 +41,14 @@ def client_json(project_id: str = "demo-project", **overrides: Any) -> bytes:
     return json.dumps({"installed": installed}).encode()
 
 
-def fake_creds() -> Credentials:
+def fake_creds(scopes: list[str] | None = None) -> Credentials:
     return Credentials(
         token="fake-access-token",
         refresh_token="fake-refresh-token",
         token_uri="https://example.invalid/token",
         client_id="fake-client-id",
         client_secret="fake-client-secret",
-        scopes=[auth.READONLY],
+        scopes=scopes or [auth.READONLY],
         expiry=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
     )
 
@@ -72,8 +72,8 @@ def write_client_file(config: Config, data: bytes | None = None) -> None:
     config.client_secrets_path.write_bytes(data if data is not None else client_json())
 
 
-def write_token(config: Config) -> None:
-    auth.save_credentials(config, fake_creds())
+def write_token(config: Config, scopes: list[str] | None = None) -> None:
+    auth.save_credentials(config, fake_creds(scopes))
 
 
 def fake_sign_in_ok(config: Config) -> Any:

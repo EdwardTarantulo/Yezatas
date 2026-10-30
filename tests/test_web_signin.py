@@ -6,7 +6,7 @@ from oauthlib.oauth2.rfc6749.errors import AccessDeniedError
 
 from webhelpers import (fake_sign_in_ok, make_ui, step_class, write_client_file,
                         write_token)
-from yezatas.auth import MissingClientSecrets
+from yezatas.auth import WRITE, MissingClientSecrets
 from yezatas.config import Config
 from yezatas.quota import _utc_now, quota_day
 from yezatas.store import Store
@@ -34,6 +34,18 @@ def test_sign_in_success_saves_token_and_runs_the_check(tmp_path: Path) -> None:
     html = ui.setup_html()
     assert "done" in step_class(html, "signin") and "done" in step_class(html, "testusers")
     assert "Sign out" in html
+
+
+def test_setup_says_whether_the_sign_in_can_edit(tmp_path: Path) -> None:
+    ui = make_ui(tmp_path)
+    write_client_file(ui.config)
+    write_token(ui.config)
+    html = ui.setup_html()
+    assert "signed in with read-only access" in html and "myaccount.google.com" not in html
+    write_token(ui.config, [WRITE])
+    html = ui.setup_html()
+    assert "allowed Yezatas to edit your videos" in html and "read-only access." not in html
+    assert "https://myaccount.google.com/connections" in html
 
 
 def test_sign_in_needs_a_client_file(tmp_path: Path) -> None:

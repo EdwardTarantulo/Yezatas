@@ -365,7 +365,7 @@ def create_app(
             "client": client, "client_exists": config.client_secrets_path.exists(),
             "client_path": str(config.client_secrets_path),
             "api_url": _api_page_url(client),
-            "signed_in": signed_in, "signin": signin, "pull": pull, "check": check,
+            "signed_in": signed_in, "can_edit": signed_in and auth.can_edit(config), "signin": signin, "pull": pull, "check": check,
             "estimate": estimate,
             "latest_pull": ({"videos": latest[0], "when": _local_time(latest[1])}
                             if latest else None),

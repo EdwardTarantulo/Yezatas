@@ -62,6 +62,15 @@ def save_credentials(config: Config, creds: Credentials) -> None:
         raise
 
 
+def can_edit(config: Config) -> bool:
+    """True if the saved token includes the edit scope. Reads the file only, never the network."""
+    try:
+        info = json.loads(config.token_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(info, dict) and _covers(info.get("scopes"), (WRITE,))
+
+
 def load_credentials(
     config: Config,
     scopes: tuple[str, ...] = (READONLY,),
