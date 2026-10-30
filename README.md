@@ -36,6 +36,10 @@ as it lands; the git history is the detailed record.
 - **2026-10-30**: **light, Studio-style UI**: app shell with search and sidebar, **channel dashboard** (average score,
   Fix next, most common problems, catalog and quota), **content table** (search, filters, sorting, paging) and a
   **video page** with every check and its fix.
+- **2026-10-30**: **edit validation** for every proposed title, description and tags change (YouTube's 100-character
+  and 5,000-byte limits, no `<` `>`, placeholder links, hashtags, tag rules, chapter rules; warnings for removed links and
+  changed chapter times). **Built by Muse Code**, Meta's coding agent, running headless in its Windows sandbox from a
+  written spec; reviewed and tested before merging.
 
 ## Setup
 
@@ -73,6 +77,7 @@ with troubleshooting, is [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md).
 | Muse Voice Transcribe | Timed transcripts for chapters and subtitles |
 | SAM 3.1 | Thumbnail subject segmentation (supporting the thumbnail coach) |
 | Muse Image | Thumbnail variant ideas |
+| Muse Code | Coding agent: built the edit validator during the hackathon |
 
 ## License
 
