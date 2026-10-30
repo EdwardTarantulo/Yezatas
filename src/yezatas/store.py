@@ -7,7 +7,10 @@ import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
+
+if TYPE_CHECKING:  # validate imports seo, which imports this module
+    from .validate import Draft
 
 _SCHEMA_V1: tuple[str, ...] = (
     """CREATE TABLE pulls (
@@ -57,8 +60,37 @@ _SCHEMA_V1: tuple[str, ...] = (
     "CREATE INDEX idx_quota_ledger_day ON quota_ledger(quota_day)",
 )
 
+_SCHEMA_V2: tuple[str, ...] = (
+    """CREATE TABLE drafts (
+        video_id TEXT PRIMARY KEY REFERENCES videos(video_id),
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        tags_json TEXT NOT NULL,
+        base_title TEXT NOT NULL,
+        base_description TEXT NOT NULL,
+        base_tags_json TEXT NOT NULL,
+        source TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        approved_at TEXT
+    )""",
+    """CREATE TABLE pushes (
+        id INTEGER PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        status TEXT NOT NULL,
+        source TEXT NOT NULL,
+        before_json TEXT NOT NULL,
+        after_json TEXT NOT NULL DEFAULT '{}',
+        message TEXT NOT NULL DEFAULT ''
+    )""",
+    "CREATE INDEX idx_pushes_video ON pushes(video_id, id)",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
-MIGRATIONS: tuple[tuple[str, ...], ...] = (_SCHEMA_V1,)
+MIGRATIONS: tuple[tuple[str, ...], ...] = (_SCHEMA_V1, _SCHEMA_V2)
 
 _ORDER_COLUMNS = frozenset(
     {"view_count", "like_count", "comment_count", "published_at", "title", "updated_at", "video_id"}
@@ -103,6 +135,51 @@ class Video:
     def from_dict(cls, data: dict[str, Any]) -> "Video":
         names = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in data.items() if k in names})
+
+
+@dataclass(frozen=True)
+class DraftRow:
+    """A proposed edit of one video, with the catalog text it was made from (its base)."""
+
+    video_id: str
+    title: str
+    description: str
+    tags: tuple[str, ...]
+    base_title: str
+    base_description: str
+    base_tags: tuple[str, ...]
+    source: str
+    note: str
+    created_at: str
+    updated_at: str
+    approved_at: str | None
+
+    @property
+    def draft(self) -> "Draft":
+        from .validate import Draft
+
+        return Draft(self.title, self.description, self.tags)
+
+    @property
+    def base(self) -> "Draft":
+        from .validate import Draft
+
+        return Draft(self.base_title, self.base_description, self.base_tags)
+
+
+@dataclass(frozen=True)
+class PushRecord:
+    """One push attempt; `before` is YouTube's live text right before it (the backup)."""
+
+    id: int
+    video_id: str
+    started_at: str
+    finished_at: str | None
+    status: str  # "pending" | "pushed" | "conflict" | "failed"
+    source: str
+    before: dict[str, Any]
+    after: dict[str, Any]
+    message: str
 
 
 class Store:
@@ -296,3 +373,148 @@ class Store:
         return self._conn.execute(
             "SELECT * FROM quota_ledger WHERE quota_day = ? ORDER BY id", (quota_day,)
         ).fetchall()
+
+    # --- drafts ----------------------------------------------------------
+    @staticmethod
+    def _row_to_draft(row: sqlite3.Row) -> DraftRow:
+        return DraftRow(
+            video_id=row["video_id"],
+            title=row["title"],
+            description=row["description"],
+            tags=tuple(json.loads(row["tags_json"])),
+            base_title=row["base_title"],
+            base_description=row["base_description"],
+            base_tags=tuple(json.loads(row["base_tags_json"])),
+            source=row["source"],
+            note=row["note"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            approved_at=row["approved_at"],
+        )
+
+    def put_draft(self, row: DraftRow) -> None:
+        """Insert or replace the draft of a video (every column)."""
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO drafts (video_id, title, description, tags_json, base_title,
+                    base_description, base_tags_json, source, note, created_at, updated_at,
+                    approved_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(video_id) DO UPDATE SET
+                    title=excluded.title, description=excluded.description,
+                    tags_json=excluded.tags_json, base_title=excluded.base_title,
+                    base_description=excluded.base_description,
+                    base_tags_json=excluded.base_tags_json, source=excluded.source,
+                    note=excluded.note, created_at=excluded.created_at,
+                    updated_at=excluded.updated_at, approved_at=excluded.approved_at
+                """,
+                (
+                    row.video_id, row.title, row.description, _dumps(list(row.tags)),
+                    row.base_title, row.base_description, _dumps(list(row.base_tags)),
+                    row.source, row.note, row.created_at, row.updated_at, row.approved_at,
+                ),
+            )
+
+    def get_draft(self, video_id: str) -> DraftRow | None:
+        row = self._conn.execute("SELECT * FROM drafts WHERE video_id = ?", (video_id,)).fetchone()
+        return self._row_to_draft(row) if row else None
+
+    def list_drafts(self) -> list[DraftRow]:
+        rows = self._conn.execute("SELECT * FROM drafts ORDER BY video_id").fetchall()
+        return [self._row_to_draft(r) for r in rows]
+
+    def delete_draft(self, video_id: str) -> bool:
+        with self._conn:
+            cur = self._conn.execute("DELETE FROM drafts WHERE video_id = ?", (video_id,))
+        return cur.rowcount > 0
+
+    def set_draft_approval(self, video_id: str, approved_at: str | None) -> None:
+        with self._conn:
+            self._conn.execute(
+                "UPDATE drafts SET approved_at = ? WHERE video_id = ?", (approved_at, video_id)
+            )
+
+    def update_video_text(
+        self,
+        video_id: str,
+        title: str,
+        description: str,
+        tags: Sequence[str],
+        now: datetime | None = None,
+    ) -> None:
+        """Set the catalog text of a video (also inside raw_json's snippet). No snapshot."""
+        row = self._conn.execute(
+            "SELECT raw_json FROM videos WHERE video_id = ?", (video_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(video_id)
+        raw = json.loads(row["raw_json"] or "{}")
+        snippet = raw.get("snippet")
+        if isinstance(snippet, dict):
+            snippet.update(title=title, description=description, tags=list(tags))
+        with self._conn:
+            self._conn.execute(
+                "UPDATE videos SET title = ?, description = ?, tags_json = ?, raw_json = ?, "
+                "updated_at = ? WHERE video_id = ?",
+                (title, description, _dumps(list(tags)), _dumps(raw), _iso(now), video_id),
+            )
+
+    # --- pushes ----------------------------------------------------------
+    @staticmethod
+    def _row_to_push(row: sqlite3.Row) -> PushRecord:
+        return PushRecord(
+            id=row["id"],
+            video_id=row["video_id"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            status=row["status"],
+            source=row["source"],
+            before=json.loads(row["before_json"]),
+            after=json.loads(row["after_json"]),
+            message=row["message"],
+        )
+
+    def begin_push(
+        self, video_id: str, source: str, before: dict[str, Any], now: datetime | None = None
+    ) -> int:
+        """Record the backup of YouTube's live text before a push; status "pending"."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO pushes (video_id, started_at, status, source, before_json) "
+                "VALUES (?, ?, 'pending', ?, ?)",
+                (video_id, _iso(now), source, _dumps(before)),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def finish_push(
+        self,
+        push_id: int,
+        status: str,
+        after: dict[str, Any],
+        message: str,
+        now: datetime | None = None,
+    ) -> None:
+        with self._conn:
+            self._conn.execute(
+                "UPDATE pushes SET finished_at = ?, status = ?, after_json = ?, message = ? "
+                "WHERE id = ?",
+                (_iso(now), status, _dumps(after), message, push_id),
+            )
+
+    def get_push(self, push_id: int) -> PushRecord | None:
+        row = self._conn.execute("SELECT * FROM pushes WHERE id = ?", (push_id,)).fetchone()
+        return self._row_to_push(row) if row else None
+
+    def list_pushes(self, video_id: str | None = None, limit: int = 100) -> list[PushRecord]:
+        """Push records, newest first, optionally for one video."""
+        if video_id is None:
+            rows = self._conn.execute(
+                "SELECT * FROM pushes ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM pushes WHERE video_id = ? ORDER BY id DESC LIMIT ?",
+                (video_id, limit),
+            ).fetchall()
+        return [self._row_to_push(r) for r in rows]

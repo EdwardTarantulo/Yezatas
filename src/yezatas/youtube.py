@@ -1,4 +1,5 @@
-"""The YouTube Data API behind a small read-only interface. No write calls exist yet."""
+"""The YouTube Data API behind small interfaces: reads for the catalog pull, and one write
+(videos.update) that only a push of creator-approved drafts uses."""
 
 from __future__ import annotations
 
@@ -89,3 +90,18 @@ class GoogleYouTubeReader:
         if not 1 <= len(ids) <= MAX_RESULTS:
             raise ValueError(f"videos.list takes 1 to {MAX_RESULTS} ids, got {len(ids)}")
         return self._service.videos().list(part=part, id=",".join(ids)).execute()
+
+
+class YouTubeWriter(Protocol):
+    """What a push needs: read a batch of videos, and update one video's snippet."""
+
+    def videos(self, ids: Sequence[str], part: str) -> dict[str, Any]: ...
+
+    def update_video(self, body: dict[str, Any], part: str) -> dict[str, Any]: ...
+
+
+class GoogleYouTubeWriter(GoogleYouTubeReader):
+    """YouTubeWriter backed by google-api-python-client. Thin on purpose; not unit-tested."""
+
+    def update_video(self, body: dict[str, Any], part: str) -> dict[str, Any]:
+        return self._service.videos().update(part=part, body=body).execute()

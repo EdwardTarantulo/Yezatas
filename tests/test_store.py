@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from yezatas.store import MIGRATIONS, Store, Video
+from yezatas.store import MIGRATIONS, DraftRow, PushRecord, Store, Video
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -39,7 +39,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 1
+        assert s.schema_version == len(MIGRATIONS) == 2
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -49,7 +49,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 1
+        assert s.schema_version == 2
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -135,3 +135,95 @@ def test_quota_ledger(store: Store) -> None:
 def test_naive_timestamp_rejected(store: Store) -> None:
     with pytest.raises(ValueError):
         store.begin_pull("chan0000001", now=datetime(2026, 10, 1))
+
+
+def test_v1_database_migrates_to_v2_and_keeps_its_data(tmp_path: Path) -> None:
+    path = tmp_path / "old.sqlite"
+    with Store(path) as s:
+        pid = s.begin_pull("chan0000001", now=T0)
+        s.upsert_video(make_video(), pid, now=T0)
+        s.add_quota_entry("videos.list", 1, quota_day="2026-10-01", now=T0)
+    conn = sqlite3.connect(path)  # turn it back into a version 1 database
+    conn.executescript("DROP TABLE drafts; DROP TABLE pushes; PRAGMA user_version = 1;")
+    conn.close()
+    with Store(path) as s:
+        assert s.schema_version == 2
+        video = s.get_video("vid00000001")
+        assert video is not None and video.title == "How to repot a cactus"
+        assert s.quota_used("2026-10-01") == 1
+        assert s.list_drafts() == [] and s.list_pushes() == []
+        s.put_draft(make_draft())
+        assert s.get_draft("vid00000001") is not None
+
+
+def make_draft(vid: str = "vid00000001", **kw: object) -> DraftRow:
+    base: dict[str, object] = dict(
+        video_id=vid, title="New title", description="New text\nline two", tags=("a", "b"),
+        base_title="How to repot a cactus", base_description="Step by step.\nSecond line.",
+        base_tags=("cactus", "plants"), source="manual", note="", created_at="t1",
+        updated_at="t2", approved_at=None,
+    )
+    base.update(kw)
+    return DraftRow(**base)  # type: ignore[arg-type]
+
+
+def test_draft_round_trip_and_upsert(store: Store) -> None:
+    pid = store.begin_pull("chan0000001", now=T0)
+    store.upsert_video(make_video(), pid, now=T0)
+    row = make_draft(title="Kaktusų 🌵", tags=("🌵", "kaktusas"))
+    store.put_draft(row)
+    assert store.get_draft("vid00000001") == row
+    assert row.draft.title == "Kaktusų 🌵" and row.draft.tags == ("🌵", "kaktusas")
+    assert row.base.description == "Step by step.\nSecond line."
+    changed = make_draft(title="Other", note="n", approved_at="t3")
+    store.put_draft(changed)
+    assert store.list_drafts() == [changed]
+    store.set_draft_approval("vid00000001", None)
+    assert store.get_draft("vid00000001").approved_at is None  # type: ignore[union-attr]
+    store.set_draft_approval("vid00000001", "t9")
+    assert store.get_draft("vid00000001").approved_at == "t9"  # type: ignore[union-attr]
+    assert store.delete_draft("vid00000001") is True
+    assert store.delete_draft("vid00000001") is False
+    assert store.get_draft("vid00000001") is None
+
+
+def test_draft_needs_a_catalog_video(store: Store) -> None:
+    with pytest.raises(sqlite3.IntegrityError):
+        store.put_draft(make_draft("unknown00001"))
+
+
+def test_update_video_text_changes_columns_and_raw_snippet_without_snapshot(store: Store) -> None:
+    pid = store.begin_pull("chan0000001", now=T0)
+    store.upsert_video(make_video(raw={"snippet": {"title": "old", "categoryId": "22"}}), pid, now=T0)
+    later = T0 + timedelta(hours=1)
+    store.update_video_text("vid00000001", "T", "D", ["x", "y"], now=later)
+    video = store.get_video("vid00000001")
+    assert video is not None
+    assert (video.title, video.description, video.tags) == ("T", "D", ["x", "y"])
+    assert video.raw["snippet"] == {"title": "T", "description": "D", "tags": ["x", "y"],
+                                    "categoryId": "22"}
+    assert video.view_count == 100
+    assert len(store.snapshots_for("vid00000001")) == 1
+    row = store._conn.execute("SELECT updated_at FROM videos").fetchone()
+    assert row[0] == later.isoformat()
+    with pytest.raises(KeyError):
+        store.update_video_text("nope", "T", "D", [])
+
+
+def test_push_records_round_trip_newest_first(store: Store) -> None:
+    first = store.begin_push("vid00000001", "manual", {"title": "old", "tags": ["a"]}, now=T0)
+    record = store.get_push(first)
+    assert isinstance(record, PushRecord)
+    assert (record.status, record.finished_at, record.after, record.message) == (
+        "pending", None, {}, "")
+    assert record.before == {"title": "old", "tags": ["a"]} and record.started_at == T0.isoformat()
+    store.finish_push(first, "pushed", {"title": "new"}, "ok", now=T0 + timedelta(seconds=2))
+    second = store.begin_push("vid00000002", "restore", {"title": "x"}, now=T0)
+    third = store.begin_push("vid00000001", "manual", {"title": "y"}, now=T0)
+    done = store.get_push(first)
+    assert done is not None and done.status == "pushed" and done.after == {"title": "new"}
+    assert done.finished_at == (T0 + timedelta(seconds=2)).isoformat() and done.message == "ok"
+    assert [r.id for r in store.list_pushes()] == [third, second, first]
+    assert [r.id for r in store.list_pushes("vid00000001")] == [third, first]
+    assert [r.id for r in store.list_pushes(limit=2)] == [third, second]
+    assert store.get_push(999) is None
