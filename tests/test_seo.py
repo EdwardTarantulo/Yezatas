@@ -493,6 +493,19 @@ def test_localizations_need_five_languages(n, points):
         assert "Yezatas" in result.fix
 
 
+def test_localizations_do_not_count_the_video_language():
+    # Studio lists the video's own language among the translations.
+    loc = {"title": "t", "description": "d"}
+    result = check(make_video(default_language="en", localizations={"en": loc}), "localizations")
+    assert result.points == 0 and "0 translations" in result.detail
+    locs = {"en-GB": loc, "de-DE": loc, "es": loc}
+    result = check(make_video(default_language="en", localizations=locs), "localizations")
+    assert "2 translations" in result.detail
+    locs = {"zh-Hant": loc}
+    result = check(make_video(default_language="zh-Hans", localizations=locs), "localizations")
+    assert "1 translation." in result.detail
+
+
 def test_related_links():
     key = "description_related_links"
     assert check(make_video(), key).passed

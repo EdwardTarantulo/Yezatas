@@ -505,16 +505,25 @@ def check_audio_language(video: Video, context: ChannelContext | None) -> CheckR
                    "Set the audio language so YouTube can offer the right captions and dubbing.")
 
 
+def _is_own_language(key: str, language: str | None) -> bool:
+    """Studio lists the video's own language among its translations ("en", or "en" on "en-GB")."""
+    if not language:
+        return False
+    return (key == language or ("-" not in key and language.split("-", 1)[0] == key)
+            or ("-" not in language and key.split("-", 1)[0] == language))
+
+
 def check_localizations(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "Title and description are translated into 5+ languages"
-    n = len(video.localizations)
+    n = sum(1 for key in video.localizations
+            if not _is_own_language(key, video.default_language))
     points = 8 if n >= LOCALIZATIONS_GOOD else _half(8) if n >= 1 else 0
     fix = ("Add translated titles and descriptions; Yezatas can translate them for you."
            if n == 0 else
            f"Add more languages; {LOCALIZATIONS_GOOD} or more reach more viewers, and Yezatas "
            "can translate them for you.")
     return _result("localizations", "details", title, 8, points,
-                   f"The video has {n} translations.", fix)
+                   f"The video has {n} translation{'' if n == 1 else 's'}.", fix)
 
 
 def check_thumbnail_hd(video: Video, context: ChannelContext | None) -> CheckResult:
