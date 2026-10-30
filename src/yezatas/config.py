@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Mapping
 
 DEFAULT_DAILY_QUOTA = 10000
+# Standard mode: Meta does not train on the prompts. Contributor models (`*-contributor`) may, so
+# Yezatas never sends channel data to them.
+DEFAULT_MODEL = "muse-spark-1.3"
 
 
 class ConfigError(ValueError):
@@ -23,6 +26,8 @@ class Config:
     client_secrets_path: Path
     token_path: Path
     daily_quota_budget: int = DEFAULT_DAILY_QUOTA
+    model: str = DEFAULT_MODEL
+    model_key_path: Path | None = None  # the saved Meta API key (MODEL_API_KEY in the environment wins)
 
 
 def _default_home(env: Mapping[str, str]) -> Path:
@@ -45,6 +50,18 @@ def _parse_quota(raw: str) -> int:
     return value
 
 
+def _parse_model(raw: str) -> str:
+    model = raw.strip()
+    if not model:
+        raise ConfigError("YEZATAS_MODEL must not be empty")
+    if model.endswith("-contributor"):
+        raise ConfigError(
+            f"YEZATAS_MODEL {model!r} is a Contributor model, which may train on your data. "
+            "Use a Standard model such as muse-spark-1.3."
+        )
+    return model
+
+
 def load_config(env: Mapping[str, str] | None = None) -> Config:
     """Build a Config from the environment (or the mapping given). Creates nothing."""
     if env is None:
@@ -54,6 +71,8 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     credentials_dir = home / "credentials"
     raw_quota = env.get("YEZATAS_DAILY_QUOTA")
     budget = _parse_quota(raw_quota) if raw_quota is not None else DEFAULT_DAILY_QUOTA
+    raw_model = env.get("YEZATAS_MODEL")
+    model = _parse_model(raw_model) if raw_model is not None else DEFAULT_MODEL
     return Config(
         home=home,
         catalog_db=home / "catalog" / "catalog.sqlite",
@@ -61,6 +80,8 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         client_secrets_path=credentials_dir / "client_secrets.json",
         token_path=credentials_dir / "token.json",
         daily_quota_budget=budget,
+        model=model,
+        model_key_path=credentials_dir / "model_api_key",
     )
 
 

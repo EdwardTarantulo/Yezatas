@@ -18,6 +18,7 @@ dependencies = [
     "uvicorn",
     "jinja2",
     "python-multipart",
+    "openai",
 ]
 
 [project.optional-dependencies]

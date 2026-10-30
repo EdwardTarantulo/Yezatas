@@ -51,3 +51,17 @@ def test_config_is_frozen(tmp_path: Path) -> None:
     cfg = load_config({"YEZATAS_HOME": str(tmp_path)})
     with pytest.raises(Exception):
         cfg.daily_quota_budget = 1  # type: ignore[misc]
+
+
+def test_model_defaults_to_standard_spark_and_key_file(tmp_path: Path) -> None:
+    cfg = load_config({"YEZATAS_HOME": str(tmp_path)})
+    assert cfg.model == "muse-spark-1.3"
+    assert cfg.model_key_path == tmp_path / "credentials" / "model_api_key"
+    assert load_config({"YEZATAS_HOME": str(tmp_path), "YEZATAS_MODEL": " muse-wonder-1.0 "}).model == "muse-wonder-1.0"
+
+
+@pytest.mark.parametrize("bad", ["muse-spark-1.3-contributor", "", "  "])
+def test_contributor_or_empty_model_rejected(tmp_path: Path, bad: str) -> None:
+    with pytest.raises(ConfigError):
+        load_config({"YEZATAS_HOME": str(tmp_path), "YEZATAS_MODEL": bad})
+

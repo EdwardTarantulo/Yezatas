@@ -89,8 +89,26 @@ _SCHEMA_V2: tuple[str, ...] = (
     "CREATE INDEX idx_pushes_video ON pushes(video_id, id)",
 )
 
+_SCHEMA_V3: tuple[str, ...] = (
+    """CREATE TABLE agent_runs (
+        id INTEGER PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        model TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        log_json TEXT NOT NULL DEFAULT '[]',
+        result_json TEXT NOT NULL DEFAULT '{}',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX idx_agent_runs_video ON agent_runs(video_id, id)",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
-MIGRATIONS: tuple[tuple[str, ...], ...] = (_SCHEMA_V1, _SCHEMA_V2)
+MIGRATIONS: tuple[tuple[str, ...], ...] = (_SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3)
 
 _ORDER_COLUMNS = frozenset(
     {"view_count", "like_count", "comment_count", "published_at", "title", "updated_at", "video_id"}
@@ -180,6 +198,24 @@ class PushRecord:
     before: dict[str, Any]
     after: dict[str, Any]
     message: str
+
+
+@dataclass(frozen=True)
+class AgentRun:
+    """One run of the suggestion agent on one video: what it called, what it proposed, what it cost."""
+
+    id: int
+    video_id: str
+    started_at: str
+    finished_at: str | None
+    model: str
+    status: str  # "running" | "drafted" | "no_change" | "rejected" | "failed"
+    summary: str
+    log: list[Any]  # events in order: tool calls, guard problems, repair rounds
+    result: dict[str, Any]  # the suggestion as returned (title, description, tags, changes, summary)
+    input_tokens: int
+    cached_tokens: int
+    output_tokens: int
 
 
 class Store:
@@ -518,3 +554,66 @@ class Store:
                 (video_id, limit),
             ).fetchall()
         return [self._row_to_push(r) for r in rows]
+
+    # --- agent runs ------------------------------------------------------
+    @staticmethod
+    def _row_to_agent_run(row: sqlite3.Row) -> AgentRun:
+        return AgentRun(
+            id=row["id"],
+            video_id=row["video_id"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            model=row["model"],
+            status=row["status"],
+            summary=row["summary"],
+            log=json.loads(row["log_json"]),
+            result=json.loads(row["result_json"]),
+            input_tokens=row["input_tokens"],
+            cached_tokens=row["cached_tokens"],
+            output_tokens=row["output_tokens"],
+        )
+
+    def begin_agent_run(self, video_id: str, model: str, now: datetime | None = None) -> int:
+        """Record the start of a suggestion run; status "running"."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO agent_runs (video_id, started_at, model, status) "
+                "VALUES (?, ?, ?, 'running')",
+                (video_id, _iso(now), model),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def finish_agent_run(
+        self,
+        run_id: int,
+        status: str,
+        summary: str,
+        log: list[Any],
+        result: dict[str, Any],
+        tokens: tuple[int, int, int] = (0, 0, 0),
+        now: datetime | None = None,
+    ) -> None:
+        """Close a run. `tokens` is (input, cached, output)."""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE agent_runs SET finished_at = ?, status = ?, summary = ?, log_json = ?, "
+                "result_json = ?, input_tokens = ?, cached_tokens = ?, output_tokens = ? WHERE id = ?",
+                (_iso(now), status, summary, _dumps(log), _dumps(result), *tokens, run_id),
+            )
+
+    def get_agent_run(self, run_id: int) -> AgentRun | None:
+        row = self._conn.execute("SELECT * FROM agent_runs WHERE id = ?", (run_id,)).fetchone()
+        return self._row_to_agent_run(row) if row else None
+
+    def list_agent_runs(self, video_id: str | None = None, limit: int = 100) -> list[AgentRun]:
+        """Agent runs, newest first, optionally for one video."""
+        if video_id is None:
+            rows = self._conn.execute(
+                "SELECT * FROM agent_runs ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM agent_runs WHERE video_id = ? ORDER BY id DESC LIMIT ?",
+                (video_id, limit),
+            ).fetchall()
+        return [self._row_to_agent_run(r) for r in rows]

@@ -39,7 +39,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 2
+        assert s.schema_version == len(MIGRATIONS) == 3
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -49,7 +49,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 2
+        assert s.schema_version == 3
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -137,21 +137,21 @@ def test_naive_timestamp_rejected(store: Store) -> None:
         store.begin_pull("chan0000001", now=datetime(2026, 10, 1))
 
 
-def test_v1_database_migrates_to_v2_and_keeps_its_data(tmp_path: Path) -> None:
+def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -> None:
     path = tmp_path / "old.sqlite"
     with Store(path) as s:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
         s.add_quota_entry("videos.list", 1, quota_day="2026-10-01", now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 1 database
-    conn.executescript("DROP TABLE drafts; DROP TABLE pushes; PRAGMA user_version = 1;")
+    conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 2
+        assert s.schema_version == 3
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
-        assert s.list_drafts() == [] and s.list_pushes() == []
+        assert s.list_drafts() == [] and s.list_pushes() == [] and s.list_agent_runs() == []
         s.put_draft(make_draft())
         assert s.get_draft("vid00000001") is not None
 
@@ -227,3 +227,21 @@ def test_push_records_round_trip_newest_first(store: Store) -> None:
     assert [r.id for r in store.list_pushes("vid00000001")] == [third, first]
     assert [r.id for r in store.list_pushes(limit=2)] == [third, second]
     assert store.get_push(999) is None
+
+
+def test_agent_runs_round_trip_newest_first(store: Store) -> None:
+    first = store.begin_agent_run("vid00000001", "muse-spark-1.3", now=T0)
+    second = store.begin_agent_run("vid00000002", "muse-spark-1.3", now=T0)
+    run = store.get_agent_run(first)
+    assert run is not None and run.status == "running" and run.finished_at is None
+    assert run.log == [] and run.result == {} and run.input_tokens == 0
+    store.finish_agent_run(first, "drafted", "Longer title", [{"tool": "get_scorecard"}],
+                           {"title": "New"}, tokens=(1200, 300, 450), now=T0)
+    run = store.get_agent_run(first)
+    assert run is not None and run.status == "drafted" and run.summary == "Longer title"
+    assert run.log == [{"tool": "get_scorecard"}] and run.result == {"title": "New"}
+    assert (run.input_tokens, run.cached_tokens, run.output_tokens) == (1200, 300, 450)
+    assert [r.id for r in store.list_agent_runs()] == [second, first]
+    assert [r.id for r in store.list_agent_runs("vid00000001")] == [first]
+    assert store.get_agent_run(999) is None
+
