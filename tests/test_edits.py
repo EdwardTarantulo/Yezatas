@@ -156,6 +156,14 @@ def test_restore_draft_refuses_unknown_or_empty_backups(store: Store) -> None:
     assert store.get_draft(VID) is None
 
 
+def test_restore_draft_never_replaces_an_existing_draft(store: Store) -> None:
+    save_draft(store, VID, "Work in progress", "d", [], now=NOW)
+    push_id = store.begin_push(VID, "manual", {"title": "Old title", "description": "", "tags": []})
+    with pytest.raises(DraftError, match="already has a draft"):
+        restore_draft(store, push_id)
+    assert store.get_draft(VID).title == "Work in progress"
+
+
 def test_restoring_the_current_text_leaves_no_draft(store: Store) -> None:
     video = store.get_video(VID)
     push_id = store.begin_push(

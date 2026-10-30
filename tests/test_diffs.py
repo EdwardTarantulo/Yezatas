@@ -203,3 +203,15 @@ def test_diff_draft_tags_only_change():
     assert result.tags.added == ("c",)
     assert result.tags.removed == ("b",)
     assert result.changed is True
+
+
+def test_diff_words_shows_a_mostly_rewritten_title_as_old_then_new() -> None:
+    old = "Repotting cactus #12"
+    new = "How to Repot a Cactus Without Getting Hurt"
+    assert diff_words(old, new) == (Segment("removed", old), Segment("added", new))
+
+
+def test_diff_words_keeps_word_level_detail_for_small_edits() -> None:
+    segments = diff_words("How to repot a cactus at home", "How to repot a big cactus at home")
+    assert Segment("added", "big ") in segments
+    assert segments[0].kind == "same"

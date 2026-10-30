@@ -160,6 +160,10 @@ def restore_draft(store: Store, push_id: int, now: datetime | None = None) -> Sa
     before = record.before
     if not isinstance(before.get("title"), str) or not before["title"].strip():
         raise DraftError("This push record has no saved text to restore.")
+    if store.get_draft(record.video_id) is not None:
+        raise DraftError(
+            "This video already has a draft. Push or discard it first, then restore this text."
+        )
     description = before.get("description")
     tags = before.get("tags")
     return save_draft(

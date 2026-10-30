@@ -86,7 +86,15 @@ def diff_words(old: str, new: str) -> tuple[Segment, ...]:
         else:
             segments.append(Segment("removed", "".join(old_tokens[a1:a2])))
             segments.append(Segment("added", "".join(new_tokens[b1:b2])))
-    return _merge([s for s in segments if s.text])
+    merged = _merge([s for s in segments if s.text])
+    # Mostly rewritten: old words interleaved with new ones are hard to read, so show the old
+    # text as one removed run followed by the new text.
+    same = sum(len(s.text) for s in merged if s.kind == "same" and s.text.strip())
+    if 2 * same < max(len(old), len(new)):
+        return tuple(
+            Segment(kind, text) for kind, text in (("removed", old), ("added", new)) if text
+        )
+    return merged
 
 
 def _gap_text(hidden: int) -> str:
