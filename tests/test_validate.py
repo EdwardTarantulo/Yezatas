@@ -205,6 +205,12 @@ def test_link_kept_passes():
     assert "link_removed" not in codes(make_draft(), original)
 
 
+def test_link_kept_when_only_surrounding_punctuation_changes():
+    original = make_draft(description="Recipe (see https://site.invalid/a). More at https://site.invalid/b.")
+    draft = make_draft(description="Recipe: https://site.invalid/a\nMore: https://site.invalid/b")
+    assert "link_removed" not in codes(draft, original)
+
+
 def test_link_removed_needs_original():
     draft = make_draft(description="No links here.")
     assert "link_removed" not in codes(draft)

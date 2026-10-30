@@ -113,11 +113,16 @@ def _check_tags(draft: Draft) -> list[Issue]:
     return issues
 
 
+def _urls(text: str) -> list[str]:
+    """URLs in order, without sentence punctuation stuck to the end ("(see x.com/a)." -> x.com/a)."""
+    return [url.rstrip(".,;:!?)]}'\"") for url in _URL.findall(text)]
+
+
 def _check_links_removed(draft: Draft, original: Draft) -> list[Issue]:
     """One warning per original URL that is missing from the draft."""
-    current = set(_URL.findall(draft.description))
+    current = set(_urls(draft.description))
     issues, seen = [], set()
-    for url in _URL.findall(original.description):
+    for url in _urls(original.description):
         if url not in seen:
             seen.add(url)
             if url not in current:
