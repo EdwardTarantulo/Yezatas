@@ -44,7 +44,7 @@
   {% endif %}
 
   {{ issue_list(c.errors, c.warnings) }}
-  {{ diff_view(c.diff) }}
+  {{ diff_view(c.diff, c.row.localizations or {}) }}
 
   {% set w = why.get(vid) if c.row.source == 'agent' else none %}
   {% if w %}

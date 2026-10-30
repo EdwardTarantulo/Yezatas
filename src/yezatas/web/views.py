@@ -7,17 +7,18 @@ nothing here touches the disk or YouTube. Formatting (view counts, dates) lives 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 from urllib.parse import urlencode
 
 from .. import edits
 from ..agent import estimate_cost
-from ..diffs import DraftDiff, diff_draft
+from ..diffs import DraftDiff, diff_row
 from ..push import PushItem
 from ..seo import CATEGORIES, CheckResult, Scorecard, fix_priority
-from ..store import AgentRun, DraftRow, PushRecord, Video
+from ..store import AgentRun, DraftRow, PushRecord, TranslationRecord, Video
+from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
 from ..validate import Issue, has_errors
 
 PAGE_SIZE = 50
@@ -420,6 +421,14 @@ def summarize_diff(diff: DraftDiff) -> str:
         if diff.tags.reordered:
             bits.append("new order")
         parts.append("tags" + (f" ({', '.join(bits)})" if bits else ""))
+    if diff.language is not None:
+        parts.append("video language")
+    loc = diff.localizations
+    if loc.changed:
+        bits = [f"{len(names)} {word}" for names, word in
+                ((loc.added, "added"), (loc.changed_langs, "changed"), (loc.removed, "removed"))
+                if names]
+        parts.append(f"translations ({', '.join(bits)})")
     return "Changes: " + "; ".join(parts) if parts else "No changes."
 
 
@@ -459,6 +468,14 @@ class ChangeCard:
     def approved(self) -> bool:
         return self.ready
 
+    @property
+    def sends_translations(self) -> bool:
+        return self.diff.localizations.changed
+
+    @property
+    def sends_language(self) -> bool:
+        return self.diff.language is not None
+
 
 def build_change_card(row: DraftRow, video: Video) -> ChangeCard:
     issues = edits.issues_for(row)
@@ -470,7 +487,12 @@ def build_change_card(row: DraftRow, video: Video) -> ChangeCard:
         block = "Update the draft to YouTube's new text first."
     elif has_errors(issues):
         block = "Fix the errors first."
-    diff = diff_draft(row.base, row.draft)
+    diff = diff_row(row)
+    # the video's own language that Studio lists among the translations is not a translation
+    own = row.default_language or row.base_default_language
+    if own is not None and diff.localizations.kept:
+        kept = tuple(k for k in diff.localizations.kept if not same_language(k, own))
+        diff = replace(diff, localizations=replace(diff.localizations, kept=kept))
     origin = row.note or ORIGIN_LABELS.get(row.source, row.source.capitalize())
     return ChangeCard(
         row=row, video=video, diff=diff, errors=errors, warnings=warnings, stale=stale,
@@ -504,6 +526,7 @@ class Backup:
     title: str
     description: str
     tags: tuple[str, ...]
+    languages: tuple[str, ...] = ()  # translations the backup holds (not the video's own language)
 
 
 def backup_of_record(record: PushRecord) -> Backup | None:
@@ -514,10 +537,17 @@ def backup_of_record(record: PushRecord) -> Backup | None:
         return None
     description = before.get("description")
     tags = before.get("tags")
+    localizations = before.get("localizations")
+    own = before.get("defaultLanguage")
+    languages = tuple(
+        sorted(k for k in localizations
+               if not (isinstance(own, str) and same_language(k, own)))
+    ) if isinstance(localizations, dict) else ()
     return Backup(
         title,
         description if isinstance(description, str) else "",
         tuple(t for t in tags if isinstance(t, str)) if isinstance(tags, list) else (),
+        languages,
     )
 
 
@@ -690,3 +720,146 @@ class SuggestBatch:
 
     def count(self, status: str) -> int:
         return sum(1 for i in self.items if i.status == status)
+
+
+# --- translations: the video page card ----------------------------------------------------------
+# record status -> (label, pill class)
+TRANSLATION_STATUS_LABELS: dict[str, tuple[str, str]] = {
+    "verified": ("Verified", "done"),
+    "flagged": ("Flagged", "warn"),
+    "unverified": ("Unverified", "unverified"),
+    "failed": ("Failed", "problem"),
+}
+
+
+def lang_name(code: str | None) -> str:
+    """'Spanish' for es; 'German (de-DE)' for a regional code; the code itself when unknown."""
+    if not code:
+        return "Not set"
+    if code in LANGUAGES:
+        return LANGUAGES[code]
+    base = code.split("-", 1)[0]
+    return f"{LANGUAGES[base]} ({code})" if base in LANGUAGES else code
+
+
+@dataclass(frozen=True)
+class SourceOption:
+    code: str
+    name: str
+    selected: bool
+
+
+@dataclass(frozen=True)
+class TargetOption:
+    code: str
+    name: str
+    ticked: bool
+    on_youtube: str  # "", "on YouTube" or "on YouTube as de-DE"
+
+
+@dataclass(frozen=True)
+class TranslationView:
+    """The latest translation into one language, ready to show."""
+
+    record: TranslationRecord
+    name: str
+    label: str
+    tone: str
+    score: str  # "4/5", or "" when the checker did not score it
+    outdated: bool  # made from other text than the video's current text
+    addable: bool
+    ticked: bool
+    needs_check: bool  # flagged or unverified: the creator must say "I checked this translation"
+    key: str  # the YouTube key it would be saved under (de-DE when Studio already has that)
+    in_draft: bool
+    note: str  # why the checker could not check it ("" when it could)
+    back_title: str
+    back_description: str
+
+
+@dataclass(frozen=True)
+class DraftTranslation:
+    key: str
+    name: str
+    state: str  # "New in this draft", "Changed in this draft" or "On YouTube"
+
+
+@dataclass(frozen=True)
+class TranslateView:
+    video_id: str
+    language_code: str  # the video's language ("" when not set)
+    language_label: str
+    sources: tuple[SourceOption, ...]
+    language_known: bool  # the video language is one of the choices, so it is preselected
+    targets: tuple[TargetOption, ...]
+    results: tuple[TranslationView, ...]
+    addable_count: int
+    in_draft: tuple[DraftTranslation, ...]
+
+
+def _same_text(loc: Mapping[str, str] | None, record: TranslationRecord) -> bool:
+    return loc is not None and loc == {
+        "title": record.title.strip(),
+        "description": record.description.replace("\r\n", "\n").replace("\r", "\n"),
+    }
+
+
+def build_translate_view(video: Video, row: DraftRow | None,
+                         records: Mapping[str, TranslationRecord]) -> TranslateView:
+    """What the translation card shows: the language choice, the results and the draft's translations."""
+    language = (row.default_language if row is not None and row.default_language else None) \
+        or video.default_language
+    youtube = edits.plain_localizations(video.localizations)
+    own = (lambda key: bool(language) and same_language(key, language))
+    youtube_keys = [k for k in youtube if not own(k)]
+    in_draft_map = (row.localizations if row is not None and row.localizations is not None
+                    else None)
+    pool = list(in_draft_map if in_draft_map is not None else youtube)
+
+    selected = next((code for code in LANGUAGES if language and same_language(code, language)), "")
+    sources = tuple(SourceOption(code, name, code == selected) for code, name in LANGUAGES.items())
+    targets = []
+    for code, name in LANGUAGES.items():
+        key = youtube_key(code, youtube_keys)
+        mark = "" if key not in youtube_keys else (
+            "on YouTube" if key == code else f"on YouTube as {key}")
+        targets.append(TargetOption(code, name, code in DEFAULT_TARGETS and code != selected, mark))
+
+    text = (row.title, row.description) if row is not None else (video.title, video.description)
+    current = source_hash(*text)
+    ordered = [c for c in LANGUAGES if c in records] + sorted(c for c in records if c not in LANGUAGES)
+    results = []
+    for code in ordered:
+        record = records[code]
+        label, tone = TRANSLATION_STATUS_LABELS.get(record.status, (record.status, ""))
+        outdated = record.source_hash != current
+        addable = not outdated and record.status != "failed"
+        key = youtube_key(code, pool)
+        present = in_draft_map is not None and _same_text(in_draft_map.get(key), record)
+        back = record.back_translation if isinstance(record.back_translation, dict) else {}
+        results.append(TranslationView(
+            record=record, name=lang_name(code), label=label, tone=tone,
+            score=f"{record.score}/5" if record.score is not None else "",
+            outdated=outdated, addable=addable,
+            ticked=addable and record.status == "verified" and not present,
+            needs_check=record.status in ("flagged", "unverified"), key=key, in_draft=present,
+            note=str(back.get("note") or ""),
+            back_title=str(back.get("title") or ""),
+            back_description=str(back.get("description") or ""),
+        ))
+
+    listed = []
+    if row is not None and row.localizations is not None:
+        loc = diff_row(row).localizations
+        for key in row.localizations:
+            if own(key):
+                continue
+            state = ("New in this draft" if key in loc.added
+                     else "Changed in this draft" if key in loc.changed_langs else "On YouTube")
+            listed.append(DraftTranslation(key, lang_name(key), state))
+    return TranslateView(
+        video_id=video.video_id, language_code=language or "", language_label=lang_name(language),
+        sources=sources, language_known=bool(selected), targets=tuple(targets),
+        results=tuple(results), addable_count=sum(1 for r in results if r.addable),
+        in_draft=tuple(listed),
+    )

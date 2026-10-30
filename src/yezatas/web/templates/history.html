@@ -16,6 +16,7 @@
     </div>
     {% if r.record.message %}<p class="muted">{{ r.record.message }}</p>{% endif %}
     {% if r.backup %}
+    {% if r.backup.languages %}<p class="muted backup-languages">Backup includes translations: {{ r.backup.languages|join(', ') }}</p>{% endif %}
     <details class="backup">
       <summary>Show the saved text</summary>
       <dl class="backup-text">

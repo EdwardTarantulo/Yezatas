@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
-from .. import agent, auth, edits, push
+from .. import agent, auth, edits, push, translate
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
 from ..quota import QuotaGuard
@@ -40,9 +40,9 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (Entry, RunView, SuggestBatch, SuggestItem, build_listing, change_cards,
-                    dashboard_model, format_count, format_date, group_checks, history_rows,
-                    make_entries, plan_lines, push_results, run_view, stops_batch, thumb_url)
+from .views import (Entry, RunView, SuggestBatch, SuggestItem, build_listing, build_translate_view,
+                    change_cards, dashboard_model, format_count, format_date, group_checks, history_rows,
+                    lang_name, make_entries, plan_lines, push_results, run_view, stops_batch, thumb_url)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -62,6 +62,11 @@ SUGGEST_TIMEOUT_MESSAGE = (
     "The suggestions took more than 15 minutes, so Yezatas stopped waiting. The Agent log shows "
     "what finished."
 )
+TRANSLATE_TIMEOUT_SECONDS = 30 * 60.0
+TRANSLATE_TIMEOUT_MESSAGE = (
+    "The translation took more than 30 minutes, so Yezatas stopped waiting. Translations that "
+    "finished are kept below."
+)
 FIX_NEXT_COUNTS = (1, 3, 5, 10)
 MAX_KEY_CHARS = 500
 
@@ -71,6 +76,12 @@ ReaderFactory = Callable[[Any], YouTubeReader]
 WriterFactory = Callable[[Any], YouTubeWriter]
 CredentialsLoader = Callable[[Config], Any]
 SuggestFn = Callable[[Store, str, Report], "agent.SuggestResult"]
+TranslateTools = Callable[[Config], "tuple[translate.Translator | None, translate.Verifier]"]
+
+
+def default_translate_tools(config: Config) -> "tuple[translate.Translator | None, translate.Verifier]":
+    """Spark Open (or Spark 1.3 as the fallback) to translate, Glimmer on this computer to check."""
+    return translate.translator_from_config(config), translate.verifier_from_config(config)
 
 
 class ProgressReader:
@@ -126,6 +137,14 @@ def map_suggest_error(exc: BaseException) -> tuple[str, str]:
     return "suggest", f"The suggestions stopped unexpectedly ({exc.__class__.__name__})."
 
 
+def map_translate_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, translate.TranslateError):
+        return exc.kind, str(exc)
+    if type(exc) is ValueError:  # translate_video's own plain sentences
+        return "translate", str(exc)
+    return "translate", f"The translation stopped unexpectedly ({exc.__class__.__name__})."
+
+
 def make_default_suggest(config: Config) -> SuggestFn:
     """The real suggest function: Muse Spark through Meta's Model API, one client per run.
 
@@ -172,6 +191,7 @@ class WebState:
         write_credentials_loader: CredentialsLoader,
         writer_factory: WriterFactory,
         suggest: SuggestFn,
+        translate_tools: TranslateTools = default_translate_tools,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -181,6 +201,7 @@ class WebState:
         self._write_credentials_loader = write_credentials_loader
         self._writer_factory = writer_factory
         self._suggest = suggest
+        self._translate_tools = translate_tools
         self.signin_job = Job(
             map_sign_in_error, sign_in_timeout, SIGN_IN_TIMEOUT_MESSAGE, clock
         )
@@ -193,6 +214,10 @@ class WebState:
         self._suggest_seen: JobSnapshot | None = None  # the finished job the creator dismissed
         self._suggest_ids: tuple[str, ...] = ()
         self._suggest_batch = False
+        self.translate_job = Job(map_translate_error, TRANSLATE_TIMEOUT_SECONDS,
+                                 TRANSLATE_TIMEOUT_MESSAGE, clock)
+        self._translate_seen: JobSnapshot | None = None  # the finished job the creator dismissed
+        self._translate_video = ""
         self._lock = threading.Lock()
         self._check_lock = threading.Lock()
         self._check: CheckState | None = None
@@ -391,6 +416,52 @@ class WebState:
             with self._lock:
                 self._suggest_seen = snap
 
+    # --- translations -----------------------------------------------------------------------
+    def start_translate(self, video_id: str, source_language: str, targets: Sequence[str],
+                        sid: str) -> bool:
+        """Translate one video into these languages, in the one translation job."""
+        wanted = tuple(targets)
+
+        def work(report: Report) -> "translate.TranslateResult":
+            return self._run_translate(video_id, source_language, wanted, sid, report)
+
+        if not self.translate_job.start(work):
+            return False
+        with self._lock:
+            self._translate_video = video_id
+        return True
+
+    def _run_translate(self, video_id: str, source_language: str, targets: tuple[str, ...],
+                       sid: str, report: Report) -> "translate.TranslateResult":
+        translator, verifier = self._translate_tools(self.config)
+        if translator is None:
+            raise translate.TranslateError(
+                "auth", "There is no translation key. Add one in Setup. Nothing was sent.")
+        with Store(self.config.catalog_db) as store:
+            result = translate.translate_video(store, translator, verifier, video_id,
+                                               source_language, list(targets), report=report)
+        failed = all(r.status == "failed" for r in result.records)
+        self.add_flash(
+            sid, "error" if failed else "ok",
+            f"Translation finished: {result.message}."
+            + ("" if failed else " Read the results below, then add the ones you want to the "
+                                 "draft. Nothing goes to YouTube until you approve and push."))
+        return result
+
+    def translate_state(self) -> tuple[JobSnapshot, str]:
+        """(job snapshot, the video id it works on). A finished job the creator dismissed is idle."""
+        snap = self.translate_job.snapshot()
+        with self._lock:
+            if snap is self._translate_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._translate_video
+
+    def dismiss_translate_result(self) -> None:
+        snap = self.translate_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._translate_seen = snap
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -420,18 +491,22 @@ def create_app(
     write_credentials_loader: CredentialsLoader = load_write_credentials,
     writer_factory: WriterFactory = GoogleYouTubeWriter,
     suggest: SuggestFn | None = None,
+    translate_tools: TranslateTools | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
     token = token or secrets.token_urlsafe(32)
     start_url = f"http://127.0.0.1:{port}/?t={token}"
+    tools = translate_tools or default_translate_tools
     state = WebState(config, sign_in, reader_factory, credentials_loader, clock, sign_in_timeout,
                      write_sign_in, write_credentials_loader, writer_factory,
-                     suggest or make_default_suggest(config))
+                     suggest or make_default_suggest(config),
+                     tools)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
     templates.env.undefined = StrictUndefined
+    templates.env.filters["lang_name"] = lang_name
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -552,6 +627,48 @@ def create_app(
             "counts": FIX_NEXT_COUNTS, "video_id": video_id,
         }
 
+    def tools_or_none() -> "tuple[translate.Translator | None, translate.Verifier | None]":
+        """The translator and the checker; a broken setup just means "not available"."""
+        try:
+            return tools(config)
+        except Exception:  # noqa: BLE001
+            return None, None
+
+    down_until = [0.0]  # a refused connection takes about 2 seconds on Windows: remember "down"
+
+    def verifier_ready(verifier: "translate.Verifier | None", fresh: bool = False) -> bool:
+        """Is the checker up? The Setup page always asks (`fresh`); other pages reuse a slow "no"."""
+        if verifier is None:
+            return False
+        if not fresh and clock() < down_until[0]:
+            return False
+        started = clock()
+        try:
+            ready = bool(verifier.available())
+        except Exception:  # noqa: BLE001
+            ready = False
+        down_until[0] = 0.0 if ready or clock() - started < 0.5 else clock() + 30.0
+        return ready
+
+    def translate_panel(video_id: str) -> dict[str, Any]:
+        """What the translation job and the tools are doing, for one video page (worker thread)."""
+        snap, job_video = state.translate_state()
+        mine = job_video == video_id
+        running = snap.running and mine
+        translator, verifier = tools_or_none()
+        source = translate.translator_key_source(config)
+        provider = "meta" if source == "meta" else "baseten" if source else "other"
+        model = translator.model if translator is not None else (
+            config.model if source == "meta" else config.translator_model)
+        return {
+            "running": running, "busy": snap.running and not mine,
+            "message": snap.message if running else "",
+            "failed": snap.message if snap.status == "failed" and mine else "",
+            "has_translator": translator is not None, "model": model, "provider": provider,
+            "verifier_model": verifier.model if verifier is not None else config.verifier_model,
+            "verifier_ready": True if running else verifier_ready(verifier),
+        }
+
     def video_not_found(request: Request) -> Response:
         return render(request, "error.html", {
             "layout": "shell.html", "active": "content",
@@ -596,11 +713,13 @@ def create_app(
         with Store(config.catalog_db) as store:
             row = store.get_draft(video_id)
             runs = store.list_agent_runs(video_id, limit=1)
+            records = store.latest_translations(video_id)
         card = change_cards([(row, video)])[0] if row is not None else None
         panel = suggest_panel(video_id)
         latest = (run_view(runs[0], {video_id: video.title}, check_title_map([entry]),
                            _local_time, interrupted=not panel["running"])
                   if runs else None)
+        tr = translate_panel(video_id)
         text = ((row.title, row.description, row.tags) if row is not None
                 else (video.title, video.description, tuple(video.tags)))
         return render(request, "video.html", {
@@ -613,13 +732,23 @@ def create_app(
             "views": format_count(video.view_count), "likes": format_count(video.like_count),
             "comments": format_count(video.comment_count),
             "published": format_date(video.published_at),
-            "sg": panel, "latest_run": latest, "poll": panel["running"] or panel["busy"],
+            "sg": panel, "latest_run": latest,
+            "tr": tr, "tv": build_translate_view(video, row, records),
+            "poll": panel["running"] or panel["busy"] or tr["running"] or tr["busy"],
         })
 
     @app.get("/setup")
     def setup(request: Request) -> Response:
         data = page_data()
         data["flash"] = state.pop_flash(request.state.session_id)
+        _, verifier = tools_or_none()
+        data.update({
+            "translator_key": translate.translator_key_source(config),
+            "translator_env": translate.TRANSLATOR_KEY_ENV,
+            "translator_model": config.translator_model,
+            "verifier_model": config.verifier_model, "verifier_url": config.verifier_url,
+            "verifier_ready": verifier_ready(verifier, fresh=True),
+        })
         return render(request, "setup.html", {**data, "active": "setup"})
 
     @app.get("/api/status")
@@ -631,6 +760,7 @@ def create_app(
             "write": _job_json(state.write_job.snapshot()),
             "push": _job_json(state.push_job.snapshot()),
             "suggest": _job_json(state.suggest_job.snapshot()),
+            "translate": _job_json(state.translate_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
 
@@ -862,7 +992,7 @@ def create_app(
             "active": "changes", "push": push_snap, "write": write_snap,
             "poll": push_snap.running or write_snap.running,
             "ready": [], "waiting": 0, "plan": None, "has_write": False, "results": [],
-            "report": None,
+            "report": None, "sends_translations": False, "sends_language": False,
         }
         if push_snap.status == "done" and isinstance(push_snap.result, push.PushReport):
             report = push_snap.result
@@ -875,6 +1005,8 @@ def create_app(
         cards = changes_data()
         ready = [c for c in cards if c.ready]
         data["ready"] = ready
+        data["sends_translations"] = any(c.sends_translations for c in ready)
+        data["sends_language"] = any(c.sends_language for c in ready)
         data["waiting"] = len(cards) - len(ready)
         if ready:
             with Store(config.catalog_db) as store:
@@ -1084,5 +1216,152 @@ def create_app(
         flash(request, "ok", "The saved key was deleted." if removed
               else "There was no saved key.", "ai")
         return back_to_setup("ai")
+
+    # --- translations -----------------------------------------------------------------------
+    @app.post("/videos/{video_id}/translate")
+    async def translate_video_text(request: Request, video_id: str) -> Response:
+        form = await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#translations")
+
+        def exists() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.get_video(video_id) is not None
+
+        if not await run_in_threadpool(exists):
+            return video_not_found(request)
+        source = str(form.get("source_language") or "")
+        picked = {str(v) for v in form.getlist("targets")}
+        if not source:
+            flash(request, "error", "Choose the language of this video first. Yezatas does not "
+                  "guess it. Nothing was sent.")
+        elif source not in translate.LANGUAGES:
+            flash(request, "error", "Yezatas cannot translate from that language. Choose another "
+                  "one. Nothing was sent.")
+        elif not picked:
+            flash(request, "error", "Pick at least one language to translate into. Nothing was "
+                  "sent.")
+        elif not picked <= set(translate.LANGUAGES):
+            flash(request, "error", "One of the chosen languages is not available. Nothing was "
+                  "sent.")
+        elif source in picked:
+            flash(request, "error", "A video cannot be translated into its own language. Untick "
+                  f"{translate.LANGUAGES[source]} and try again. Nothing was sent.")
+        else:
+            translator, _ = await run_in_threadpool(tools_or_none)
+            if translator is None:
+                flash(request, "error", "There is no translation key yet. Add a Baseten key or a "
+                      "Meta API key. Nothing was sent.", "translate")
+            elif not state.start_translate(
+                    video_id, source, [c for c in translate.LANGUAGES if c in picked],
+                    request.state.session_id):
+                flash(request, "error", "A translation is already running. Wait for it to finish.")
+        return back
+
+    @app.post("/translate/done")
+    async def dismiss_translate(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_translate_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#translations" if video_id else "/")
+
+    @app.post("/videos/{video_id}/translations/add")
+    async def add_video_translations(request: Request, video_id: str) -> Response:
+        form = await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#translations")
+        chosen = list(dict.fromkeys(str(v) for v in form.getlist("languages")))
+
+        def work() -> tuple[str, str]:
+            with Store(config.catalog_db) as store:
+                video = store.get_video(video_id)
+                if video is None:
+                    return "missing", ""
+                if not chosen:
+                    return "error", "Tick at least one translation to add."
+                row = store.get_draft(video_id)
+                records = store.latest_translations(video_id)
+                current = translate.source_hash(
+                    *((row.title, row.description) if row is not None
+                      else (video.title, video.description)))
+                pool = list(row.localizations if row is not None and row.localizations is not None
+                            else edits.plain_localizations(video.localizations))
+                picked: dict[str, tuple[str, str]] = {}
+                sources: set[str] = set()
+                for language in chosen:
+                    record = records.get(language)
+                    name = translate.LANGUAGES.get(language, language)
+                    if record is None:
+                        return "error", f"There is no {name} translation to add."
+                    if record.status == "failed":
+                        return "error", f"The {name} translation failed, so it cannot be added."
+                    if record.source_hash != current:
+                        return "error", (f"The {name} translation was made from older text. "
+                                         "Translate it again first.")
+                    sources.add(record.source_language)
+                    picked[translate.youtube_key(language, pool)] = (record.title, record.description)
+                if len(sources) != 1:
+                    return "error", ("These translations were made from different source "
+                                     "languages. Add them one source language at a time.")
+                try:
+                    edits.add_translations(store, video_id, sources.pop(), picked)
+                except (edits.DraftError, ValueError) as exc:
+                    return "error", str(exc)
+                count = len(picked)
+                return "ok", (f"Added {count} translation{'' if count == 1 else 's'} to the "
+                              "draft. Review them on the Changes page.")
+
+        kind, message = await run_in_threadpool(work)
+        if kind == "missing":
+            return video_not_found(request)
+        flash(request, kind, message)
+        return back
+
+    @app.post("/videos/{video_id}/translations/{language}/remove")
+    async def remove_video_translation(request: Request, video_id: str, language: str) -> Response:
+        await read_form(request)
+
+        def work() -> tuple[str, str]:
+            with Store(config.catalog_db) as store:
+                try:
+                    edits.remove_translation(store, video_id, language)
+                except edits.DraftError as exc:
+                    return "error", str(exc)
+            return "ok", (f"Removed the {lang_name(language)} translation from the draft. "
+                          "Nothing changes on YouTube until you approve and push.")
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other(f"/videos/{quote(video_id)}#translations")
+
+    # --- the translation key (optional, Baseten; the Meta key is the fallback) -------------------
+    @app.post("/setup/translator-key")
+    async def save_translator_key(request: Request) -> Response:
+        form = await read_form(request)
+        key = str(form.get("api_key") or "").strip()
+        if translate.translator_key_source(config) == "environment":
+            flash(request, "error", f"The key comes from the {translate.TRANSLATOR_KEY_ENV} "
+                  "environment variable, so nothing was saved.", "translate")
+        elif not key:
+            flash(request, "error", "Paste your key first.", "translate")
+        elif len(key) > MAX_KEY_CHARS or any(c.isspace() for c in key):
+            flash(request, "error", "That does not look like a key: it must be one line with no "
+                  "spaces. Nothing was saved.", "translate")
+        else:
+            try:
+                await run_in_threadpool(translate.save_translator_key, config, key)
+            except (ValueError, OSError):
+                flash(request, "error", "The key could not be saved. Check that "
+                      f"{config.credentials_dir} is writable.", "translate")
+            else:
+                flash(request, "ok", "Saved the key on this computer. It is not shown again.",
+                      "translate")
+        return back_to_setup("translate")
+
+    @app.post("/setup/translator-key/delete")
+    async def delete_translator_key(request: Request) -> Response:
+        await read_form(request)
+        removed = await run_in_threadpool(translate.delete_translator_key, config)
+        flash(request, "ok", "The saved key was deleted." if removed
+              else "There was no saved key.", "translate")
+        return back_to_setup("translate")
 
     return app

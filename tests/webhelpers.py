@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
 
-from fakes import FakeYouTubeReader
+from fakes import FakeYouTubeReader, ScriptedVerifier
 from yezatas import auth
 from yezatas.config import Config, load_config
 from yezatas.store import Store, Video
@@ -121,6 +121,8 @@ def make_ui(tmp_path: Path, *, signed_in_browser: bool = True,
             config: Config | None = None, **kwargs: Any) -> Ui:
     config = config or make_config(tmp_path)
     reader = reader or FakeYouTubeReader(120)
+    # never reach for the network or a local Ollama: no translator, a checker that is down
+    kwargs.setdefault("translate_tools", lambda cfg: (None, ScriptedVerifier(up=False)))
     app = create_app(config, port=PORT, token=TOKEN, sign_in=sign_in,
                      reader_factory=lambda creds: reader, open_browser=False, **kwargs)
     client = TestClient(app, base_url=BASE_URL)

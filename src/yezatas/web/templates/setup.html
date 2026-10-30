@@ -416,6 +416,40 @@
   {% endif %}
 </section>
 
+<section class="card" id="step-translate">
+  <header class="card-head">
+    <h2>Translations (optional)</h2>
+    {% if translator_key == 'environment' %}<span class="pill done">Key from the environment</span>
+    {% elif translator_key == 'saved' %}<span class="pill done">Key saved</span>
+    {% elif translator_key == 'meta' %}<span class="pill done">Using the Meta key</span>
+    {% else %}<span class="pill">No key</span>{% endif %}
+  </header>
+  <p>Yezatas can translate a video's title and description into other languages. <strong>{{ translator_model }}</strong> (Muse Spark Open, on Baseten) translates, code checks that every link, time, hashtag, @handle and email survived, and <strong>{{ verifier_model }}</strong> on this computer translates each result back and compares it. Translations become part of the draft. Nothing is sent to YouTube without your approval.</p>
+  <h3 class="run-h">Translator</h3>
+  {% if translator_key == 'meta' %}
+  <p id="translator-key-status">No Baseten key is set, so translations use your Meta API key with <strong>{{ model }}</strong>. A Baseten key switches them to {{ translator_model }}.</p>
+  {% elif translator_key == 'environment' %}
+  <p class="result" id="translator-key-status">The key comes from the <code>{{ translator_env }}</code> environment variable. To change it, change the variable and restart Yezatas.</p>
+  {% elif translator_key == 'saved' %}
+  <p id="translator-key-status">A Baseten key is saved on this computer, in <code>{{ home }}</code>. It is not shown again.</p>
+  {% else %}
+  <p id="translator-key-status">No translation key is set. Add a Baseten API key (or a Meta API key in the step above).</p>
+  {% endif %}
+  {% if translator_key != 'environment' %}
+  <form method="post" action="/setup/translator-key" class="upload" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="translator-key">{{ 'Replace the saved key' if translator_key == 'saved' else 'Baseten API key' }}</label>
+    <input id="translator-key" type="password" name="api_key" autocomplete="off" spellcheck="false" maxlength="500" required>
+    <button type="submit" class="button primary">Save the key</button>
+  </form>
+  {% if translator_key == 'saved' %}{{ post_button('/setup/translator-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
+  {% endif %}
+  <h3 class="run-h">Checker</h3>
+  <p id="verifier-status"><strong>{{ verifier_model }}</strong> at <code>{{ verifier_url }}</code>:
+    {% if verifier_ready %}<span class="pill done">Ready</span>{% else %}<span class="pill warn">Not running</span>{% endif %}</p>
+  <p class="hint">To use the checker, install Ollama, add the model <code>{{ verifier_model }}</code> and start Ollama. Yezatas only talks to it on this computer. Without it, translations are still made but marked "Unverified".</p>
+</section>
+
 {% include "_footer.html" %}
 </div>
 {% endblock %}

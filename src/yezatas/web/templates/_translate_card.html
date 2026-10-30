@@ -1,0 +1,98 @@
+{% from "_macros.html" import post_form %}
+{# The "Translations" card of the video page. `tr` is the job and tools state, `tv` the languages and results. #}
+<section class="card translate-card" id="translations" aria-labelledby="h-translate">
+  <div class="card-title-row">
+    <h2 id="h-translate">Translations</h2>
+    {% if change %}<a class="button secondary" href="/changes#d-{{ video.video_id|urlencode }}">Review changes</a>{% endif %}
+  </div>
+  <p>Video language: <strong id="tr-language">{{ tv.language_label }}</strong></p>
+
+  {% if tr.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="translate-msg" role="status" aria-live="polite">{{ tr.message or 'Starting…' }}</span></p>
+  <p class="hint">This takes a few minutes for each language: the translation, then the check on this computer. You can leave this page. The job keeps running while Yezatas is open, and the results show here.</p>
+  {% else %}
+  <p class="muted">The title and description of this video go to {{ tr.model }}{% if tr.provider == 'baseten' %} on Baseten{% elif tr.provider == 'meta' %} through Meta's Model API (Standard mode: Meta does not use them for training){% endif %} to be translated. The check runs on this computer: {{ tr.verifier_model }} through Ollama, so nothing leaves it for the check. Translations only become part of the draft. Nothing goes to YouTube until you approve and push it.</p>
+  {% if tr.failed %}
+  <div class="flash error" role="alert">{{ tr.failed }}</div>
+  <form class="inline" method="post" action="/translate/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if tr.busy %}<p class="hint" id="translate-busy">Another translation is running. Wait for it to finish.</p>{% endif %}
+  {% if not tr.has_translator %}<p class="hint" id="translate-no-key">There is no translation key yet. <a href="/setup#step-translate">Add one in Setup</a>.</p>{% endif %}
+  {% if not tr.verifier_ready %}<p class="hint" id="translate-no-checker">The checker ({{ tr.verifier_model }}) is not running on this computer, so translations will be marked "Unverified". To check them, start Ollama with that model: <a href="/setup#step-translate">see Setup</a>.</p>{% endif %}
+  <form class="translate-form" method="post" action="/videos/{{ video.video_id|urlencode }}/translate">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field">
+      <label for="tr-source">Language of this video's title and description</label>
+      <select id="tr-source" name="source_language"{% if not tv.language_known %} required{% endif %}>
+        {% if not tv.language_known %}<option value="" selected>Choose the language of this video</option>{% endif %}
+        {% for o in tv.sources %}<option value="{{ o.code }}"{% if o.selected %} selected{% endif %}>{{ o.name }}</option>{% endfor %}
+      </select>
+      {% if not tv.language_known %}<p class="hint" id="tr-language-hint">Yezatas does not guess the language of your video. Choose it before translating.</p>{% endif %}
+    </div>
+    <fieldset class="lang-grid">
+      <legend>Translate into</legend>
+      {% for t in tv.targets %}
+      <label class="check-label lang"><input type="checkbox" name="targets" value="{{ t.code }}"{% if t.ticked %} checked{% endif %}> <span>{{ t.name }}{% if t.on_youtube %} <span class="on-yt">({{ t.on_youtube }})</span>{% endif %}</span></label>
+      {% endfor %}
+    </fieldset>
+    <p class="hint">Translating again replaces the earlier result for that language below. Languages marked "on YouTube" are only replaced if you add the new translation to the draft and push it.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if tr.busy or not tr.has_translator %} disabled{% endif %}>Translate</button></div>
+  </form>
+  {% endif %}
+
+  {% if tv.results %}
+  <form class="translate-add" id="translation-results" method="post" action="/videos/{{ video.video_id|urlencode }}/translations/add">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <h3 class="run-h">Results</h3>
+    <ul class="tr-list">
+      {% for t in tv.results %}
+      {% set r = t.record %}
+      <li class="tr-item" id="tr-{{ r.language }}">
+        <div class="tr-head">
+          <strong>{{ t.name }}</strong>
+          <span class="pill {{ t.tone }}">{{ t.label }}</span>
+          {% if t.score %}<span class="muted">Score {{ t.score }}</span>{% endif %}
+          {% if t.outdated %}<span class="pill warn">Older text: translate again</span>{% endif %}
+          {% if t.in_draft %}<span class="pill">Already in the draft</span>{% endif %}
+          {% if t.addable and t.key != r.language %}<span class="muted">Saved as {{ t.key }}</span>{% endif %}
+        </div>
+        {% if r.status == 'failed' %}
+        <ul class="issues">{% for p in r.problems %}<li class="issue error">{{ p }}</li>{% endfor %}</ul>
+        {% else %}
+        {% if t.note %}<p class="hint tr-note">The checker could not check this one: {{ t.note }}</p>{% endif %}
+        <p class="tr-title">{{ r.title }}</p>
+        <details class="tr-text"><summary>Description</summary><pre>{{ r.description }}</pre></details>
+        {% if t.back_title or t.back_description %}
+        <details class="tr-text"><summary>Back-translation (made blind, without seeing your text)</summary>
+          <p class="tr-title">{{ t.back_title }}</p><pre>{{ t.back_description }}</pre></details>
+        {% endif %}
+        {% if r.issues or r.problems %}
+        <ul class="issues">
+          {% for p in r.problems %}<li class="issue error"><strong>Problem:</strong> {{ p }}</li>{% endfor %}
+          {% for i in r.issues %}<li class="issue warning"><strong>Checker:</strong> {{ i }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% endif %}
+        {% if t.addable %}
+        <p><label class="check-label"><input type="checkbox" name="languages" value="{{ r.language }}"{% if t.ticked %} checked{% endif %}> {{ 'I checked this translation' if t.needs_check else 'Add to the draft' }}</label></p>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="actions"><button type="submit" class="button primary"{% if not tv.addable_count %} disabled{% endif %}>Add the ticked translations to the draft</button></div>
+    <p class="hint">Flagged and unverified translations are only added when you tick them. Added translations are part of the draft: review them on the Changes page. Nothing goes to YouTube until you approve and push.</p>
+  </form>
+  {% endif %}
+
+  {% if tv.in_draft %}
+  <h3 class="run-h">Translations in the draft</h3>
+  <ul class="tr-draft">
+    {% for d in tv.in_draft %}
+    <li id="draft-tr-{{ d.key }}"><span><strong>{{ d.name }}</strong> <span class="muted">{{ d.key }} &middot; {{ d.state }}</span></span>
+      {{ post_form('/videos/' ~ (video.video_id|urlencode) ~ '/translations/' ~ (d.key|urlencode) ~ '/remove', csrf, 'Remove', 'secondary') }}</li>
+    {% endfor %}
+  </ul>
+  <p class="hint">Removing a translation that is already on YouTube deletes it there once you approve and push the draft.</p>
+  {% endif %}
+</section>

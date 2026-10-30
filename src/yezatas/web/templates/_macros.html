@@ -33,7 +33,7 @@
 
 {# The difference between a draft and its base. Unchanged parts are not shown.
    Every change carries a text marker or hidden label, so it reads without colour. #}
-{% macro diff_view(diff) %}
+{% macro diff_view(diff, texts={}) %}
 {% if diff.title_changed %}
 <div class="diff-block">
   <h3 class="diff-h">Title</h3>
@@ -66,6 +66,38 @@
     {% for t in diff.tags.kept %}<li class="tagchip kept"><span class="visually-hidden">Unchanged tag: </span>{{ t }}</li>{% endfor %}
   </ul>
   {% if diff.tags.reordered %}<p class="muted">The order of the tags changed.</p>{% endif %}
+</div>
+{% endif %}
+{% if diff.language %}
+<div class="diff-block">
+  <h3 class="diff-h">Video language</h3>
+  <p>Video language: {{ (diff.language[0]|lang_name) if diff.language[0] else 'not set' }} &rarr; {{ (diff.language[1]|lang_name) if diff.language[1] else 'not set' }}</p>
+</div>
+{% endif %}
+{% if diff.localizations.changed %}
+<div class="diff-block">
+  <h3 class="diff-h">Translations</h3>
+  {% for lang in diff.localizations.added %}
+  <div class="loc added">
+    <p class="loc-h"><span class="tagchip added"><span class="visually-hidden">Added translation: </span><span aria-hidden="true">+ </span>{{ lang|lang_name }}</span> <span class="muted">{{ lang }}</span></p>
+    <p class="loc-title">{{ texts[lang].title }}</p>
+    <details class="loc-text"><summary>Description</summary><pre>{{ texts[lang].description }}</pre></details>
+  </div>
+  {% endfor %}
+  {% for lang in diff.localizations.changed_langs %}
+  <div class="loc changed">
+    <p class="loc-h"><span class="tagchip added"><span class="visually-hidden">Changed translation: </span><span aria-hidden="true">~ </span>{{ lang|lang_name }}</span> <span class="muted">{{ lang }}, changed</span></p>
+    <p class="loc-title">{{ texts[lang].title }}</p>
+    <details class="loc-text"><summary>Description</summary><pre>{{ texts[lang].description }}</pre></details>
+  </div>
+  {% endfor %}
+  {% if diff.localizations.removed %}
+  <p class="loc-h">Removed translations:</p>
+  <ul class="tag-chips">
+    {% for lang in diff.localizations.removed %}<li class="tagchip removed"><span class="visually-hidden">Removed translation: </span><span aria-hidden="true">&minus; </span>{{ lang|lang_name }} <span class="muted">{{ lang }}</span></li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if diff.localizations.kept %}<p class="muted loc-kept">{{ diff.localizations.kept|length }} other translation{{ '' if diff.localizations.kept|length == 1 else 's' }} {{ 'stays' if diff.localizations.kept|length == 1 else 'stay' }} as {{ 'it is' if diff.localizations.kept|length == 1 else 'they are' }}.</p>{% endif %}
 </div>
 {% endif %}
 {% endmacro %}
