@@ -23,12 +23,23 @@ as it lands; the git history is the detailed record.
   Host checks) with a **setup screen**: an 8-step guided connection to YouTube with links to each Google Cloud page,
   client file upload and validation, sign-in, a connection check with specific fixes for common errors, and a
   read-only catalog pull with its quota cost shown first.
+- **2026-10-30**: setup screen **tested end to end on a real channel**: new Google Cloud project to a stored catalog
+  (400+ videos, including private ones, for about 20 quota units). Fixes from the test: form posts no longer refused
+  (Referrer-Policy), tabs stay signed in across restarts, "Add yourself as a test user" is now its own step (8 steps),
+  pictures of Google's sign-in pages, and the API link opens the client's own project.
 
 ## Setup
 
-*Work in progress.* Yezatas runs on your own machine and talks to YouTube through your own Google Cloud project, so no
-third party ever sees your channel data or credentials. A step-by-step guide for creating the OAuth client will live in
-`docs/SETUP_GOOGLE.md`.
+Yezatas runs on your own machine and talks to YouTube through your own Google Cloud project, so no third party ever
+sees your channel data or credentials. It needs Python 3.10+.
+
+```
+pip install -e .
+python -m yezatas ui
+```
+
+The setup screen walks you through connecting your channel in 8 steps (about 10 minutes, free). The written version,
+with troubleshooting, is [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md).
 
 ## Safety model
 

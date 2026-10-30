@@ -26,28 +26,41 @@ the written version, for reference and troubleshooting.
 
 ## 3. Set up the OAuth consent screen
 
-1. Go to **APIs & Services → OAuth consent screen** (in newer consoles: **Google Auth Platform → Branding / Audience**).
-2. User type: **External** (unless you have a Google Workspace organization and only use accounts inside it).
-3. App name: `Yezatas` (any name works; only you will see it). Fill in the support email and developer contact email.
-4. Scopes: you can skip adding scopes here; Yezatas asks for them when you sign in.
-   - First it asks for `youtube.readonly` (read your videos and stats).
-   - Only when you choose to publish changes does it ask for `youtube.force-ssl` (edit videos, captions, thumbnails).
-5. **Test users:** add the Google account that owns the channel. While the app is in *Testing* status, only test users
-   can sign in.
+1. Go to **Google Auth Platform** (<https://console.cloud.google.com/auth/overview>). If it says *not configured
+   yet*, click **Get started**. (In older consoles: **APIs & Services → OAuth consent screen**.)
+2. **App Information:** app name `Yezatas` (any name works; only you will see it) and your email as support email.
+3. **Audience:** **External** (unless you have a Google Workspace organization and only use accounts inside it).
+4. **Contact Information:** your email.
+5. **Finish:** agree to the policy and click **Create**.
 
-Leaving the app in **Testing** is fine for personal use. Note that Google expires refresh tokens of apps in Testing
-status after 7 days, so you may need to sign in again about once a week.
+Scopes: you can skip adding them here; Yezatas asks for them when you sign in. First it asks for `youtube.readonly`
+(read your videos and stats). Only when you choose to publish changes does it ask for `youtube.force-ssl` (edit videos,
+captions, thumbnails).
 
-## 4. Create a Desktop app OAuth client
+## 4. Add yourself as a test user
 
-1. Go to **APIs & Services → Credentials** (or **Google Auth Platform → Clients**).
-2. Click **Create credentials → OAuth client ID**.
-3. Application type: **Desktop app**. Name: `Yezatas desktop`.
-4. Click **Create**, then **Download JSON**.
+While the app is in **Testing**, Google only lets in the accounts on its Test users list, including yours.
 
-## 5. Put `client_secrets.json` where Yezatas looks for it
+1. Go to **Google Auth Platform → Audience** (<https://console.cloud.google.com/auth/audience>).
+2. Under **Test users**, click **+ Add users**, enter the Google account you will sign in with, and **Save**.
+   For a Brand Account channel, add the Google account you use to manage it.
+3. Check that the email now shows in the list.
 
-Rename the downloaded file to `client_secrets.json` and move it into the Yezatas credentials folder:
+Leaving the app in **Testing** is fine for personal use. Google expires the sign-in of apps in Testing status after
+7 days, so you may need to sign in again about once a week.
+
+## 5. Create a Desktop app OAuth client
+
+1. Go to **Google Auth Platform → Clients** (<https://console.cloud.google.com/auth/clients>) and click
+   **+ Create client**. (In older consoles: **APIs & Services → Credentials → Create credentials → OAuth client ID**.)
+2. Application type: **Desktop app**. Name: `Yezatas desktop`.
+3. Click **Create**, then **Download JSON** *before* closing the dialog: Google does not show the secret again. If you
+   closed it, open the client and use **Add secret**, or delete it and create a new one.
+
+## 6. Give the file to Yezatas
+
+Upload it in the setup screen (`python -m yezatas ui`, step 5). Or rename the downloaded file to `client_secrets.json`
+and move it into the Yezatas credentials folder yourself:
 
 | System | Default location |
 |---|---|
@@ -65,9 +78,10 @@ If you set the `YEZATAS_HOME` environment variable, the folder is `$YEZATAS_HOME
 
 ## Troubleshooting
 
-- **"Access blocked: app has not completed the Google verification process"**: the account you signed in with is not on
-  the Test users list (step 3.5).
+- **"Access blocked: app has not completed the Google verification process"** (Error 403: access_denied): the account
+  you signed in with is not on the Test users list (step 4).
+- **"Google hasn't verified this app"**: expected for your own app in Testing. Click **Continue** (not Back to safety).
 - **"YouTube Data API v3 has not been used in project … or it is disabled"**: enable the API (step 2) in the same
-  project the client belongs to, then wait a minute.
+  project the client belongs to (its `project_id` is in the JSON file), then wait a minute.
 - **`quotaExceeded`**: the daily 10,000 units are used up. Quota resets at midnight Pacific time. Yezatas' quota guard
   shows the cost of every action before it runs, so this should only happen if other tools share the same project.
