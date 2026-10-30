@@ -51,6 +51,13 @@ as it lands; the git history is the detailed record.
 - **2026-10-30**: first **real push and restore** on a real channel (one tag on a private video, then put back from
   History; 51 quota units each). The push page now explains Google's two edit-permission pages, what Yezatas does with
   that permission (only `videos.update` on title, description and tags) and how to remove it.
+- **2026-10-30**: **suggestion agent on Muse Spark 1.3**, the first Meta model at runtime:
+  - **Tools.** The model reads the video's scorecard, current text, related videos and the channel's habits through tool calls, then answers with schema-checked JSON.
+  - **Fact guard.** Before anything becomes a draft, the edit validator runs, plus a fact guard: no new links unless a tool returned them, and no new timestamps, @handles or emails. A failed check gets one repair round; if it fails again, the suggestion is dropped.
+  - **Review.** Suggestions are ordinary drafts, so the creator still sees the diff and approves each one. The Changes page also shows why each change was made and what was left for the creator.
+  - **Where to use it.** On a video page, or for the top of **Fix next**.
+  - **Audit trail.** An **Agent log** records every run: the tool calls, what the checks found, tokens and estimated cost.
+  - **Standard models only.** Contributor models, which may train on the data, are refused.
 
 ## Setup
 
