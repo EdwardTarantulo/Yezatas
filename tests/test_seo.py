@@ -25,7 +25,10 @@ DESCRIPTION = (
     "In this garden bed tutorial we build a raised bed from scratch and plant the first seeds "
     "of the season. You will see the tools, the soil mix and the mistakes to avoid.\n\n"
     + CHAPTERS
-    + "\n\nSubscribe for more weekly garden projects and leave a comment with your own tips.\n"
+    + "\n\nWatch next: https://youtu.be/abc123XYZ00 for the compost bin build.\n"
+    "Subscribe for more weekly garden projects and leave a comment with your own tips. "
+    "Every week we show one practical build with a full materials list, honest costs and "
+    "the small mistakes that cost us time, so you can skip them.\n"
     "#gardening #raisedbed"
 )
 
@@ -40,7 +43,8 @@ def make_video(**overrides) -> Video:
         default_language="en",
         default_audio_language="en",
         duration="PT10M3S",
-        localizations={"de": {"title": "Hochbeet bauen", "description": "Anleitung"}},
+        localizations={code: {"title": "Titel", "description": "Text"}
+                       for code in ("de", "fr", "es", "it", "pt")},
         thumbnails={"maxres": {"url": "https://example.invalid/t.jpg", "width": 1280, "height": 720}},
     )
     return replace(base, **overrides)
@@ -71,7 +75,13 @@ def test_perfect_video_scores_100():
 def test_perfect_video_total_is_100_points():
     result = card(make_video(), ctx_for(make_video()))
     assert sum(c.max_points for c in result.checks) == 100
-    assert len(result.checks) == len(CHECKS) == 24
+    assert len(result.checks) == len(CHECKS) == 25
+
+
+def test_max_points_of_all_checks_sum_to_100():
+    result = card(make_video(), ctx_for(make_video()))
+    assert all(c.applicable for c in result.checks)
+    assert sum(c.max_points for c in result.checks) == 100
 
 
 def test_empty_video_scores_low_and_does_not_crash():
@@ -168,7 +178,7 @@ def test_channel_context_counts():
 # --- title ---
 
 @pytest.mark.parametrize("n,points", [
-    (0, 0), (19, 0), (20, 4), (29, 4), (30, 8), (70, 8), (71, 4), (90, 4), (91, 0),
+    (0, 0), (19, 0), (20, 4), (29, 4), (30, 8), (60, 8), (61, 4), (70, 4), (71, 0), (90, 0),
 ])
 def test_title_length_limits(n, points):
     result = check(make_video(title="a" * n), "title_length")
@@ -176,6 +186,8 @@ def test_title_length_limits(n, points):
     assert str(n) in result.detail
     if points < 8:
         assert result.fix
+    if n > 60:
+        assert "phones" in result.fix
 
 
 @pytest.mark.parametrize("n,ok", [(1, True), (70, True), (71, False), (0, False)])
@@ -221,7 +233,9 @@ def test_title_punctuation():
 
 # --- description ---
 
-@pytest.mark.parametrize("n,points", [(0, 0), (99, 0), (100, 2), (249, 2), (250, 5)])
+@pytest.mark.parametrize("n,points", [
+    (0, 0), (249, 0), (250, 2), (499, 2), (500, 5), (900, 5),
+])
 def test_description_length(n, points):
     result = check(make_video(description="a" * n), "description_length")
     assert result.points == points
@@ -238,6 +252,48 @@ def test_description_hook():
     # text after the 150 character window does not count
     assert not check(make_video(description="#tag " * 40 + "y" * 80), hook).passed
     assert not check(make_video(description=""), hook).passed
+
+
+SENTENCE = "This video shows how to build a raised bed and plant the first seeds of spring."
+
+
+@pytest.mark.parametrize("first_line,problem", [
+    ("https://site.invalid/shop " + SENTENCE, "link"),
+    ("HTTP://site.invalid/shop", "link"),
+    ("www.site.invalid " + SENTENCE, "link"),
+    ("______________________________", "separator"),
+    ("----------", "separator"),
+    ("= = = = =", "separator"),
+    ("•••", "separator"),
+    ("=== LINKS ===", "separator"),
+    ("Subscribe for more garden builds every week, with full plans and costs.", "promotion"),
+    ("Use code SAVE10 for a discount on the tools I use in this video.", "promotion"),
+    ("Support my channel on Patreon to see new builds early, thank you.", "promotion"),
+    ("Follow me for daily garden updates and behind the scenes photos.", "promotion"),
+    ("Buy the same raised bed kit from my affiliate store today.", "promotion"),
+])
+def test_hook_fails_on_link_separator_or_promo_first_line(first_line, problem):
+    result = check(make_video(description=first_line + "\n" + SENTENCE + " " + SENTENCE), "description_hook")
+    assert not result.passed and result.points == 0
+    assert problem in result.detail
+    assert "move links and promos lower" in result.fix
+
+
+def test_hook_skips_leading_blank_lines_and_checks_first_real_line():
+    result = check(make_video(description="\n\n  \nhttps://site.invalid\n" + SENTENCE),
+                   "description_hook")
+    assert not result.passed and "link" in result.detail
+
+
+def test_hook_passes_with_a_sentence_first_even_if_links_and_promos_follow():
+    desc = SENTENCE + " It takes one day.\n\nhttps://site.invalid/plans\nSubscribe and use code SAVE10"
+    result = check(make_video(description=desc), "description_hook")
+    assert result.passed and result.points == 8
+    assert check(make_video(description=SENTENCE + "\n- a bullet\n---"), "description_hook").passed
+
+
+def test_hook_is_worth_8_points():
+    assert check(make_video(), "description_hook").max_points == 8
 
 
 def test_description_title_words():
@@ -299,10 +355,13 @@ def test_chapters_hour_format_and_bullets():
 
 def test_chapters_not_applicable_for_short_or_unknown_duration():
     chap = "description_chapters"
-    for duration in ("PT5M59S", "PT45S", "PT1M", "", "P0D", "garbage"):
+    for duration in ("PT3M59S", "PT45S", "PT1M", "", "P0D", "garbage"):
         assert not check(make_video(description="none", duration=duration), chap).applicable
-    assert check(make_video(description="none", duration="PT6M"), chap).applicable
-    assert not check(make_video(description="none", duration="PT6M"), chap).passed
+    assert "4 minutes" in check(make_video(description="none", duration="PT3M59S"), chap).detail
+    assert check(make_video(description="none", duration="PT4M"), chap).applicable
+    assert not check(make_video(description="none", duration="PT4M"), chap).passed
+    assert check(make_video(description="none", duration="PT5M59S"), chap).applicable
+    assert check(make_video(description="0:00 A\n0:30 B\n1:30 C", duration="PT4M"), chap).passed
 
 
 def test_hook_not_applicable_for_shorts():
@@ -422,7 +481,32 @@ def test_languages():
 def test_localizations():
     assert check(make_video(), "localizations").passed
     result = check(make_video(localizations={}), "localizations")
-    assert not result.passed and "Yezatas" in result.fix
+    assert not result.passed and result.points == 0 and "Yezatas" in result.fix
+
+
+@pytest.mark.parametrize("n,points", [(0, 0), (1, 4), (3, 4), (4, 4), (5, 8), (12, 8)])
+def test_localizations_need_five_languages(n, points):
+    locs = {f"l{i}": {"title": "t", "description": "d"} for i in range(n)}
+    result = check(make_video(localizations=locs), "localizations")
+    assert result.points == points and result.max_points == 8
+    if points < 8:
+        assert "Yezatas" in result.fix
+
+
+def test_related_links():
+    key = "description_related_links"
+    assert check(make_video(), key).passed
+    for link in ("https://youtu.be/abc123", "https://www.youtube.com/watch?v=abc123",
+                 "https://youtube.com/playlist?list=PL123", "https://www.youtube.com/shorts/abc"):
+        assert check(make_video(description=SENTENCE + "\n" + link), key).passed, link
+    plain = check(make_video(description=SENTENCE + "\nMore at https://site.invalid/plans"), key)
+    assert not plain.passed and "Link a related video" in plain.fix
+    assert not check(make_video(description=SENTENCE + "\nhttps://www.youtube.com/@name"),
+                     key).passed
+    assert not check(make_video(description=""), key).applicable
+    assert not check(make_video(duration="PT45S", description="https://youtu.be/a"), key).applicable
+    assert [c.__name__ for c in CHECKS].index("check_description_related_links") == \
+        [c.__name__ for c in CHECKS].index("check_description_links_ok") + 1
 
 
 def test_thumbnail_hd():
@@ -463,3 +547,10 @@ def test_call_to_action_needs_a_phrase_not_just_like_or_comment() -> None:
     plain = _result_of("engagement_prompt", description="It looks like a comment on the case.")
     asks = _result_of("engagement_prompt", description="Let me know what you think below.")
     assert not plain.passed and asks.passed
+
+
+def test_buying_question_is_a_fine_description_opening() -> None:
+    hook = _result_of("description_hook", duration="PT8M",
+                      description="Which budget laptop should you buy this year? I compare three of them "
+                                  "for battery, screen and speed.")
+    assert hook.passed

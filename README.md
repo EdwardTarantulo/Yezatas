@@ -30,6 +30,9 @@ as it lands; the git history is the detailed record.
 - **2026-10-30**: **SEO scorecard**: 24 deterministic checks per video (title, description, chapters, hashtags, tags,
   languages, translations, thumbnail) worth 100 points, each with what was found and a one-line fix. Shorts skip checks
   that don't apply. **Fix next** ranks videos by views × missing points.
+- **2026-10-30**: **stricter scorecard** (25 checks): the description must open with a real sentence (not a link,
+  separator or promo), chapters from 4 minutes, 500+ character descriptions, titles that fit phone search (60),
+  5+ translated languages, and links to related videos or playlists.
 - **2026-10-30**: **light, Studio-style UI**: app shell with search and sidebar, **channel dashboard** (average score,
   Fix next, most common problems, catalog and quota), **content table** (search, filters, sorting, paging) and a
   **video page** with every check and its fix.

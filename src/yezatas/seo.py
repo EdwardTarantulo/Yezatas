@@ -27,20 +27,23 @@ CATEGORIES: dict[str, str] = {
 }
 
 # Thresholds (YouTube limits and friendly SEO rules of thumb)
-TITLE_MIN, TITLE_MAX = 30, 70
-TITLE_OK_MIN, TITLE_OK_MAX = 20, 90
+TITLE_MIN, TITLE_GOOD_MAX = 30, 60  # phone search shows about 60 characters
+TITLE_MAX = 70  # desktop search cuts the title off after about 70
+TITLE_OK_MIN = 20
 TITLE_CAPS_MAX_RATIO = 0.5
 TITLE_EMOJI_MAX = 2
-DESCRIPTION_GOOD, DESCRIPTION_OK = 250, 100
+DESCRIPTION_GOOD, DESCRIPTION_OK = 500, 250
 DESCRIPTION_LIMIT = 5000
 HOOK_WINDOW, HOOK_MIN_TEXT = 150, 50
+SEPARATOR_MAX_TEXT = 20  # letters allowed on a mostly-separator line
 TITLE_WORDS_WINDOW = 200
 HASHTAGS_GOOD_MAX, HASHTAGS_OK_MAX = 3, 15
-CHAPTERS_MIN_DURATION = 360  # seconds
+CHAPTERS_MIN_DURATION = 240  # seconds
 CHAPTERS_MIN_COUNT, CHAPTER_MIN_GAP = 3, 10
 SHORT_MAX_DURATION = 60  # seconds
 TAGS_GOOD_MIN, TAGS_GOOD_MAX = 5, 15
 TAGS_CHAR_LIMIT = 500
+LOCALIZATIONS_GOOD = 5
 
 STOP_WORDS = frozenset(
     "this that with from your have will what when where which about into over more they them "
@@ -68,6 +71,19 @@ _CALL_TO_ACTION = re.compile(
     r"|\b(?:hit|smash|tap) (?:the |that )?like\b|\blike and (?:share|subscribe)\b"
     r"|\bfollow (?:me|us)\b",
     re.IGNORECASE,
+)
+_LEADING_URL = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
+_SEPARATOR_START = re.compile(r"(?:[_\-=*~•·─━—–+]\s*){3,}")
+_LETTER = re.compile(r"[^\W\d_]")
+# A first line that sells or asks instead of describing the video.
+_PROMO = re.compile(
+    r"\bsubscrib\w*|\bsupport (?:my|the|our) channel\b|\bpatreon\b|\baffiliate\b"
+    r"|\bdiscount\b|\bcoupon\b|\buse (?:my |the )?code\b|\bsponsor(?:ed|ship)?\b"
+    r"|\bfollow (?:me|us)\b",  # not "buy": "Which laptop should you buy?" is a fine opening
+    re.IGNORECASE,
+)
+_RELATED_LINK = re.compile(
+    r"youtube\.com/(?:watch|playlist|shorts/)|youtu\.be/", re.IGNORECASE
 )
 
 
@@ -159,19 +175,20 @@ def _half(max_points: int) -> int:
     return max_points // 2
 
 
-# --- Title checks (30 points) ---
+# --- Title checks (25 points) ---
 
 def check_title_length(video: Video, context: ChannelContext | None) -> CheckResult:
-    title = "Title is 30 to 70 characters"
+    title = "Title is 30 to 60 characters"
     n = len(video.title.strip())
-    if TITLE_MIN <= n <= TITLE_MAX:
+    if TITLE_MIN <= n <= TITLE_GOOD_MAX:
         points = 8
-    elif TITLE_OK_MIN <= n < TITLE_MIN or TITLE_MAX < n <= TITLE_OK_MAX:
+    elif TITLE_OK_MIN <= n < TITLE_MIN or TITLE_GOOD_MAX < n <= TITLE_MAX:
         points = _half(8)
     else:
         points = 0
     fix = ("Add a title." if n == 0 else
-           f"Aim for {TITLE_MIN} to {TITLE_MAX} characters; the title is {n}.")
+           f"Aim for {TITLE_MIN} to {TITLE_GOOD_MAX} characters; phones cut titles off around "
+           f"{TITLE_GOOD_MAX}, and this one is {n}.")
     return _result("title_length", "title", title, 8, points,
                    f"The title is {n} characters.", fix)
 
@@ -205,10 +222,10 @@ def check_title_unique(video: Video, context: ChannelContext | None) -> CheckRes
     title = "Title is different from your other videos"
     key = normalize_title(video.title)
     if context is None or not key:
-        return _skip("title_unique", "title", title, 6)
+        return _skip("title_unique", "title", title, 4)
     count = context.title_counts.get(key, 0)
     ok = count <= 1
-    return _result("title_unique", "title", title, 6, 6 if ok else 0,
+    return _result("title_unique", "title", title, 4, 4 if ok else 0,
                    "No other video has this title." if ok else
                    f"{count} videos on the channel share this title.",
                    "Give each video its own title so viewers and search can tell them apart.")
@@ -217,9 +234,9 @@ def check_title_unique(video: Video, context: ChannelContext | None) -> CheckRes
 def check_title_no_angle_brackets(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "Title has no < or > characters"
     if not video.title:
-        return _skip("title_no_angle_brackets", "title", title, 4)
+        return _skip("title_no_angle_brackets", "title", title, 2)
     ok = "<" not in video.title and ">" not in video.title
-    return _result("title_no_angle_brackets", "title", title, 4, 4 if ok else 0,
+    return _result("title_no_angle_brackets", "title", title, 2, 2 if ok else 0,
                    "No angle brackets." if ok else "The title contains < or >.",
                    "Remove the < and > characters; YouTube rejects them.")
 
@@ -228,7 +245,7 @@ def check_title_punctuation(video: Video, context: ChannelContext | None) -> Che
     title = "Title does not look like clickbait"
     text = video.title.strip()
     if not text:
-        return _skip("title_punctuation", "title", title, 3)
+        return _skip("title_punctuation", "title", title, 2)
     emojis = len(_EMOJI.findall(text))
     shouting = re.search(r"[!?]{2,}$", text) is not None
     ok = not shouting and emojis <= TITLE_EMOJI_MAX
@@ -238,14 +255,14 @@ def check_title_punctuation(video: Video, context: ChannelContext | None) -> Che
         detail = f"The title has {emojis} emojis."
     else:
         detail = "No clickbait punctuation."
-    return _result("title_punctuation", "title", title, 3, 3 if ok else 0, detail,
+    return _result("title_punctuation", "title", title, 2, 2 if ok else 0, detail,
                    "Use a single ! or ? at most and keep to two emojis or fewer.")
 
 
-# --- Description checks (35 points) ---
+# --- Description checks (39 points) ---
 
 def check_description_length(video: Video, context: ChannelContext | None) -> CheckResult:
-    title = "Description is at least 250 characters"
+    title = "Description is at least 500 characters"
     n = len(video.description.strip())
     points = 5 if n >= DESCRIPTION_GOOD else _half(5) if n >= DESCRIPTION_OK else 0
     return _result("description_length", "description", title, 5, points,
@@ -260,17 +277,34 @@ def _hook_text(description: str) -> str:
     return " ".join(window.split())
 
 
+def _first_line_problem(description: str) -> str:
+    """What is wrong with the first non-empty line, or "" when it is fine."""
+    first = next((line.strip() for line in description.splitlines() if line.strip()), "")
+    if _LEADING_URL.match(first):
+        return "The description starts with a link."
+    if (_SEPARATOR_START.match(first)
+            and len(_LETTER.findall(first)) <= SEPARATOR_MAX_TEXT):
+        return "The description starts with a separator line."
+    if _PROMO.search(first):
+        return "The description starts with a promotion or call to action."
+    return ""
+
+
 def check_description_hook(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "Description opens with a real sentence"
     if is_short(video):
-        return _skip("description_hook", "description", title, 5,
+        return _skip("description_hook", "description", title, 8,
                      "Shorts do not show a description opening.")
+    problem = _first_line_problem(video.description)
     n = len(_hook_text(video.description))
-    ok = n >= HOOK_MIN_TEXT
-    return _result("description_hook", "description", title, 5, 5 if ok else 0,
-                   f"The first {HOOK_WINDOW} characters hold {n} characters of plain text.",
-                   f"Start with one or two sentences of plain text (about {HOOK_MIN_TEXT}+ "
-                   "characters) before any links or hashtags; viewers see that above \"more\".")
+    if not problem and n < HOOK_MIN_TEXT:
+        problem = f"The first {HOOK_WINDOW} characters hold only {n} characters of plain text."
+    return _result("description_hook", "description", title, 8, 0 if problem else 8,
+                   problem or f"The first {HOOK_WINDOW} characters hold {n} characters of "
+                   "plain text.",
+                   "Start with one or two sentences that say what the video is about; move "
+                   "links and promos lower. This text shows above \"more\" and in search "
+                   "results.")
 
 
 def check_description_title_words(video: Video, context: ChannelContext | None) -> CheckResult:
@@ -289,12 +323,23 @@ def check_description_title_words(video: Video, context: ChannelContext | None) 
 def check_description_links_ok(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "Description has no placeholder or broken links"
     if not video.description.strip():
-        return _skip("description_links_ok", "description", title, 3)
+        return _skip("description_links_ok", "description", title, 2)
     match = _BROKEN_LINK.search(video.description)
-    return _result("description_links_ok", "description", title, 3, 0 if match else 3,
+    return _result("description_links_ok", "description", title, 2, 0 if match else 2,
                    f"Found \"{match.group(0).strip()}\"." if match else
                    "No placeholder links found.",
                    "Replace the placeholder with the real link or delete it.")
+
+
+def check_description_related_links(video: Video, context: ChannelContext | None) -> CheckResult:
+    title = "Description links to another video or playlist"
+    if is_short(video) or not video.description.strip():
+        return _skip("description_related_links", "description", title, 3)
+    ok = _RELATED_LINK.search(video.description) is not None
+    return _result("description_related_links", "description", title, 3, 3 if ok else 0,
+                   "A link to another video or playlist is there." if ok else
+                   "No link to another video or playlist found.",
+                   "Link a related video or playlist so viewers keep watching your channel.")
 
 
 def parse_chapters(description: str) -> list[int]:
@@ -307,8 +352,8 @@ def check_description_chapters(video: Video, context: ChannelContext | None) -> 
     title = "Long video has chapters starting at 0:00"
     seconds = parse_duration(video.duration)
     if seconds is None or seconds < CHAPTERS_MIN_DURATION:
-        return _skip("description_chapters", "description", title, 7,
-                     "Chapters only matter for videos of 6 minutes or more.")
+        return _skip("description_chapters", "description", title, 8,
+                     "Chapters only matter for videos of 4 minutes or more.")
     stamps = parse_chapters(video.description)
     if len(stamps) < CHAPTERS_MIN_COUNT:
         problem = f"Found {len(stamps)} timestamps; chapters need at least {CHAPTERS_MIN_COUNT}."
@@ -318,7 +363,7 @@ def check_description_chapters(video: Video, context: ChannelContext | None) -> 
         problem = f"Timestamps must go up, at least {CHAPTER_MIN_GAP} seconds apart."
     else:
         problem = ""
-    return _result("description_chapters", "description", title, 7, 0 if problem else 7,
+    return _result("description_chapters", "description", title, 8, 0 if problem else 8,
                    problem or f"{len(stamps)} chapters found.",
                    "Add chapters, one per line like \"0:00 Intro\", at least 3, starting at "
                    "0:00 and matching what is really in the video.")
@@ -344,9 +389,9 @@ def check_description_no_angle_brackets(video: Video,
                                         context: ChannelContext | None) -> CheckResult:
     title = "Description has no < or > characters"
     if not video.description:
-        return _skip("description_no_angle_brackets", "description", title, 2)
+        return _skip("description_no_angle_brackets", "description", title, 1)
     ok = "<" not in video.description and ">" not in video.description
-    return _result("description_no_angle_brackets", "description", title, 2, 2 if ok else 0,
+    return _result("description_no_angle_brackets", "description", title, 1, 1 if ok else 0,
                    "No angle brackets." if ok else "The description contains < or >.",
                    "Remove the < and > characters; YouTube rejects them.")
 
@@ -355,9 +400,9 @@ def check_description_limit(video: Video, context: ChannelContext | None) -> Che
     title = "Description fits the 5,000 character limit"
     n = len(video.description)
     if n == 0:
-        return _skip("description_limit", "description", title, 2)
+        return _skip("description_limit", "description", title, 1)
     ok = n <= DESCRIPTION_LIMIT
-    return _result("description_limit", "description", title, 2, 2 if ok else 0,
+    return _result("description_limit", "description", title, 1, 1 if ok else 0,
                    f"The description is {n} characters.",
                    f"Cut {n - DESCRIPTION_LIMIT} characters; YouTube allows "
                    f"{DESCRIPTION_LIMIT:,}.")
@@ -384,7 +429,7 @@ def check_engagement_prompt(video: Video, context: ChannelContext | None) -> Che
                    "Add a short line asking viewers to subscribe, like or comment.")
 
 
-# --- Tag checks (15 points) ---
+# --- Tag checks (14 points) ---
 
 def check_tags_present(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "Video has 5 to 15 tags"
@@ -405,9 +450,9 @@ def tags_char_count(tags: Iterable[str]) -> int:
 def check_tags_length(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "Tags fit the 500 character limit"
     if not video.tags:
-        return _skip("tags_length", "tags", title, 3)
+        return _skip("tags_length", "tags", title, 2)
     n = tags_char_count(video.tags)
-    return _result("tags_length", "tags", title, 3, 3 if n <= TAGS_CHAR_LIMIT else 0,
+    return _result("tags_length", "tags", title, 2, 2 if n <= TAGS_CHAR_LIMIT else 0,
                    f"The tags use {n} of {TAGS_CHAR_LIMIT} characters.",
                    f"Remove tags until they fit; they are {n - TAGS_CHAR_LIMIT} characters over.")
 
@@ -440,7 +485,7 @@ def check_tags_unique(video: Video, context: ChannelContext | None) -> CheckResu
                    "Delete the repeated tags.")
 
 
-# --- Detail checks (20 points) ---
+# --- Detail checks (22 points) ---
 
 def check_default_language(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "Video language is set"
@@ -461,11 +506,15 @@ def check_audio_language(video: Video, context: ChannelContext | None) -> CheckR
 
 
 def check_localizations(video: Video, context: ChannelContext | None) -> CheckResult:
-    title = "Title and description are translated"
+    title = "Title and description are translated into 5+ languages"
     n = len(video.localizations)
-    return _result("localizations", "details", title, 6, 6 if n else 0,
-                   f"The video has {n} translations.",
-                   "Add translated titles and descriptions; Yezatas can translate them for you.")
+    points = 8 if n >= LOCALIZATIONS_GOOD else _half(8) if n >= 1 else 0
+    fix = ("Add translated titles and descriptions; Yezatas can translate them for you."
+           if n == 0 else
+           f"Add more languages; {LOCALIZATIONS_GOOD} or more reach more viewers, and Yezatas "
+           "can translate them for you.")
+    return _result("localizations", "details", title, 8, points,
+                   f"The video has {n} translations.", fix)
 
 
 def check_thumbnail_hd(video: Video, context: ChannelContext | None) -> CheckResult:
@@ -491,6 +540,7 @@ CHECKS: tuple[CheckFn, ...] = (
     check_description_hook,
     check_description_title_words,
     check_description_links_ok,
+    check_description_related_links,
     check_description_chapters,
     check_description_hashtags,
     check_description_no_angle_brackets,
