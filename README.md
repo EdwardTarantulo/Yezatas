@@ -58,6 +58,14 @@ as it lands; the git history is the detailed record.
   - **Where to use it.** On a video page, or for the top of **Fix next**.
   - **Audit trail.** An **Agent log** records every run: the tool calls, what the checks found, tokens and estimated cost.
   - **Standard models only.** Contributor models, which may train on the data, are refused.
+- **2026-10-31**: **verified translations** of titles and descriptions:
+  - **Translate.** **Muse Spark Open** (on Baseten; Muse Spark 1.3 as the fallback) translates into the chosen languages in parallel.
+  - **Code checks.** Every link, time, hashtag, @handle and email must survive, and YouTube's limits must hold.
+  - **Independent check.** **Muse Glimmer** runs on the creator's own PC through Ollama. It translates each result back without seeing the original, compares that with the original and scores it.
+    - In the first real test, Glimmer sometimes handed the translation back untranslated and still scored it 5/5.
+    - Now a copied back-translation is caught, retried once, and otherwise marked unverified with the reason.
+  - **Review.** Results are verified, flagged, unverified or failed. Only the ones the creator ticks go into the draft.
+  - **Push.** It sends the video language and the complete translation list (YouTube replaces it whole). Studio changes are detected, and the old translations are backed up. Studio's regional codes (like `de-DE`) are reused instead of duplicated.
 
 ## Setup
 
