@@ -1,0 +1,52 @@
+{% extends "shell.html" %}
+{% block title %}Agent log - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Agent log</h1>
+<p class="intro">This is the audit trail: every suggestion run, what {{ model }} asked to read, and what the checks found. Nothing here reaches YouTube.</p>
+
+{% if rows %}
+<ul class="history">
+  {% for r in rows %}
+  <li class="card history-row" id="run-{{ r.run.id }}">
+    <div class="history-head">
+      <span class="pill {{ r.tone }}">{{ r.label }}</span>
+      <a class="history-title" href="/videos/{{ r.run.video_id|urlencode }}">{{ r.title }}</a>
+      <span class="muted history-when">Run #{{ r.run.id }} &middot; {{ r.when }} &middot; {{ r.run.model }}</span>
+    </div>
+    {% if r.run.summary %}<p>{{ r.run.summary }}</p>{% endif %}
+    <p class="muted run-cost">{{ r.tokens }} &middot; Estimated cost: {{ r.cost }}</p>
+    {% if r.has_details %}
+    <details class="backup">
+      <summary>Show the steps</summary>
+      {% if r.tool_calls %}
+      <h3 class="run-h">Tool calls</h3>
+      <ul class="run-list">
+        {% for t in r.tool_calls %}<li><code>{{ t.name }}</code> <code>{{ t.arguments }}</code> <span class="muted">({{ t.result_chars }} characters returned)</span></li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if r.problems %}
+      <h3 class="run-h">Problems found by the checks</h3>
+      <ul class="run-list">
+        {% for p in r.problems %}<li>{{ p }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if r.errors %}
+      <h3 class="run-h">Errors</h3>
+      <ul class="run-list">
+        {% for e in r.errors %}<li>{{ e }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </details>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if rows|length >= limit %}<p class="hint">Showing the newest {{ limit }} runs.</p>{% endif %}
+{% else %}
+<section class="empty-state" id="no-runs">
+  <h2>No suggestions yet</h2>
+  <p class="muted">Every run of the suggestion agent will be listed here. Open a video and use Suggest improvements to start one.</p>
+  <p><a class="button secondary" href="/videos">Go to Content</a></p>
+</section>
+{% endif %}
+{% endblock %}

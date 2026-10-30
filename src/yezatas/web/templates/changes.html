@@ -1,5 +1,5 @@
 {% extends "shell.html" %}
-{% from "_macros.html" import thumb, diff_view, issue_list, post_form %}
+{% from "_macros.html" import thumb, diff_view, issue_list, post_form, run_changes %}
 {% block title %}Changes - Yezatas{% endblock %}
 {% block content %}
 <h1 class="page-title">Changes</h1>
@@ -45,6 +45,17 @@
 
   {{ issue_list(c.errors, c.warnings) }}
   {{ diff_view(c.diff) }}
+
+  {% set w = why.get(vid) if c.row.source == 'agent' else none %}
+  {% if w %}
+  <div class="why" id="agent-why-{{ vid }}">
+    <h3 class="diff-h">Why</h3>
+    <p class="muted">Suggested by {{ w.run.model }}. Check every change before you approve it.</p>
+    {% if w.run.summary %}<p class="run-summary">{{ w.run.summary }}</p>{% endif %}
+    {{ run_changes(w) }}
+    <p class="hint"><a href="/agent#run-{{ w.run.id }}">See the steps in the Agent log</a></p>
+  </div>
+  {% endif %}
 
   <div class="actions">
     {% if c.ready %}

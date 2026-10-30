@@ -6,16 +6,18 @@ nothing here touches the disk or YouTube. Formatting (view counts, dates) lives 
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 from urllib.parse import urlencode
 
 from .. import edits
+from ..agent import estimate_cost
 from ..diffs import DraftDiff, diff_draft
 from ..push import PushItem
 from ..seo import CATEGORIES, CheckResult, Scorecard, fix_priority
-from ..store import DraftRow, PushRecord, Video
+from ..store import AgentRun, DraftRow, PushRecord, Video
 from ..validate import Issue, has_errors
 
 PAGE_SIZE = 50
@@ -542,3 +544,149 @@ def history_rows(records: Iterable[PushRecord], titles: Mapping[str, str],
             backup=backup_of_record(record), has_draft=record.video_id in draft_ids,
         ))
     return rows
+
+
+# --- AI suggestions: agent runs, the fix-next batch -------------------------------------------
+# run status -> (label, pill class)
+RUN_STATUS_LABELS: dict[str, tuple[str, str]] = {
+    "drafted": ("Draft made", "done"),
+    "no_change": ("No change needed", ""),
+    "rejected": ("Stopped by the checks", "warn"),
+    "failed": ("Failed", "problem"),
+    "running": ("Running", "working"),
+}
+# batch item status -> (label, pill class): the run statuses plus two that never reach a run
+ITEM_STATUS_LABELS: dict[str, tuple[str, str]] = {
+    **RUN_STATUS_LABELS,
+    "skipped": ("Skipped", "warn"),
+    "not_attempted": ("Not attempted", ""),
+}
+FIELD_LABELS = {"title": "Title", "description": "Description", "tags": "Tags"}
+STOP_ERROR_KINDS = ("auth", "rate_limit")
+
+
+def format_cost(cost: float | None) -> str:
+    """'$0.012', or "unknown" for a model without a known price."""
+    return "unknown" if cost is None else f"${cost:.3f}"
+
+
+@dataclass(frozen=True)
+class RunChange:
+    field: str
+    check: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class RunToolCall:
+    name: str
+    arguments: str  # compact JSON (or the raw text when the model sent something unparsable)
+    result_chars: int
+
+
+@dataclass(frozen=True)
+class RunView:
+    """An agent run with everything the video page, the Changes page and the Agent log show."""
+
+    run: AgentRun
+    title: str
+    when: str
+    label: str
+    tone: str
+    changes: tuple[RunChange, ...]
+    not_fixed: tuple[RunChange, ...]
+    tool_calls: tuple[RunToolCall, ...]
+    problems: tuple[str, ...]
+    errors: tuple[str, ...]
+    tokens: str
+    cost: str
+
+    @property
+    def has_details(self) -> bool:
+        return bool(self.tool_calls or self.problems or self.errors)
+
+
+def _dicts(value: Any) -> list[dict[str, Any]]:
+    return [x for x in value if isinstance(x, dict)] if isinstance(value, list) else []
+
+
+def run_view(run: AgentRun, titles: Mapping[str, str], check_titles: Mapping[str, str],
+             fmt_time: Callable[[str], str], *, interrupted: bool = False) -> RunView:
+    """A run as plain display data. `interrupted`: it says running but no job is running."""
+    label, tone = RUN_STATUS_LABELS.get(run.status, (run.status, ""))
+    if interrupted and run.status == "running":
+        label, tone = "Interrupted", "warn"
+
+    def check_title(check_id: Any) -> str:
+        cid = str(check_id or "")
+        return check_titles.get(cid) or cid or "General"
+
+    result = run.result if isinstance(run.result, dict) else {}
+    changes = tuple(
+        RunChange(FIELD_LABELS.get(str(c.get("field")), str(c.get("field") or "")),
+                  check_title(c.get("check_id")), str(c.get("reason") or ""))
+        for c in _dicts(result.get("changes")))
+    not_fixed = tuple(RunChange("", check_title(c.get("check_id")), str(c.get("reason") or ""))
+                      for c in _dicts(result.get("not_fixed")))
+    tool_calls: list[RunToolCall] = []
+    problems: list[str] = []
+    errors: list[str] = []
+    for event in _dicts(run.log):
+        kind = event.get("type")
+        if kind == "tool":
+            args = event.get("arguments")
+            text = args if isinstance(args, str) else json.dumps(
+                args if args is not None else {}, separators=(",", ":"), ensure_ascii=False)
+            chars = event.get("result_chars")
+            tool_calls.append(RunToolCall(str(event.get("name") or ""), text,
+                                          chars if isinstance(chars, int) else 0))
+        elif kind == "problems":
+            problems.extend(str(p) for p in (event.get("problems") or []))
+        elif kind == "error":
+            errors.append(str(event.get("message") or event.get("kind") or "Unknown error"))
+    cost = estimate_cost(run.model, run.input_tokens, run.cached_tokens, run.output_tokens)
+    return RunView(
+        run=run, title=titles.get(run.video_id) or run.video_id,
+        when=fmt_time(run.started_at), label=label, tone=tone, changes=changes,
+        not_fixed=not_fixed, tool_calls=tuple(tool_calls), problems=tuple(problems),
+        errors=tuple(errors),
+        tokens=(f"{run.input_tokens:,} tokens in ({run.cached_tokens:,} cached), "
+                f"{run.output_tokens:,} out"),
+        cost=format_cost(cost),
+    )
+
+
+def stops_batch(run: AgentRun | None) -> bool:
+    """True when a failed run ended on an auth or rate-limit error: more runs would fail too."""
+    events = _dicts(run.log) if run is not None else []
+    last = events[-1] if events else {}
+    return last.get("type") == "error" and last.get("kind") in STOP_ERROR_KINDS
+
+
+@dataclass(frozen=True)
+class SuggestItem:
+    """One video of a suggestion job and what became of it."""
+
+    video_id: str
+    title: str
+    status: str  # a key of ITEM_STATUS_LABELS
+    message: str = ""
+
+    @property
+    def label(self) -> str:
+        return ITEM_STATUS_LABELS.get(self.status, (self.status, ""))[0]
+
+    @property
+    def tone(self) -> str:
+        return ITEM_STATUS_LABELS.get(self.status, (self.status, ""))[1]
+
+
+@dataclass(frozen=True)
+class SuggestBatch:
+    """The result of a suggestion job: one item per video, and why it stopped early (or '')."""
+
+    items: tuple[SuggestItem, ...]
+    stopped: str = ""
+
+    def count(self, status: str) -> int:
+        return sum(1 for i in self.items if i.status == status)

@@ -553,3 +553,19 @@ button.gbtn { cursor: pointer; }
   .change-head .vthumb { display: none; }
   .history-when { margin-left: 0; }
 }
+
+/* --- AI suggestions, agent log --- */
+.run-h { margin: 14px 0 6px; font-size: 14px; font-weight: 600; }
+.run-list { margin: 0 0 8px; }
+.run-list li { overflow-wrap: anywhere; }
+.run-summary { font-weight: 500; }
+.run-cost { margin: 8px 0; }
+.suggest-card .run { margin-top: 16px; padding-top: 4px; border-top: 1px solid var(--line); }
+.suggest-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--line); }
+.suggest-form select { height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.suggest-form .hint { flex-basis: 100%; margin: 4px 0 0; }
+.why { margin: 0 0 14px; padding: 10px 14px; border-radius: 8px; background: var(--info-bg); }
+.why p { margin: 0 0 6px; }
+.why .muted, .why .hint { color: var(--text); }
+.upload input[type=password] { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.upload input[type=password]:focus { border-color: var(--link); outline: 0; box-shadow: 0 0 0 1px var(--link); }

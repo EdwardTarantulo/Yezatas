@@ -1,5 +1,5 @@
 {% extends "shell.html" %}
-{% from "_macros.html" import score_badge, thumb %}
+{% from "_macros.html" import score_badge, thumb, privacy_note %}
 {% block title %}Channel dashboard - Yezatas{% endblock %}
 {% block content %}
 <h1 class="page-title">Channel dashboard</h1>
@@ -7,6 +7,8 @@
 {% if draft_count %}
 <p class="flash" id="drafts-note">{{ draft_count }} change{{ '' if draft_count == 1 else 's' }} waiting for review <a href="/changes">Review changes</a></p>
 {% endif %}
+
+{% include "_suggest_dash.html" %}
 
 <div class="dash-grid">
   <section class="card dash-card area-seo" id="card-seo" aria-labelledby="h-seo">
@@ -51,6 +53,18 @@
     </ul>
     {% else %}
     <p class="empty-note">Nothing to fix right now.</p>
+    {% endif %}
+    {% if sg.has_key %}
+    <form class="suggest-form" id="suggest-fix-next" method="post" action="/suggest/fix-next">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="sg-count">Suggest fixes for the top</label>
+      <select id="sg-count" name="count">{% for n in sg.counts %}<option value="{{ n }}"{% if n == 3 %} selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+      <span>videos</span>
+      <button type="submit" class="button secondary"{% if sg.running %} disabled{% endif %}>Suggest fixes</button>
+      <p class="hint">{{ privacy_note(sg.model) }} Each suggestion becomes a draft you review.</p>
+    </form>
+    {% else %}
+    <p class="hint" id="suggest-no-key">AI suggestions need a Meta API key. <a href="/setup#step-ai">Add one in Setup</a>.</p>
     {% endif %}
   </section>
 

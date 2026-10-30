@@ -1,0 +1,41 @@
+{% from "_macros.html" import privacy_note, run_changes %}
+{# The "Suggestions from Muse Spark" card of the video page. #}
+<section class="card suggest-card" id="suggest" aria-labelledby="h-suggest">
+  <div class="card-title-row">
+    <h2 id="h-suggest">Suggestions from Muse Spark</h2>
+    <a class="button secondary" href="/agent">Agent log</a>
+  </div>
+  {% if sg.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="suggest-msg" role="status" aria-live="polite">{{ sg.message or 'Starting…' }}</span></p>
+  <p class="hint">You can leave this page. The suggestion keeps running while Yezatas is open, and the result shows here.</p>
+  {% else %}
+  <p class="muted">{{ privacy_note(sg.model) }} The result is a draft for you to review. Nothing goes to YouTube until you approve and push it.</p>
+  {% if sg.failed %}
+  <div class="flash error" role="alert">{{ sg.failed }}</div>
+  <form class="inline" method="post" action="/suggest/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if sg.busy %}<p class="hint" id="suggest-busy">Another suggestion is running. Wait for it to finish.</p>{% endif %}
+  {% if change %}<p class="hint" id="suggest-has-draft">This video already has a draft. <a href="/changes#d-{{ video.video_id|urlencode }}">Review it</a>, then push or discard it before asking for a new suggestion.</p>{% endif %}
+  {% if not sg.has_key %}<p class="hint" id="suggest-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/suggest">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="button primary"{% if sg.busy or change %} disabled{% endif %}>Suggest improvements</button>
+  </form>
+  {% endif %}
+
+  {% if latest_run %}
+  {% set r = latest_run %}
+  <div class="run" id="latest-run">
+    <h3 class="run-h">Latest run</h3>
+    <p><span class="pill {{ r.tone }}">{{ r.label }}</span> <span class="muted">{{ r.when }} &middot; {{ r.run.model }}</span></p>
+    {% if r.run.summary %}<p class="run-summary">{{ r.run.summary }}</p>{% endif %}
+    {{ run_changes(r) }}
+    <p class="muted run-cost">{{ r.tokens }} &middot; Estimated cost: {{ r.cost }}</p>
+    <p>
+      {% if r.run.status == 'drafted' and change %}<a href="/changes#d-{{ video.video_id|urlencode }}">Review the draft on the Changes page</a> &middot; {% endif %}
+      <a href="/agent#run-{{ r.run.id }}">See the steps in the Agent log</a>
+    </p>
+  </div>
+  {% endif %}
+</section>

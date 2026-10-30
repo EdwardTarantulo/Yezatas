@@ -13,6 +13,7 @@
 {%- elif name == 'minus' -%}<circle cx="12" cy="12" r="9"/><path d="M8.5 12h7"/>
 {%- elif name == 'changes' -%}<path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>
 {%- elif name == 'history' -%}<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>
+{%- elif name == 'agent' -%}<rect x="4.5" y="7.5" width="15" height="11" rx="2.5"/><path d="M12 7.5V4.5M9 12.5v1.5M15 12.5v1.5M2.5 13v2M21.5 13v2"/><circle cx="12" cy="3.8" r="0.1"/>
 {%- elif name == 'back' -%}<path d="M15 5l-7 7 7 7"/>
 {%- elif name == 'external' -%}<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>
 {%- endif -%}
@@ -70,3 +71,23 @@
 {% endmacro %}
 
 {% macro post_form(action, csrf, label, kind='secondary', disabled=false, describedby='') %}<form class="inline" method="post" action="{{ action }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button {{ kind }}"{% if disabled %} disabled{% endif %}{% if describedby %} aria-describedby="{{ describedby }}"{% endif %}>{{ label }}</button></form>{% endmacro %}
+
+
+{# The privacy sentence that goes next to every button that sends a video to the model. #}
+{% macro privacy_note(model) %}This video's title, description, tags, stats and scorecard go to Meta's Model API ({{ model }}, Standard mode: Meta does not use them for training).{% endmacro %}
+
+{# What a run changed and what it left for the creator. `r` is a RunView. #}
+{% macro run_changes(r) %}
+{% if r.changes %}
+<h3 class="run-h">What changed</h3>
+<ul class="run-list">
+  {% for c in r.changes %}<li><strong>{{ c.field }}</strong> &middot; {{ c.check }}: {{ c.reason }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% if r.not_fixed %}
+<h3 class="run-h">Left for you</h3>
+<ul class="run-list">
+  {% for c in r.not_fixed %}<li><strong>{{ c.check }}</strong>: {{ c.reason }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endmacro %}

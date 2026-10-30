@@ -1,9 +1,10 @@
 """The Yezatas web app: the setup screen, the SEO dashboard, the content table, video pages and
-the edit, review and push screens.
+the edit, review and push screens, plus the AI suggestions and the agent log.
 
 Pages only read from YouTube through the catalog pull. The one write is `POST /changes/push`,
-which sends drafts the creator approved and ticked a confirmation box for. Background jobs open
-their own Store, because a SQLite connection must not cross threads.
+which sends drafts the creator approved and ticked a confirmation box for. A suggestion only ever
+makes a draft. Background jobs open their own Store, because a SQLite connection must not cross
+threads.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
-from .. import auth, edits, push
+from .. import agent, auth, edits, push
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
 from ..quota import QuotaGuard
@@ -39,9 +40,9 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (Entry, build_listing, change_cards, dashboard_model, format_count,
-                    format_date, group_checks, history_rows, make_entries, plan_lines,
-                    push_results, thumb_url)
+from .views import (Entry, RunView, SuggestBatch, SuggestItem, build_listing, change_cards,
+                    dashboard_model, format_count, format_date, group_checks, history_rows,
+                    make_entries, plan_lines, push_results, run_view, stops_batch, thumb_url)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -55,12 +56,21 @@ UPLOAD_BODY_LIMIT = MAX_CLIENT_FILE_BYTES + 16 * 1024  # file plus multipart ove
 # Generous caps on the edit form. YouTube's own limits are far lower; the validator reports those.
 FORM_LIMITS = {"title": 1000, "description": 50_000, "tags": 5000}
 HISTORY_LIMIT = 100
+AGENT_LOG_LIMIT = 100
+SUGGEST_TIMEOUT_SECONDS = 15 * 60.0
+SUGGEST_TIMEOUT_MESSAGE = (
+    "The suggestions took more than 15 minutes, so Yezatas stopped waiting. The Agent log shows "
+    "what finished."
+)
+FIX_NEXT_COUNTS = (1, 3, 5, 10)
+MAX_KEY_CHARS = 500
 
 HERE = Path(__file__).parent
 
 ReaderFactory = Callable[[Any], YouTubeReader]
 WriterFactory = Callable[[Any], YouTubeWriter]
 CredentialsLoader = Callable[[Config], Any]
+SuggestFn = Callable[[Store, str, Report], "agent.SuggestResult"]
 
 
 class ProgressReader:
@@ -112,6 +122,37 @@ def load_write_credentials(config: Config) -> Any:
     return auth.load_credentials(config, scopes=(auth.WRITE,))
 
 
+def map_suggest_error(exc: BaseException) -> tuple[str, str]:
+    return "suggest", f"The suggestions stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def make_default_suggest(config: Config) -> SuggestFn:
+    """The real suggest function: Muse Spark through Meta's Model API, one client per run.
+
+    The model client and the agent loop are looked up when a run starts, not at import.
+    """
+
+    def run(store: Store, video_id: str, report: Report) -> "agent.SuggestResult":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.AgentError("No Meta API key is set. Add one in Setup.")
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        return agent.suggest_for_video(store, client, video_id, report=report)
+
+    return run
+
+
+def check_title_map(entries: Sequence[Entry]) -> dict[str, str]:
+    """check id -> title, read off the scorecards (the Agent log and Changes show titles)."""
+    titles: dict[str, str] = {}
+    for entry in entries:
+        for check in entry.card.checks:
+            titles.setdefault(check.check_id, check.title)
+    return titles
+
+
 def _job_json(snap: JobSnapshot) -> dict[str, Any]:
     return {"status": snap.status, "message": snap.message, "error_kind": snap.error_kind}
 
@@ -130,6 +171,7 @@ class WebState:
         write_sign_in: Callable[[Config], Any],
         write_credentials_loader: CredentialsLoader,
         writer_factory: WriterFactory,
+        suggest: SuggestFn,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -138,6 +180,7 @@ class WebState:
         self._write_sign_in = write_sign_in
         self._write_credentials_loader = write_credentials_loader
         self._writer_factory = writer_factory
+        self._suggest = suggest
         self.signin_job = Job(
             map_sign_in_error, sign_in_timeout, SIGN_IN_TIMEOUT_MESSAGE, clock
         )
@@ -145,6 +188,11 @@ class WebState:
         self.write_job = Job(map_sign_in_error, sign_in_timeout, SIGN_IN_TIMEOUT_MESSAGE, clock)
         self.push_job = Job(map_api_error)
         self._push_seen: JobSnapshot | None = None  # the finished push the creator dismissed
+        self.suggest_job = Job(map_suggest_error, SUGGEST_TIMEOUT_SECONDS,
+                               SUGGEST_TIMEOUT_MESSAGE, clock)
+        self._suggest_seen: JobSnapshot | None = None  # the finished job the creator dismissed
+        self._suggest_ids: tuple[str, ...] = ()
+        self._suggest_batch = False
         self._lock = threading.Lock()
         self._check_lock = threading.Lock()
         self._check: CheckState | None = None
@@ -273,6 +321,76 @@ class WebState:
             with self._lock:
                 self._push_seen = snap
 
+    # --- AI suggestions ---------------------------------------------------------------------
+    def start_suggest(self, video_ids: Sequence[str], batch: bool, sid: str) -> bool:
+        """Suggest improvements for these videos, one after another, in the one suggestion job."""
+        ids = tuple(video_ids)
+
+        def work(report: Report) -> SuggestBatch:
+            return self._run_suggest(ids, batch, sid, report)
+
+        if not self.suggest_job.start(work):
+            return False
+        with self._lock:
+            self._suggest_ids, self._suggest_batch = ids, batch
+        return True
+
+    def _run_suggest(self, ids: tuple[str, ...], batch: bool, sid: str,
+                     report: Report) -> SuggestBatch:
+        items: list[SuggestItem] = []
+        stopped = ""
+        with Store(self.config.catalog_db) as store:
+            titles: dict[str, str] = {}
+            for video_id in ids:
+                video = store.get_video(video_id)
+                titles[video_id] = video.title if video is not None else video_id
+            for number, video_id in enumerate(ids, 1):
+                title = titles[video_id]
+                lead = f"{number} of {len(ids)}: {title}" if len(ids) > 1 else ""
+
+                def say(text: str, lead: str = lead) -> None:
+                    report(f"{lead} ({text})" if lead else text)
+
+                if lead:
+                    report(lead)
+                try:
+                    result = self._suggest(store, video_id, say)
+                except agent.AgentError as exc:
+                    items.append(SuggestItem(video_id, title, "skipped", str(exc)))
+                    continue
+                except Exception as exc:  # noqa: BLE001 - keep what finished, stop the rest
+                    items.append(SuggestItem(video_id, title, "failed",
+                                             f"Stopped unexpectedly ({exc.__class__.__name__})."))
+                    stopped = "A suggestion stopped unexpectedly, so the rest were not tried."
+                    break
+                items.append(SuggestItem(video_id, title, result.status, result.message))
+                if result.status == "failed" and stops_batch(store.get_agent_run(result.run_id)):
+                    stopped = result.message
+                    break
+        done = {item.video_id for item in items}
+        items.extend(SuggestItem(v, titles[v], "not_attempted") for v in ids if v not in done)
+        if not batch and items:
+            # One video: the result shows once, on the page the creator lands on after the reload.
+            only = items[0]
+            kind = ("ok" if only.status == "drafted"
+                    else "info" if only.status == "no_change" else "error")
+            self.add_flash(sid, kind, only.message or only.label)
+        return SuggestBatch(tuple(items), stopped)
+
+    def suggest_state(self) -> tuple[JobSnapshot, tuple[str, ...], bool]:
+        """(job snapshot, video ids, is it a batch). A finished job the creator dismissed is idle."""
+        snap = self.suggest_job.snapshot()
+        with self._lock:
+            if snap is self._suggest_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._suggest_ids, self._suggest_batch
+
+    def dismiss_suggest_result(self) -> None:
+        snap = self.suggest_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._suggest_seen = snap
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -301,13 +419,15 @@ def create_app(
     write_sign_in: Callable[[Config], Any] = sign_in_with_write_access,
     write_credentials_loader: CredentialsLoader = load_write_credentials,
     writer_factory: WriterFactory = GoogleYouTubeWriter,
+    suggest: SuggestFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
     token = token or secrets.token_urlsafe(32)
     start_url = f"http://127.0.0.1:{port}/?t={token}"
     state = WebState(config, sign_in, reader_factory, credentials_loader, clock, sign_in_timeout,
-                     write_sign_in, write_credentials_loader, writer_factory)
+                     write_sign_in, write_credentials_loader, writer_factory,
+                     suggest or make_default_suggest(config))
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -372,6 +492,8 @@ def create_app(
             "pull_result": pull.result if isinstance(pull.result, PullResult) else None,
             "quota": {"used": used, "remaining": remaining, "budget": config.daily_quota_budget},
             "home": str(config.home),
+            "model": config.model, "model_key": agent.key_source(config),
+            "key_env": agent.KEY_ENV,
             "poll": signin.running or pull.running,
             "max_kb": MAX_CLIENT_FILE_BYTES // 1024,
             "flash": [],
@@ -412,8 +534,23 @@ def create_app(
     def see_other(url: str) -> RedirectResponse:
         return RedirectResponse(url, status_code=303)
 
-    def flash(request: Request, kind: str, text: str) -> None:
-        state.add_flash(request.state.session_id, kind, text)
+    def flash(request: Request, kind: str, text: str, step: str = "") -> None:
+        state.add_flash(request.state.session_id, kind, text, step)
+
+    def suggest_panel(video_id: str = "") -> dict[str, Any]:
+        """What the suggestion job is doing, for the dashboard (no id) or one video page."""
+        snap, ids, is_batch = state.suggest_state()
+        mine = (video_id in ids) if video_id else is_batch
+        batch = snap.result if (snap.status == "done" and is_batch and not video_id
+                                and isinstance(snap.result, SuggestBatch)) else None
+        return {
+            "has_key": bool(agent.key_source(config)), "model": config.model,
+            "running": snap.running and (mine or not video_id),
+            "busy": snap.running and not mine and bool(video_id),
+            "message": snap.message, "batch": batch,
+            "failed": snap.message if snap.status == "failed" and mine else "",
+            "counts": FIX_NEXT_COUNTS, "video_id": video_id,
+        }
 
     def video_not_found(request: Request) -> Response:
         return render(request, "error.html", {
@@ -433,6 +570,7 @@ def create_app(
         model = dashboard_model(data["entries"])
         return render(request, "dashboard.html", {
             "active": "dashboard", "latest_pull": data["latest_pull"], "quota": data["quota"],
+            "sg": suggest_panel(), "poll": state.suggest_job.snapshot().running,
             **model,
         })
 
@@ -457,7 +595,12 @@ def create_app(
         video = entry.video
         with Store(config.catalog_db) as store:
             row = store.get_draft(video_id)
+            runs = store.list_agent_runs(video_id, limit=1)
         card = change_cards([(row, video)])[0] if row is not None else None
+        panel = suggest_panel(video_id)
+        latest = (run_view(runs[0], {video_id: video.title}, check_title_map([entry]),
+                           _local_time, interrupted=not panel["running"])
+                  if runs else None)
         text = ((row.title, row.description, row.tags) if row is not None
                 else (video.title, video.description, tuple(video.tags)))
         return render(request, "video.html", {
@@ -470,6 +613,7 @@ def create_app(
             "views": format_count(video.view_count), "likes": format_count(video.like_count),
             "comments": format_count(video.comment_count),
             "published": format_date(video.published_at),
+            "sg": panel, "latest_run": latest, "poll": panel["running"] or panel["busy"],
         })
 
     @app.get("/setup")
@@ -486,6 +630,7 @@ def create_app(
             "pull": _job_json(state.pull_job.snapshot()),
             "write": _job_json(state.write_job.snapshot()),
             "push": _job_json(state.push_job.snapshot()),
+            "suggest": _job_json(state.suggest_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
 
@@ -598,6 +743,22 @@ def create_app(
         return back_to_setup("pull")
 
     # --- edit, review, push, history -----------------------------------------------------------
+    def why_runs(cards: Sequence[Any]) -> dict[str, RunView]:
+        """For agent drafts: the latest run that made a draft of that video (worker thread)."""
+        ids = [c.video_id for c in cards if c.row.source == "agent"]
+        if not ids:
+            return {}
+        data = catalog_data()
+        titles = check_title_map(data["entries"]) if data else {}
+        found: dict[str, RunView] = {}
+        with Store(config.catalog_db) as store:
+            for video_id in ids:
+                run = next((r for r in store.list_agent_runs(video_id)
+                            if r.status == "drafted"), None)
+                if run is not None:
+                    found[video_id] = run_view(run, {}, titles, _local_time)
+        return found
+
     def changes_data() -> list[Any]:
         """Every pending draft as a card, most viewed video first (worker thread)."""
         with Store(config.catalog_db) as store:
@@ -615,6 +776,7 @@ def create_app(
             "active": "changes", "cards": cards,
             "approved_count": sum(1 for c in cards if c.ready),
             "push_status": state.push_snapshot().status,
+            "why": why_runs(cards),
         })
 
     async def change_step(request: Request, work: Callable[[Store], str], anchor: str = "") -> Response:
@@ -808,5 +970,119 @@ def create_app(
         kind, message, target = await run_in_threadpool(work)
         flash(request, kind, message)
         return see_other(target)
+
+    # --- AI suggestions ---------------------------------------------------------------------
+    @app.post("/videos/{video_id}/suggest")
+    async def suggest_for_video(request: Request, video_id: str) -> Response:
+        await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}")
+
+        def check() -> str:
+            with Store(config.catalog_db) as store:
+                if store.get_video(video_id) is None:
+                    return "missing"
+                return "draft" if store.get_draft(video_id) is not None else ""
+
+        problem = await run_in_threadpool(check)
+        if problem == "missing":
+            return video_not_found(request)
+        if not agent.key_source(config):
+            flash(request, "error", "Add a Meta API key first. Nothing was sent to Meta.", "ai")
+            return back
+        if problem == "draft":
+            flash(request, "error", "This video already has a draft. Push or discard it first.")
+            return back
+        if not state.start_suggest([video_id], False, request.state.session_id):
+            flash(request, "error", "A suggestion is already running. Wait for it to finish.")
+        return back
+
+    def fix_next_ids(count: int) -> list[str]:
+        """The top `count` public videos to fix (the Fix next order) that have no draft."""
+        data = catalog_data()
+        if data is None:
+            return []
+        have = draft_ids()
+        rows = [e for e in data["entries"]
+                if e.video.privacy_status == "public" and e.card.failed
+                and e.video.video_id not in have]
+        rows.sort(key=lambda e: (-e.priority, -e.card.missing, e.video.video_id))
+        return [e.video.video_id for e in rows[:count]]
+
+    @app.post("/suggest/fix-next")
+    async def suggest_fix_next(request: Request) -> Response:
+        form = await read_form(request)
+        back = see_other("/")
+        raw = str(form.get("count") or "")
+        count = int(raw) if raw.isdigit() and int(raw) in FIX_NEXT_COUNTS else 0
+        if not count:
+            flash(request, "error", "Choose 1, 3, 5 or 10 videos.")
+            return back
+        if not agent.key_source(config):
+            flash(request, "error", "Add a Meta API key first. Nothing was sent to Meta.", "ai")
+            return back
+        ids = await run_in_threadpool(fix_next_ids, count)
+        if not ids:
+            flash(request, "info", "No public video needs a fix, or the ones that do already "
+                  "have a draft.")
+            return back
+        if not state.start_suggest(ids, True, request.state.session_id):
+            flash(request, "error", "A suggestion is already running. Wait for it to finish.")
+        return back
+
+    @app.post("/suggest/done")
+    async def dismiss_suggest(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_suggest_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}" if video_id else "/")
+
+    @app.get("/agent")
+    def agent_page(request: Request) -> Response:
+        with Store(config.catalog_db) as store:
+            runs = store.list_agent_runs(limit=AGENT_LOG_LIMIT)
+            titles = {}
+            for run in runs:
+                video = store.get_video(run.video_id)
+                if video is not None:
+                    titles[run.video_id] = video.title
+        data = catalog_data()
+        check_titles = check_title_map(data["entries"]) if data else {}
+        snap = state.suggest_job.snapshot()
+        return render(request, "agent.html", {
+            "active": "agent", "limit": AGENT_LOG_LIMIT, "model": config.model,
+            "rows": [run_view(r, titles, check_titles, _local_time, interrupted=not snap.running)
+                     for r in runs],
+        })
+
+    # --- the Meta API key (optional, for the suggestions) --------------------------------------
+    @app.post("/setup/model-key")
+    async def save_model_key(request: Request) -> Response:
+        form = await read_form(request)
+        key = str(form.get("api_key") or "").strip()
+        if agent.key_source(config) == "environment":
+            flash(request, "error", f"The key comes from the {agent.KEY_ENV} environment "
+                  "variable, so nothing was saved.", "ai")
+        elif not key:
+            flash(request, "error", "Paste your key first.", "ai")
+        elif len(key) > MAX_KEY_CHARS or any(c.isspace() for c in key):
+            flash(request, "error", "That does not look like a key: it must be one line with no "
+                  "spaces. Nothing was saved.", "ai")
+        else:
+            try:
+                await run_in_threadpool(agent.save_api_key, config, key)
+            except (ValueError, OSError):
+                flash(request, "error", "The key could not be saved. Check that "
+                      f"{config.credentials_dir} is writable.", "ai")
+            else:
+                flash(request, "ok", "Saved the key on this computer. It is not shown again.", "ai")
+        return back_to_setup("ai")
+
+    @app.post("/setup/model-key/delete")
+    async def delete_model_key(request: Request) -> Response:
+        await read_form(request)
+        removed = await run_in_threadpool(agent.delete_api_key, config)
+        flash(request, "ok", "The saved key was deleted." if removed
+              else "There was no saved key.", "ai")
+        return back_to_setup("ai")
 
     return app

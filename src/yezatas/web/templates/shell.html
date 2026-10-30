@@ -2,7 +2,7 @@
 {% from "_macros.html" import icon, mark %}
 {% block body_class %}app{% endblock %}
 {% block body %}
-{% set nav = [('dashboard', 'Dashboard', '/'), ('content', 'Content', '/videos'), ('changes', 'Changes', '/changes'), ('history', 'History', '/history'), ('setup', 'Setup', '/setup')] %}
+{% set nav = [('dashboard', 'Dashboard', '/'), ('content', 'Content', '/videos'), ('changes', 'Changes', '/changes'), ('history', 'History', '/history'), ('agent', 'Agent log', '/agent'), ('setup', 'Setup', '/setup')] %}
 <header class="topbar">
   <a class="brand" href="/" aria-label="Yezatas home">{{ mark() }}<span class="brand-name">Yezatas</span></a>
   <form class="search" action="/videos" method="get" role="search">
@@ -20,7 +20,7 @@
   </nav>
   <main class="main">
     {% for item in shell_flash|default([]) %}
-    <div class="flash {{ item.kind }}" role="{{ 'alert' if item.kind == 'error' else 'status' }}">{{ item.text }}</div>
+    <div class="flash {{ item.kind }}" role="{{ 'alert' if item.kind == 'error' else 'status' }}">{{ item.text }}{% if item.step %} <a href="/setup#step-{{ item.step }}">Open Setup</a>{% endif %}</div>
     {% endfor %}
     {% block content %}{% endblock %}
   </main>

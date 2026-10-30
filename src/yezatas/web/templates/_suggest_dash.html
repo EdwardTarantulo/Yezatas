@@ -1,0 +1,39 @@
+{% from "_macros.html" import post_form %}
+{# Progress, result or failure of the suggestion job, above the dashboard cards. #}
+{% if sg.running %}
+<section class="card" id="suggest-progress" aria-labelledby="h-sg-progress">
+  <h2 id="h-sg-progress">Suggesting fixes</h2>
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="suggest-msg" role="status" aria-live="polite">{{ sg.message or 'Starting…' }}</span></p>
+  <p class="hint">You can leave this page. The suggestions keep running while Yezatas is open. Each one becomes a draft you review on the Changes page.</p>
+</section>
+{% elif sg.failed %}
+<section class="card problem notice" id="suggest-failed">
+  <h2>The suggestions stopped</h2>
+  <p>{{ sg.failed }}</p>
+  <div class="actions">{{ post_form('/suggest/done', csrf, 'Dismiss', 'primary') }} <a class="button secondary" href="/agent">Agent log</a></div>
+</section>
+{% elif sg.batch %}
+{% set b = sg.batch %}
+<section class="card" id="suggest-result" aria-labelledby="h-sg-result">
+  <h2 id="h-sg-result">Suggestions finished</h2>
+  <p>{{ b.count('drafted') }} draft{{ '' if b.count('drafted') == 1 else 's' }} made{% if b.count('no_change') %}, {{ b.count('no_change') }} needed no change{% endif %}{% if b.count('rejected') %}, {{ b.count('rejected') }} stopped by the checks{% endif %}{% if b.count('failed') %}, {{ b.count('failed') }} failed{% endif %}{% if b.count('skipped') %}, {{ b.count('skipped') }} skipped{% endif %}{% if b.count('not_attempted') %}, {{ b.count('not_attempted') }} not attempted{% endif %}.</p>
+  {% if b.stopped %}<p class="flash error" role="alert">Stopped early: {{ b.stopped }}</p>{% endif %}
+  <ul class="results">
+    {% for i in b.items %}
+    <li class="result-row" id="sr-{{ i.video_id }}">
+      <span class="pill {{ i.tone }}">{{ i.label }}</span>
+      <div class="result-main">
+        <a href="/videos/{{ i.video_id|urlencode }}">{{ i.title }}</a>
+        {% if i.message %}<p class="muted">{{ i.message }}</p>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  <div class="actions">
+    {{ post_form('/suggest/done', csrf, 'Done', 'primary') }}
+    {% if b.count('drafted') %}<a class="button secondary" href="/changes">Review the drafts</a>{% endif %}
+    <a class="button secondary" href="/agent">Agent log</a>
+  </div>
+</section>
+{% endif %}
