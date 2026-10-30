@@ -23,31 +23,33 @@ def statuses(**kw) -> dict[str, str]:
 def test_nothing_done() -> None:
     assert set(statuses().values()) == {"todo"}
     steps = compute_steps(None, "", False, IDLE, None, IDLE, False)
-    assert [s.enabled for s in steps] == [True, True, True, True, False, False, False]
+    assert [s.enabled for s in steps] == [True, True, True, True, True, False, False, False]
 
 
 def test_client_file_unlocks_sign_in() -> None:
     s = statuses(client=CLIENT)
     assert s["project"] == "done" and s["client"] == "done" and s["signin"] == "todo"
-    assert compute_steps(CLIENT, "", False, IDLE, None, IDLE, False)[4].enabled
+    assert compute_steps(CLIENT, "", False, IDLE, None, IDLE, False)[5].enabled
 
 
 def test_steps_2_and_3_wait_for_proof_once_the_client_file_is_in() -> None:
     steps = {s.key: s for s in compute_steps(CLIENT, "", False, IDLE, None, IDLE, False)}
     assert steps["api"].status == "unverified" and steps["consent"].status == "unverified"
+    assert steps["testusers"].status == "unverified"
     assert steps["api"].pill == "Not checked yet"
     assert statuses()["api"] == "todo" and statuses()["consent"] == "todo"
 
 
-def test_invalid_client_file_is_a_problem_on_step_4() -> None:
+def test_invalid_client_file_is_a_problem_on_step_5() -> None:
     steps = compute_steps(None, "This is not JSON.", False, IDLE, None, IDLE, False)
-    assert steps[3].status == "problem" and steps[3].note == "This is not JSON."
+    assert steps[4].status == "problem" and steps[4].note == "This is not JSON."
 
 
 def test_signed_in_marks_consent_done_and_unlocks_check() -> None:
     steps = compute_steps(CLIENT, "", True, IDLE, None, IDLE, False)
     by = {s.key: s for s in steps}
-    assert by["consent"].status == "done" and by["signin"].status == "done"
+    assert by["consent"].status == "done" and by["testusers"].status == "done"
+    assert by["signin"].status == "done"
     assert by["check"].enabled and by["check"].status == "todo"
     assert not by["pull"].enabled
 
@@ -57,17 +59,19 @@ def test_sign_in_running_and_failed() -> None:
     assert statuses(client=CLIENT, signin=running)["signin"] == "working"
     denied = JobSnapshot("failed", "add yourself", "access_denied")
     s = statuses(client=CLIENT, signin=denied)
-    assert s["consent"] == "problem" and s["signin"] == "problem"
+    assert s["testusers"] == "problem" and s["signin"] == "problem"
+    assert s["consent"] == "unverified"
     cancelled = JobSnapshot("failed", "Sign-in cancelled.", "cancelled")
     s = statuses(client=CLIENT, signin=cancelled)
     assert s["signin"] == "todo" and s["consent"] == "unverified"
+    assert s["testusers"] == "unverified"
 
 
 def test_checked_connection_unlocks_pull_and_confirms_api() -> None:
     s = statuses(client=CLIENT, signed_in=True, check=GOOD_CHECK)
     assert s["check"] == "done" and s["api"] == "done" and s["pull"] == "todo"
     steps = compute_steps(CLIENT, "", True, IDLE, GOOD_CHECK, IDLE, False)
-    assert steps[6].enabled
+    assert steps[7].enabled
 
 
 def test_api_disabled_is_a_problem_on_step_2_and_6() -> None:

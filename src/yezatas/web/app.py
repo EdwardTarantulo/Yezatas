@@ -38,7 +38,7 @@ DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
 SIGN_IN_TIMEOUT_MESSAGE = (
     "The sign-in did not finish within 5 minutes. If Google showed \"Access blocked\", your "
-    "account is probably not on the Test users list: add it in step 3. Otherwise just start "
+    "account is probably not on the Test users list: add it in step 4. Otherwise just start "
     "the sign-in again."
 )
 UPLOAD_BODY_LIMIT = MAX_CLIENT_FILE_BYTES + 16 * 1024  # file plus multipart overhead
@@ -268,9 +268,9 @@ def create_app(
             used, remaining = guard.used(), guard.remaining()
         steps = compute_steps(client, client_problem, signed_in, signin, check, pull,
                               latest is not None)
-        # Steps 1 to 3 cannot be detected, so once the client file is valid the next action is
+        # Steps 1 to 4 cannot be detected, so once the client file is valid the next action is
         # further down the list.
-        candidates = steps[4:] if client else steps
+        candidates = steps[5:] if client else steps
         current = next((s.key for s in candidates if s.status != "done" and s.enabled), "")
         estimate = None
         if check is not None and check.ok:
@@ -362,7 +362,7 @@ def create_app(
         text = f"Saved the client file for project {info.project_id} (client {info.client_id_short})."
         if existing is not None:
             await run_in_threadpool(state.sign_out)
-            text += " Because the client changed, you were signed out: sign in again in step 5."
+            text += " Because the client changed, you were signed out: sign in again in step 6."
         state.add_flash(sid, "ok", text, "client")
         return back_to_setup("signin" if existing is not None else "client")
 
@@ -372,7 +372,7 @@ def create_app(
         sid = request.state.session_id
         client, _ = read_saved_client(config)
         if client is None:
-            state.add_flash(sid, "error", "Add the OAuth client file first (step 4).", "client")
+            state.add_flash(sid, "error", "Add the OAuth client file first (step 5).", "client")
             return back_to_setup("client")
         if config.token_path.is_file():
             state.add_flash(sid, "error", "You are already signed in. Sign out first to switch "
@@ -403,7 +403,7 @@ def create_app(
         await read_form(request)
         sid = request.state.session_id
         if not config.token_path.is_file():
-            state.add_flash(sid, "error", "Sign in first (step 5).", "signin")
+            state.add_flash(sid, "error", "Sign in first (step 6).", "signin")
             return back_to_setup("signin")
         await run_in_threadpool(state.run_check)
         return back_to_setup("check")
@@ -414,7 +414,7 @@ def create_app(
         sid = request.state.session_id
         check = state.check
         if check is None or not check.ok or not check.has_uploads:
-            state.add_flash(sid, "error", "Check the connection first (step 6).", "check")
+            state.add_flash(sid, "error", "Check the connection first (step 7).", "check")
             return back_to_setup("check")
         remaining = await run_in_threadpool(remaining_quota)
         needed = estimate_pull_units(check.video_count)

@@ -24,7 +24,7 @@ AUTH_REASONS = frozenset({
 
 MAX_DETAIL = 300
 
-SIGN_IN_AGAIN = "Sign in again (step 5)."
+SIGN_IN_AGAIN = "Sign in again (step 6)."
 NO_CHANNEL_TEXT = (
     "This Google account has no YouTube channel. Sign in with the channel's account, or pick "
     "the brand account on Google's screen."
@@ -100,18 +100,18 @@ def map_api_error(exc: BaseException) -> tuple[str, str]:
 def map_sign_in_error(exc: BaseException) -> tuple[str, str]:
     """Guidance for a failed Google sign-in."""
     if isinstance(exc, MissingClientSecrets):
-        return "missing_secrets", "The OAuth client file is missing. Add it in step 4."
+        return "missing_secrets", "The OAuth client file is missing. Add it in step 5."
     text = f"{getattr(exc, 'error', '')} {exc.__class__.__name__} {exc}".lower()
     if "access_denied" in text or "accessdenied" in text:
         return "access_denied", (
             "Google refused the sign-in (access_denied). The usual cause: the account is not "
-            "on the Test users list. Add it in step 3, then try again. If you clicked Cancel "
+            "on the Test users list. Add it in step 4, then try again. If you clicked Cancel "
             "on Google's page, just start again."
         )
     if "invalid_client" in text or "invalidclient" in text:
         return "invalid_client", (
             "Google does not recognise this OAuth client. Download the JSON again from the "
-            "Clients page and upload it in step 4."
+            "Clients page and upload it in step 5."
         )
     return "error", _describe(exc)
 

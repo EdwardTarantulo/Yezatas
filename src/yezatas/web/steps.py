@@ -74,71 +74,80 @@ def compute_steps(
         s2 = Step(2, "api", "Enable the YouTube Data API v3", "problem", message)
     elif check_ok or pulled:
         s2 = Step(2, "api", "Enable the YouTube Data API v3", "done")
-    elif client:  # the user has moved on; step 6 will confirm it
+    elif client:  # the user has moved on; step 7 will confirm it
         s2 = Step(2, "api", "Enable the YouTube Data API v3", "unverified")
     else:
         s2 = Step(2, "api", "Enable the YouTube Data API v3", "todo")
 
-    # 3. Consent screen and test user: a finished sign-in proves it; access_denied points here.
-    if not signed_in and signin_failed and signin.error_kind in ("access_denied", "timeout"):
-        s3 = Step(3, "consent", "Set up the consent screen and add yourself as a test user",
-                  "problem", signin.message)
-    elif signed_in:
-        s3 = Step(3, "consent", "Set up the consent screen and add yourself as a test user", "done")
-    elif client:  # the user has moved on; signing in (step 5) will confirm it
-        s3 = Step(3, "consent", "Set up the consent screen and add yourself as a test user",
-                  "unverified")
+    # 3. Consent screen: a finished sign-in proves it.
+    title3 = "Set up the consent screen"
+    if signed_in:
+        s3 = Step(3, "consent", title3, "done")
+    elif client:  # the user has moved on; signing in (step 6) will confirm it
+        s3 = Step(3, "consent", title3, "unverified")
     else:
-        s3 = Step(3, "consent", "Set up the consent screen and add yourself as a test user", "todo")
+        s3 = Step(3, "consent", title3, "todo")
 
-    # 4. Desktop client file.
+    # 4. Test user: a finished sign-in proves it. access_denied (and a sign-in that never comes
+    # back, which is what Google's "Access blocked" page looks like from here) point to it.
+    title4 = "Add yourself as a test user"
+    if not signed_in and signin_failed and signin.error_kind in ("access_denied", "timeout"):
+        s4 = Step(4, "testusers", title4, "problem", signin.message)
+    elif signed_in:
+        s4 = Step(4, "testusers", title4, "done")
+    elif client:
+        s4 = Step(4, "testusers", title4, "unverified")
+    else:
+        s4 = Step(4, "testusers", title4, "todo")
+
+    # 5. Desktop client file.
     if client:
-        s4 = Step(4, "client", "Create a Desktop app client and add the JSON file", "done")
+        s5 = Step(5, "client", "Create a Desktop app client and add the JSON file", "done")
     elif client_problem:
-        s4 = Step(4, "client", "Create a Desktop app client and add the JSON file", "problem",
+        s5 = Step(5, "client", "Create a Desktop app client and add the JSON file", "problem",
                   client_problem)
     else:
-        s4 = Step(4, "client", "Create a Desktop app client and add the JSON file", "todo")
+        s5 = Step(5, "client", "Create a Desktop app client and add the JSON file", "todo")
 
-    # 5. Sign in.
-    title5 = "Sign in with Google (read-only)"
+    # 6. Sign in.
+    title6 = "Sign in with Google (read-only)"
     if client is None:
-        s5 = Step(5, "signin", title5, "todo", enabled=False)
+        s6 = Step(6, "signin", title6, "todo", enabled=False)
     elif signin.running:
-        s5 = Step(5, "signin", title5, "working")
+        s6 = Step(6, "signin", title6, "working")
     elif check_kind == "auth":
-        s5 = Step(5, "signin", title5, "problem", check.message)  # type: ignore[union-attr]
+        s6 = Step(6, "signin", title6, "problem", check.message)  # type: ignore[union-attr]
     elif signed_in:
-        s5 = Step(5, "signin", title5, "done")
+        s6 = Step(6, "signin", title6, "done")
     elif signin_failed:
-        s5 = Step(5, "signin", title5, "problem", signin.message)
+        s6 = Step(6, "signin", title6, "problem", signin.message)
     else:
-        s5 = Step(5, "signin", title5, "todo")
+        s6 = Step(6, "signin", title6, "todo")
 
-    # 6. Connection check.
-    title6 = "Check the connection"
+    # 7. Connection check.
+    title7 = "Check the connection"
     if not signed_in:
-        s6 = Step(6, "check", title6, "todo", enabled=False)
+        s7 = Step(7, "check", title7, "todo", enabled=False)
     elif check_ok:
-        s6 = Step(6, "check", title6, "done")
+        s7 = Step(7, "check", title7, "done")
     elif check_failed and check_kind not in ("api_disabled", "auth"):
-        s6 = Step(6, "check", title6, "problem", check.message)  # type: ignore[union-attr]
+        s7 = Step(7, "check", title7, "problem", check.message)  # type: ignore[union-attr]
     elif check_failed:
-        where = "step 2" if check_kind == "api_disabled" else "step 5"
-        s6 = Step(6, "check", title6, "problem", f"The check failed. See {where}.")
+        where = "step 2" if check_kind == "api_disabled" else "step 6"
+        s7 = Step(7, "check", title7, "problem", f"The check failed. See {where}.")
     else:
-        s6 = Step(6, "check", title6, "todo")
+        s7 = Step(7, "check", title7, "todo")
 
-    # 7. Catalog pull.
-    title7 = "Pull your catalog"
+    # 8. Catalog pull.
+    title8 = "Pull your catalog"
     can_pull = check_ok and check is not None and check.has_uploads
     if pull.running:
-        s7 = Step(7, "pull", title7, "working")
+        s8 = Step(8, "pull", title8, "working")
     elif pull_failed and pull.error_kind not in ("api_disabled",):
-        s7 = Step(7, "pull", title7, "problem", pull.message, enabled=can_pull)
+        s8 = Step(8, "pull", title8, "problem", pull.message, enabled=can_pull)
     elif pulled:
-        s7 = Step(7, "pull", title7, "done", enabled=can_pull)
+        s8 = Step(8, "pull", title8, "done", enabled=can_pull)
     else:
-        s7 = Step(7, "pull", title7, "todo", enabled=can_pull)
+        s8 = Step(8, "pull", title8, "todo", enabled=can_pull)
 
-    return [s1, s2, s3, s4, s5, s6, s7]
+    return [s1, s2, s3, s4, s5, s6, s7, s8]

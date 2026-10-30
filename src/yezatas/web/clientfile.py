@@ -57,7 +57,7 @@ def parse_client_file(data: bytes) -> ClientInfo:
         if isinstance(parsed.get("web"), dict):
             raise ClientFileError(
                 "This is a Web application client. Create a Desktop app client instead "
-                "(step 4, application type: Desktop app) and upload that file."
+                "(step 5, application type: Desktop app) and upload that file."
             )
         if parsed.get("type") == "service_account":
             raise ClientFileError(

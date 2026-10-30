@@ -32,7 +32,7 @@ def test_sign_in_success_saves_token_and_runs_the_check(tmp_path: Path) -> None:
         entries = store.quota_entries(quota_day(_utc_now()))
     assert [(e["operation"], e["units"]) for e in entries] == [("channels.list", 1)]
     html = ui.setup_html()
-    assert "done" in step_class(html, "signin") and "done" in step_class(html, "consent")
+    assert "done" in step_class(html, "signin") and "done" in step_class(html, "testusers")
     assert "Sign out" in html
 
 
@@ -55,7 +55,7 @@ def test_access_denied_points_to_the_test_user_step(tmp_path: Path) -> None:
     assert snap.status == "failed" and snap.error_kind == "access_denied"
     assert not ui.config.token_path.exists()
     html = ui.setup_html()
-    assert "problem" in step_class(html, "consent")
+    assert "problem" in step_class(html, "testusers")
     assert "Test users" in html and "access_denied" in html
     status = ui.client.get("/api/status").json()
     assert status["signin"]["status"] == "failed"
@@ -63,7 +63,7 @@ def test_access_denied_points_to_the_test_user_step(tmp_path: Path) -> None:
 
 def test_missing_secrets_points_to_the_client_step() -> None:
     kind, message = map_sign_in_error(MissingClientSecrets("client_secrets.json not found"))
-    assert kind == "missing_secrets" and "step 4" in message
+    assert kind == "missing_secrets" and "step 5" in message
 
 
 def test_missing_secrets_raised_during_sign_in(tmp_path: Path) -> None:
@@ -91,7 +91,7 @@ def test_other_errors_show_class_and_message_but_no_secrets(tmp_path: Path) -> N
 
 def test_invalid_client_error_points_to_step_4() -> None:
     kind, message = map_sign_in_error(RuntimeError("(invalid_client) Unauthorized"))
-    assert kind == "invalid_client" and "step 4" in message
+    assert kind == "invalid_client" and "step 5" in message
 
 
 def test_no_second_sign_in_while_one_is_waiting_and_retry_after_cancel(tmp_path: Path) -> None:
@@ -148,7 +148,7 @@ def test_timeout_marks_failed_and_allows_retry(tmp_path: Path) -> None:
     assert snap.status == "failed" and snap.error_kind == "timeout"
     html = ui.setup_html()
     assert "5 minutes" in html and "Test users" in html
-    assert "problem" in step_class(html, "consent")
+    assert "problem" in step_class(html, "testusers")
 
     release.set()
     ui.web.signin_job.wait()
