@@ -40,6 +40,14 @@ as it lands; the git history is the detailed record.
   and 5,000-byte limits, no `<` `>`, placeholder links, hashtags, tag rules, chapter rules; warnings for removed links and
   changed chapter times). **Built by Muse Code**, Meta's coding agent, running headless in its Windows sandbox from a
   written spec; reviewed and tested before merging.
+- **2026-10-30**: **edit -> diff -> approve -> push**, the core of the safety model:
+  - **Editing.** Title, description and tags edits become local drafts, never touching YouTube.
+  - **Review.** A **Changes** page shows each draft as a diff (words for the title, lines for the description, tags as chips) with its validation issues. It lists the most viewed videos first.
+  - **Approval.** Each draft is approved one by one.
+  - **Pushing.** Starting a push shows the quota cost first, asks for write access only at that point, and needs a ticked confirmation.
+  - **Backups.** Before every update, YouTube's live text is saved as a backup. Any backup can be restored as a new draft from **History**.
+  - **Studio edits.** Videos changed in YouTube Studio since the last pull are detected and skipped.
+  - **Muse Code.** The diff model was built by Muse Code from a written spec.
 
 ## Setup
 
@@ -77,7 +85,7 @@ with troubleshooting, is [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md).
 | Muse Voice Transcribe | Timed transcripts for chapters and subtitles |
 | SAM 3.1 | Thumbnail subject segmentation (supporting the thumbnail coach) |
 | Muse Image | Thumbnail variant ideas |
-| Muse Code | Coding agent: built the edit validator during the hackathon |
+| Muse Code | Coding agent: built the edit validator and the draft diff model during the hackathon |
 
 ## License
 
