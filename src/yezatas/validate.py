@@ -8,7 +8,7 @@ the push, "warning" issues are shown but do not block.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 from .seo import _BROKEN_LINK, _HASHTAG, _URL, parse_chapters, tags_char_count
 
@@ -29,7 +29,7 @@ class Draft:
 
 @dataclass(frozen=True)
 class Issue:
-    field: str  # "title" | "description" | "tags"
+    field: str  # "title" | "description" | "tags" | "localizations" | "localizations.<language>"
     code: str  # stable id, e.g. "title_empty"
     severity: str  # "error" blocks the push, "warning" does not
     message: str  # one plain sentence for the creator
@@ -153,6 +153,61 @@ def validate_draft(draft: Draft, original: Draft | None = None) -> list[Issue]:
                                       "Nothing changed; the title, description and tags "
                                       "are identical to the original."))
     return title_issues + description_issues + tag_issues
+
+
+def validate_localizations(
+    default_language: str | None,
+    localizations: Mapping[str, Any] | None,
+    base_default_language: str | None,
+    base_localizations: Mapping[str, Any] | None = None,
+) -> list[Issue]:
+    """Errors in a translations map {language: {"title", "description"}}, in stable order.
+
+    The video language is the draft's own, else the one the draft was made from. Translations
+    that are exactly as on YouTube (`base_localizations`) are not judged: YouTube already took
+    them, and Studio even lists the video's own language among them.
+    """
+    if not localizations:
+        return []
+    language = default_language or base_default_language
+    issues = []
+    if not language:
+        issues.append(Issue("localizations", "localizations_language_missing", "error",
+                            "Set the video language first; YouTube only takes translations "
+                            "for a video with a language."))
+    for lang in sorted(localizations):
+        field = f"localizations.{lang}"
+        entry = localizations[lang]
+        entry = entry if isinstance(entry, Mapping) else {}
+        title = entry.get("title") if isinstance(entry.get("title"), str) else ""
+        description = entry.get("description") if isinstance(entry.get("description"), str) else ""
+        kept = (base_localizations or {}).get(lang)
+        if (isinstance(kept, Mapping) and kept.get("title") == title
+                and kept.get("description") == description):
+            continue
+        if lang == language:
+            issues.append(Issue(field, "localization_is_default", "error",
+                                f"The video language is {lang}, so it cannot also have a "
+                                f"{lang} translation."))
+        if not title.strip():
+            issues.append(Issue(field, "localization_title_empty", "error",
+                                f"The {lang} translation has an empty title."))
+        if len(title) > TITLE_LIMIT:
+            issues.append(Issue(field, "localization_title_too_long", "error",
+                                f"The {lang} title is {len(title)} characters; "
+                                f"YouTube allows {TITLE_LIMIT}."))
+        size = len(description.encode("utf-8"))
+        if size > DESCRIPTION_BYTE_LIMIT:
+            issues.append(Issue(field, "localization_description_too_long", "error",
+                                f"The {lang} description is {size} bytes; "
+                                f"YouTube allows {DESCRIPTION_BYTE_LIMIT:,} bytes."))
+        if "<" in title or ">" in title:
+            issues.append(Issue(field, "localization_title_angle_brackets", "error",
+                                f"The {lang} title contains < or >; YouTube rejects them."))
+        if "<" in description or ">" in description:
+            issues.append(Issue(field, "localization_description_angle_brackets", "error",
+                                f"The {lang} description contains < or >; YouTube rejects them."))
+    return issues
 
 
 def has_errors(issues: Iterable[Issue]) -> bool:

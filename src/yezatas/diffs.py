@@ -9,10 +9,14 @@ from __future__ import annotations
 import difflib
 import re
 from collections import Counter
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from .validate import Draft
+
+if TYPE_CHECKING:
+    from .store import DraftRow
 
 _WORD = re.compile(r"\S+|\s+")
 
@@ -49,12 +53,25 @@ class TagsDiff:
 
 
 @dataclass(frozen=True)
+class LocalizationsDiff:
+    changed: bool  # any language added, removed or with a different title or description
+    added: tuple[str, ...]  # languages, sorted
+    removed: tuple[str, ...]
+    changed_langs: tuple[str, ...]
+    kept: tuple[str, ...]  # in both and identical
+
+
+@dataclass(frozen=True)
 class DraftDiff:
     title: tuple[Segment, ...]  # word-level diff of the title
     title_changed: bool
     description: TextDiff
     tags: TagsDiff
-    changed: bool  # title_changed or description.changed or tags.changed
+    changed: bool  # title_changed or description.changed or tags.changed (and, from diff_row, the rest)
+    language: tuple[str | None, str | None] | None = None  # (old, new) when the draft changes it
+    localizations: LocalizationsDiff = field(
+        default_factory=lambda: LocalizationsDiff(False, (), (), (), ())
+    )
 
 
 def _merge(segments: list[Segment]) -> tuple[Segment, ...]:
@@ -185,3 +202,38 @@ def diff_draft(original: Draft, draft: Draft) -> DraftDiff:
     tags = diff_tags(original.tags, draft.tags)
     changed = title_changed or description.changed or tags.changed
     return DraftDiff(title, title_changed, description, tags, changed)
+
+
+def _pair(entry: object) -> tuple[str, str]:
+    """(title, description) of one translation; other keys do not count."""
+    if not isinstance(entry, Mapping):
+        return "", ""
+    title, description = entry.get("title"), entry.get("description")
+    return (title if isinstance(title, str) else "", description if isinstance(description, str) else "")
+
+
+def diff_localizations(base: Mapping, new: Mapping | None) -> LocalizationsDiff:
+    """Which languages a translations map adds, removes or changes; None (not set) changes nothing."""
+    if new is None:
+        return LocalizationsDiff(False, (), (), (), tuple(sorted(base)))
+    added = tuple(sorted(lang for lang in new if lang not in base))
+    removed = tuple(sorted(lang for lang in base if lang not in new))
+    both = sorted(lang for lang in new if lang in base)
+    changed_langs = tuple(lang for lang in both if _pair(base[lang]) != _pair(new[lang]))
+    kept = tuple(lang for lang in both if _pair(base[lang]) == _pair(new[lang]))
+    return LocalizationsDiff(bool(added or removed or changed_langs), added, removed, changed_langs, kept)
+
+
+def diff_row(row: "DraftRow") -> DraftDiff:
+    """Diff a stored draft against its base: text, language and translations."""
+    diff = diff_draft(row.base, row.draft)
+    language = None
+    if row.default_language is not None and row.default_language != row.base_default_language:
+        language = (row.base_default_language, row.default_language)
+    localizations = diff_localizations(row.base_localizations, row.localizations)
+    return replace(
+        diff,
+        language=language,
+        localizations=localizations,
+        changed=diff.changed or language is not None or localizations.changed,
+    )

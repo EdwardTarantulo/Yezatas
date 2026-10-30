@@ -3,13 +3,18 @@ from __future__ import annotations
 import pytest
 
 from yezatas.diffs import (
+    DraftDiff,
     Line,
+    LocalizationsDiff,
     Segment,
     diff_draft,
+    diff_localizations,
+    diff_row,
     diff_tags,
     diff_text,
     diff_words,
 )
+from yezatas.store import DraftRow
 from yezatas.validate import Draft
 
 
@@ -215,3 +220,83 @@ def test_diff_words_keeps_word_level_detail_for_small_edits() -> None:
     segments = diff_words("How to repot a cactus at home", "How to repot a big cactus at home")
     assert Segment("added", "big ") in segments
     assert segments[0].kind == "same"
+
+
+def loc(title: str, description: str = "d") -> dict:
+    return {"title": title, "description": description}
+
+
+def test_diff_draft_without_language_parts_still_works():
+    result = diff_draft(Draft("A", "d"), Draft("B", "d"))
+    assert result.language is None
+    assert result.localizations == LocalizationsDiff(False, (), (), (), ())
+    assert isinstance(result, DraftDiff)
+
+
+def test_diff_localizations_unchanged_when_not_set():
+    base = {"de": loc("T"), "fr": loc("T")}
+    assert diff_localizations(base, None) == LocalizationsDiff(False, (), (), (), ("de", "fr"))
+    assert diff_localizations({}, None) == LocalizationsDiff(False, (), (), (), ())
+    assert diff_localizations(base, dict(base)).changed is False
+
+
+def test_diff_localizations_added_removed_changed_kept():
+    base = {"de": loc("T"), "fr": loc("T"), "it": loc("T", "old")}
+    new = {"de": loc("T"), "it": loc("T", "new"), "es": loc("T"), "pt": loc("T")}
+    result = diff_localizations(base, new)
+    assert result == LocalizationsDiff(
+        True, added=("es", "pt"), removed=("fr",), changed_langs=("it",), kept=("de",))
+
+
+def test_diff_localizations_ignores_other_keys_and_clearing_all_is_a_change():
+    assert diff_localizations({"de": loc("T")}, {"de": {**loc("T"), "extra": 1}}).changed is False
+    cleared = diff_localizations({"de": loc("T")}, {})
+    assert cleared.changed and cleared.removed == ("de",)
+
+
+def make_row(**overrides) -> DraftRow:
+    values = dict(
+        video_id="vid1", title="T", description="d", tags=("a",), base_title="T",
+        base_description="d", base_tags=("a",), source="manual", note="", created_at="x",
+        updated_at="x", approved_at=None, base_default_language="en",
+        base_localizations={"de": loc("T")},
+    )
+    values.update(overrides)
+    return DraftRow(**values)
+
+
+def test_diff_row_text_only_is_like_diff_draft():
+    row = make_row(title="New")
+    result = diff_row(row)
+    assert (result.title, result.description, result.tags) == (
+        diff_draft(row.base, row.draft).title, diff_draft(row.base, row.draft).description,
+        diff_draft(row.base, row.draft).tags)
+    assert result.changed and result.title_changed and result.language is None
+
+
+def test_diff_row_untouched_draft_is_unchanged():
+    result = diff_row(make_row())
+    assert result.changed is False and result.language is None
+    assert result.localizations.changed is False
+
+
+def test_diff_row_language_only_counts_as_a_change():
+    result = diff_row(make_row(default_language="es"))
+    assert result.changed and not result.title_changed
+    assert result.language == ("en", "es")
+    # a language equal to the base is not a change
+    same = diff_row(make_row(default_language="en"))
+    assert same.language is None and same.changed is False
+
+
+def test_diff_row_translations_only_count_as_a_change():
+    result = diff_row(make_row(localizations={"de": loc("T"), "es": loc("Titulo")}))
+    assert result.changed and not result.title_changed and not result.description.changed
+    assert result.localizations.added == ("es",) and result.localizations.kept == ("de",)
+    unset = diff_row(make_row(localizations=None))
+    assert unset.localizations.kept == ("de",) and unset.changed is False
+
+
+def test_diff_row_from_no_language():
+    result = diff_row(make_row(default_language="en", base_default_language=None))
+    assert result.language == (None, "en") and result.changed

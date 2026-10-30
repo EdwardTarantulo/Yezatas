@@ -4,6 +4,8 @@ Only drafts the creator approved, and whose text is exactly what they reviewed, 
 For each one the live text is fetched first: if it differs from the draft's base the video was
 changed elsewhere (for example in YouTube Studio), so nothing is pushed and the catalog is
 refreshed instead. Otherwise the live text is saved as a backup before videos.update is called.
+A draft that sets the video language or the translations also sends them (the complete
+translations map: YouTube replaces the whole map), and is checked against the live ones too.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Mapping
 
-from .edits import fingerprint, is_stale, issues_for
+from .edits import fingerprint, is_stale, issues_for, plain_localizations
 from .quota import QuotaExceeded, QuotaGuard
 from .store import DraftRow, Store
 from .validate import has_errors
@@ -44,8 +46,10 @@ class PushReport:
         return sum(1 for item in self.items if item.status == status)
 
 
-def backup_of(live_snippet: dict[str, Any]) -> dict[str, Any]:
-    """The writable part of YouTube's live snippet: what a restore needs to put back."""
+def backup_of(
+    live_snippet: dict[str, Any], live_localizations: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """The writable part of YouTube's live snippet (and translations, when given): what a restore needs."""
     backup: dict[str, Any] = {
         "title": live_snippet.get("title", ""),
         "description": live_snippet.get("description", ""),
@@ -54,6 +58,8 @@ def backup_of(live_snippet: dict[str, Any]) -> dict[str, Any]:
     for key in KEEP_SNIPPET_KEYS:
         if key in live_snippet:
             backup[key] = live_snippet[key]
+    if live_localizations is not None:
+        backup["localizations"] = plain_localizations(live_localizations)
     return backup
 
 
@@ -139,6 +145,7 @@ def push_drafts(
 
     units = 0
     live: dict[str, dict[str, Any]] = {}
+    live_localizations: dict[str, dict[str, Any]] = {}
     if selected:
         preview = guard.preview(push_units(len(selected)))
         if not preview.fits:
@@ -158,7 +165,7 @@ def push_drafts(
             say(f"Reading {len(batch)} video(s) from YouTube...")
             try:
                 units += guard.charge("videos.list", note="push")
-                response = writer.videos([row.video_id for row in batch], "snippet")
+                response = writer.videos([row.video_id for row in batch], "snippet,localizations")
             except Exception as exc:  # noqa: BLE001 - reported per video, never raised
                 stopped = _is_stop(exc)
                 for row in batch:
@@ -169,6 +176,8 @@ def push_drafts(
             for item in response.get("items") or []:
                 if isinstance(item, dict) and isinstance(item.get("snippet"), dict):
                     live[item["id"]] = item["snippet"]
+                    localized = item.get("localizations")
+                    live_localizations[item["id"]] = localized if isinstance(localized, dict) else {}
 
     stop_message = ""
     for row in selected:
@@ -186,8 +195,16 @@ def push_drafts(
                 "This video is not on YouTube any more (deleted or unavailable). Nothing was pushed.",
             )
             continue
-        before = backup_of(snippet)
-        if _live_text(snippet) != (row.base_title, row.base_description, row.base_tags):
+        localized = live_localizations.get(video_id, {})
+        sets_i18n = row.default_language is not None or row.localizations is not None
+        # The translations go into the backup only when this push changes them, so restoring
+        # an older text never rolls back translations added later.
+        before = backup_of(snippet, localized if sets_i18n else None)
+        if (_live_text(snippet) != (row.base_title, row.base_description, row.base_tags)
+                or (row.default_language is not None
+                    and snippet.get("defaultLanguage") != row.base_default_language)
+                or (row.localizations is not None
+                    and plain_localizations(localized) != row.base_localizations)):
             push_id = store.begin_push(video_id, row.source, before, now)
             message = (
                 "This video was changed on YouTube (for example in Studio) after your last pull. "
@@ -195,7 +212,8 @@ def push_drafts(
             )
             store.finish_push(push_id, "conflict", {}, message, now)
             store.update_video_text(
-                video_id, before["title"], before["description"], before["tags"], now
+                video_id, before["title"], before["description"], before["tags"], now,
+                default_language=snippet.get("defaultLanguage"), localizations=localized,
             )
             store.set_draft_approval(video_id, None)
             results[video_id] = PushItem(video_id, "conflict", message, push_id)
@@ -204,11 +222,22 @@ def push_drafts(
 
         sent: dict[str, Any] = {key: snippet[key] for key in KEEP_SNIPPET_KEYS if key in snippet}
         sent.update(title=row.title, description=row.description, tags=list(row.tags))
+        body: dict[str, Any] = {"id": video_id, "snippet": sent}
+        part = "snippet"
+        after = sent
+        if sets_i18n:
+            if row.default_language is not None:
+                sent["defaultLanguage"] = row.default_language
+            sent_localizations = (row.localizations if row.localizations is not None
+                                  else plain_localizations(localized))
+            body["localizations"] = sent_localizations
+            part = "snippet,localizations"
+            after = {**sent, "localizations": sent_localizations}
         push_id = store.begin_push(video_id, row.source, before, now)  # the backup comes first
         try:
             units += guard.charge("videos.update", note="push")
             say(f"Updating {video_id}...")
-            response = writer.update_video({"id": video_id, "snippet": sent}, "snippet")
+            response = writer.update_video(body, part)
         except Exception as exc:  # noqa: BLE001 - recorded and reported, never raised
             message = _error_message("YouTube update", exc)
             store.finish_push(push_id, "failed", {}, message, now)
@@ -218,13 +247,22 @@ def push_drafts(
             continue
         returned = response.get("snippet") if isinstance(response, dict) else None
         returned = returned if isinstance(returned, dict) else {}
-        store.finish_push(push_id, "pushed", sent, "Pushed to YouTube.", now)
+        store.finish_push(push_id, "pushed", after, "Pushed to YouTube.", now)
+        extra: dict[str, Any] = {}
+        if sets_i18n:
+            returned_localizations = response.get("localizations") if isinstance(response, dict) else None
+            extra = {
+                "default_language": returned.get("defaultLanguage", sent.get("defaultLanguage")),
+                "localizations": (returned_localizations if isinstance(returned_localizations, dict)
+                                  else sent_localizations),
+            }
         store.update_video_text(
             video_id,
             returned.get("title", sent["title"]),
             returned.get("description", sent["description"]),
             returned.get("tags", sent["tags"]),
             now,
+            **extra,
         )
         store.delete_draft(video_id)
         results[video_id] = PushItem(video_id, "pushed", "Pushed to YouTube.", push_id)

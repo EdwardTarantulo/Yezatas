@@ -96,6 +96,8 @@ class FakeYouTubeWriter(FakeYouTubeReader):
     """A fake channel that also accepts videos.update. Records every call; nothing leaves the process.
 
     Like YouTube, an update replaces the writable snippet: fields left out of the body are deleted.
+    The part decides what is read and written: `localizations` is the complete translations map,
+    replaced as a whole by an update that asks for that part.
     """
 
     WRITABLE = ("title", "description", "tags", "categoryId", "defaultLanguage",
@@ -117,6 +119,10 @@ class FakeYouTubeWriter(FakeYouTubeReader):
         """Change the live text, as if the creator edited the video in Studio."""
         self.item(video_id)["snippet"].update(snippet_fields)
 
+    def studio_localizations(self, video_id: str, localizations: dict[str, Any]) -> None:
+        """Replace the live translations, as if the creator edited them in Studio."""
+        self.item(video_id)["localizations"] = copy.deepcopy(localizations)
+
     def remove(self, video_id: str) -> None:
         self.items = [i for i in self.items if i["id"] != video_id]
 
@@ -124,7 +130,11 @@ class FakeYouTubeWriter(FakeYouTubeReader):
         self.calls.append(("videos", (tuple(ids), part)))
         assert 1 <= len(ids) <= 50
         wanted = set(ids)
-        return {"items": [copy.deepcopy(i) for i in self.items if i["id"] in wanted]}
+        items = [copy.deepcopy(i) for i in self.items if i["id"] in wanted]
+        if "localizations" not in part.split(","):
+            for item in items:
+                item.pop("localizations", None)
+        return {"items": items}
 
     def update_video(self, body: dict[str, Any], part: str) -> dict[str, Any]:
         self.calls.append(("update_video", (body["id"], part)))
@@ -134,11 +144,21 @@ class FakeYouTubeWriter(FakeYouTubeReader):
         if body["id"] in self.update_errors:
             raise self.update_errors[body["id"]]
         item = self.item(body["id"])
-        old = item["snippet"]
-        new = {k: v for k, v in old.items() if k not in self.WRITABLE}
-        new.update(copy.deepcopy(body["snippet"]))
-        item["snippet"] = new
-        return {"id": body["id"], "snippet": copy.deepcopy(new)}
+        parts = part.split(",")
+        response: dict[str, Any] = {"id": body["id"]}
+        if "snippet" in parts:
+            old = item["snippet"]
+            new = {k: v for k, v in old.items() if k not in self.WRITABLE}
+            new.update(copy.deepcopy(body["snippet"]))
+            item["snippet"] = new
+            response["snippet"] = copy.deepcopy(new)
+        if "localizations" in parts:
+            if body.get("localizations"):
+                item["localizations"] = copy.deepcopy(body["localizations"])
+            else:
+                item.pop("localizations", None)
+            response["localizations"] = copy.deepcopy(item.get("localizations", {}))
+        return response
 
 
 class FakeModelClient:
@@ -161,3 +181,94 @@ class FakeModelClient:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+# --- translation fakes (no network) ----------------------------------------------------------------
+class ScriptedTranslator:
+    """Translates by prefixing: the title gets "[es] ", each description line too, so links, times
+    and tags survive. `outputs[lang]` overrides one language with a Translated, an exception to raise
+    or a callable(source_language, target, title, description)."""
+
+    def __init__(self, outputs: dict[str, Any] | None = None, model: str = "spark-open-test") -> None:
+        self.model = model
+        self.outputs = dict(outputs or {})
+        self.calls: list[tuple[str, str, str, str]] = []
+
+    def translate(self, source_language: str, target_language: str, title: str, description: str) -> Any:
+        from yezatas.translate import Translated
+
+        self.calls.append((source_language, target_language, title, description))
+        item = self.outputs.get(target_language)
+        if callable(item):
+            item = item(source_language, target_language, title, description)
+        if isinstance(item, Exception):
+            raise item
+        if item is not None:
+            return item
+        prefix = f"[{target_language}] "
+        body = "\n".join(prefix + line if line else line for line in description.split("\n"))
+        return Translated(prefix + title, body, self.model, 10, 20)
+
+
+class ScriptedVerifier:
+    """Gives every translation `default` (a Verdict) unless `verdicts[lang]` says otherwise (a Verdict
+    or an exception to raise). `up=False` makes available() False."""
+
+    def __init__(self, verdicts: dict[str, Any] | None = None, up: bool = True,
+                 model: str = "glimmer-test", default: Any = None) -> None:
+        self.model = model
+        self.verdicts = dict(verdicts or {})
+        self.up = up
+        self.default = default
+        self.calls: list[tuple[str, str, str, str, str, str]] = []
+
+    def available(self) -> bool:
+        return self.up
+
+    def verify(self, source_language: str, target_language: str, source_title: str,
+               source_description: str, title: str, description: str) -> Any:
+        from yezatas.translate import Verdict
+
+        self.calls.append((source_language, target_language, source_title, source_description,
+                           title, description))
+        item = self.verdicts.get(target_language, self.default)
+        if isinstance(item, Exception):
+            raise item
+        if item is not None:
+            return item
+        return Verdict(5, (), source_title, source_description, self.model)
+
+
+class FakeOpener:
+    """Stands in for a urllib opener. Each script item is a dict (sent as JSON), a str (sent as is),
+    an exception to raise, or a callable(request) returning one of those. Records the requests as
+    (method, url, json body or None, timeout)."""
+
+    def __init__(self, script: Sequence[Any]) -> None:
+        self.script = list(script)
+        self.requests: list[tuple[str, str, Any, Any]] = []
+
+    def open(self, request: Any, timeout: Any = None) -> Any:
+        import io
+
+        if isinstance(request, str):
+            method, url, data = "GET", request, None
+        else:
+            method, url, data = request.get_method(), request.full_url, request.data
+        self.requests.append((method, url, json.loads(data) if data else None, timeout))
+        assert self.script, "the fake opener ran out of scripted replies"
+        item = self.script.pop(0)
+        if callable(item):
+            item = item(request)
+        if isinstance(item, Exception):
+            raise item
+        raw = item if isinstance(item, str) else json.dumps(item)
+
+        class Response(io.BytesIO):
+            def __enter__(self) -> "Response":
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                self.close()
+
+        return Response(raw.encode("utf-8"))

@@ -7,7 +7,10 @@ import pytest
 
 from fakes import FakeYouTubeWriter, make_http_error
 from yezatas.catalog import pull_catalog
-from yezatas.edits import DraftError, approve, fingerprint, restore_draft, save_draft
+from yezatas.edits import (
+    DraftError, add_translations, approve, fingerprint, remove_translation, restore_draft,
+    save_draft, set_language,
+)
 from yezatas.push import KEEP_SNIPPET_KEYS, backup_of, push_drafts, push_units
 from yezatas.quota import QuotaExceeded, QuotaGuard
 from yezatas.store import Store
@@ -15,6 +18,10 @@ from yezatas.store import Store
 NOW = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
 DAY = "2026-01-15"
 V1, V2, V3 = "vid000001", "vid000002", "vid000003"
+V5 = "vid000005"  # has a German translation on YouTube
+DE5 = {"title": "Kaktus umtopfen #5", "description": "Anleitung 5."}
+ES = ("Replantar un cactus", "Como replantar un cactus.")
+PT = ("Replantar um cacto", "Como replantar um cacto.")
 
 
 def make_guard(store: Store, budget: int = 10000) -> QuotaGuard:
@@ -92,7 +99,7 @@ def test_happy_path(env) -> None:
         "defaultAudioLanguage": "en"}
     assert record.after == body["snippet"]
     assert [c[0] for c in writer.calls] == ["videos", "update_video"]
-    assert writer.calls[0][1] == ((V1,), "snippet")
+    assert writer.calls[0][1] == ((V1,), "snippet,localizations")  # the live read also asks for translations
     assert used(store) == [("videos.list", 1), ("videos.update", 50)]
 
 
@@ -301,3 +308,222 @@ def test_pushed_history_can_be_restored_through_the_same_path(env) -> None:
     assert second.items[0].status == "pushed"
     assert writer.item(V1)["snippet"]["title"] == original.title
     assert store.get_push(second.items[0].push_id).source == "restore"
+
+
+# --- language and translations --------------------------------------------------------------
+
+
+def approve_now(store: Store, video_id: str) -> str:
+    approve(store, video_id, now=NOW)
+    return fingerprint(store.get_draft(video_id))
+
+
+def test_backup_of_adds_translations_only_when_given() -> None:
+    live = {"title": "T", "description": "D", "defaultLanguage": "en"}
+    assert backup_of(live) == {"title": "T", "description": "D", "tags": [], "defaultLanguage": "en"}
+    assert backup_of(live, None) == backup_of(live)
+    loc = {"de": {"title": "a", "description": "b", "extra": "x"}}
+    assert backup_of(live, loc)["localizations"] == {"de": {"title": "a", "description": "b"}}
+    assert backup_of(live, {})["localizations"] == {}
+
+
+def test_a_text_only_draft_is_pushed_exactly_as_before(env) -> None:
+    store, writer = env
+    seen = approved_draft(store, V5, "Only the text")  # V5 has a translation that must not be touched
+    result = push_drafts(writer, store, make_guard(store), {V5: seen}, now=NOW)
+    assert result.items[0].status == "pushed"
+    (body, part), = writer.updates
+    assert part == "snippet" and set(body) == {"id", "snippet"}
+    assert body["snippet"] == {
+        "title": "Only the text", "description": "New text", "tags": ["x", "y"],
+        "categoryId": "26", "defaultLanguage": "en", "defaultAudioLanguage": "en"}
+    assert writer.item(V5)["localizations"] == {"de": DE5}
+    record = store.get_push(result.items[0].push_id)
+    assert "localizations" not in record.before and record.after == body["snippet"]
+    assert used(store) == [("videos.list", 1), ("videos.update", 50)]
+
+
+def test_a_translation_only_draft_sends_the_complete_map_and_keeps_the_text(env) -> None:
+    store, writer = env
+    live_before = writer.item(V5)["snippet"]
+    add_translations(store, V5, "en", {"es": ES, "pt": PT}, now=NOW)
+    messages: list[str] = []
+    result = push_drafts(writer, store, make_guard(store), {V5: approve_now(store, V5)},
+                         messages.append, now=NOW)
+    assert [(i.video_id, i.status) for i in result.items] == [(V5, "pushed")]
+    (body, part), = writer.updates
+    assert part == "snippet,localizations" and set(body) == {"id", "snippet", "localizations"}
+    # title, description and tags are the live ones, so the translation-only push changes none of them
+    assert body["snippet"] == {
+        "title": live_before["title"], "description": live_before["description"],
+        "tags": live_before["tags"], "categoryId": "26", "defaultLanguage": "en",
+        "defaultAudioLanguage": "en"}
+    assert body["localizations"] == {"de": DE5, "es": {"title": ES[0], "description": ES[1]},
+                                     "pt": {"title": PT[0], "description": PT[1]}}
+    assert writer.item(V5)["localizations"] == body["localizations"]
+    assert writer.calls[0][1] == ((V5,), "snippet,localizations")
+    assert used(store) == [("videos.list", 1), ("videos.update", 50)]  # quota as always
+    # the catalog follows YouTube and the draft is done
+    video = store.get_video(V5)
+    assert video.localizations == body["localizations"] and video.default_language == "en"
+    assert video.raw["localizations"] == body["localizations"]
+    assert store.get_draft(V5) is None
+    # the push record keeps the translations from before and what was sent
+    record = store.get_push(result.items[0].push_id)
+    assert record.before["localizations"] == {"de": DE5}
+    assert record.after == {**body["snippet"], "localizations": body["localizations"]}
+    assert record.status == "pushed"
+
+
+def test_existing_languages_survive_a_push_that_adds_one(env) -> None:
+    store, writer = env
+    add_translations(store, V5, "en", {"fr": ("Titre", "Texte")}, now=NOW)
+    push_drafts(writer, store, make_guard(store), {V5: approve_now(store, V5)}, now=NOW)
+    assert set(writer.item(V5)["localizations"]) == {"de", "fr"}
+
+
+def test_removing_a_translation_pushes_the_smaller_map(env) -> None:
+    store, writer = env
+    remove_translation(store, V5, "de", now=NOW)
+    result = push_drafts(writer, store, make_guard(store), {V5: approve_now(store, V5)}, now=NOW)
+    assert result.items[0].status == "pushed"
+    assert writer.updates[0][0]["localizations"] == {}
+    assert "localizations" not in writer.item(V5)
+    assert store.get_video(V5).localizations == {}
+
+
+def test_a_language_only_draft_sends_the_live_translations(env) -> None:
+    store, writer = env
+    set_language(store, V5, "es", now=NOW)
+    result = push_drafts(writer, store, make_guard(store), {V5: approve_now(store, V5)}, now=NOW)
+    assert result.items[0].status == "pushed"
+    (body, part), = writer.updates
+    assert part == "snippet,localizations"
+    assert body["snippet"]["defaultLanguage"] == "es"
+    assert body["localizations"] == {"de": DE5}  # the live map, untouched
+    assert writer.item(V5)["snippet"]["defaultLanguage"] == "es"
+    assert store.get_video(V5).default_language == "es"
+    assert store.get_video(V5).raw["snippet"]["defaultLanguage"] == "es"
+
+
+def test_a_video_without_a_language_gets_the_source_language(tmp_path: Path) -> None:
+    store, writer = setup(tmp_path)
+    with store:
+        del writer.item(V1)["snippet"]["defaultLanguage"]
+        pull_catalog(writer, store, make_guard(store), NOW)
+        assert store.get_video(V1).default_language is None
+        add_translations(store, V1, "en", {"es": ES}, now=NOW)
+        result = push_drafts(writer, store, make_guard(store), {V1: approve_now(store, V1)}, now=NOW)
+        assert result.items[0].status == "pushed"
+        (body, part), = writer.updates
+        assert body["snippet"]["defaultLanguage"] == "en"
+        assert writer.item(V1)["snippet"]["defaultLanguage"] == "en"
+        assert store.get_video(V1).default_language == "en"
+        record = store.get_push(result.items[0].push_id)
+        assert "defaultLanguage" not in record.before and record.before["localizations"] == {}
+
+
+def test_text_and_translations_in_one_push(env) -> None:
+    store, writer = env
+    save_draft(store, V1, "A better title", "New text", ["x"], now=NOW)
+    add_translations(store, V1, "en", {"es": ES}, now=NOW)
+    push_drafts(writer, store, make_guard(store), {V1: approve_now(store, V1)}, now=NOW)
+    (body, part), = writer.updates
+    assert part == "snippet,localizations"
+    assert (body["snippet"]["title"], body["snippet"]["description"]) == ("A better title", "New text")
+    assert set(body["localizations"]) == {"es"}
+
+
+def test_studio_change_of_translations_is_a_conflict(env) -> None:
+    store, writer = env
+    add_translations(store, V5, "en", {"es": ES}, now=NOW)
+    seen = approve_now(store, V5)
+    writer.studio_localizations(V5, {"de": {"title": "Studio Titel", "description": "x"}})
+    result = push_drafts(writer, store, make_guard(store), {V5: seen}, now=NOW)
+    item, = result.items
+    assert item.status == "conflict" and "Studio" in item.message
+    assert writer.updates == []
+    # the catalog shows the live translations now, so the draft is stale and unapproved
+    video = store.get_video(V5)
+    assert video.localizations == {"de": {"title": "Studio Titel", "description": "x"}}
+    row = store.get_draft(V5)
+    assert row.approved_at is None and row.base_localizations == {"de": DE5}
+    record = store.get_push(item.push_id)
+    assert record.status == "conflict" and record.after == {}
+    assert record.before["localizations"] == {"de": {"title": "Studio Titel", "description": "x"}}
+    assert used(store) == [("videos.list", 1)]
+    with pytest.raises(DraftError):
+        approve(store, V5)
+
+
+def test_studio_change_of_the_language_is_a_conflict_for_a_draft_that_sets_it(env) -> None:
+    store, writer = env
+    set_language(store, V1, "es", now=NOW)
+    seen = approve_now(store, V1)
+    writer.studio_edit(V1, defaultLanguage="fr")
+    item, = push_drafts(writer, store, make_guard(store), {V1: seen}, now=NOW).items
+    assert item.status == "conflict" and writer.updates == []
+    assert store.get_video(V1).default_language == "fr"
+
+
+def test_a_translation_added_in_studio_is_a_conflict_even_when_text_is_unchanged(env) -> None:
+    store, writer = env
+    add_translations(store, V1, "en", {"es": ES}, now=NOW)
+    seen = approve_now(store, V1)
+    writer.studio_localizations(V1, {"fr": {"title": "T", "description": "d"}})
+    assert push_drafts(writer, store, make_guard(store), {V1: seen}).items[0].status == "conflict"
+    assert writer.updates == []
+
+
+def test_translation_changes_in_studio_do_not_block_a_text_only_draft(env) -> None:
+    store, writer = env
+    seen = approved_draft(store, V5)
+    writer.studio_localizations(V5, {"de": {"title": "Studio Titel", "description": "x"}})
+    item, = push_drafts(writer, store, make_guard(store), {V5: seen}, now=NOW).items
+    assert item.status == "pushed"
+    assert writer.item(V5)["localizations"]["de"]["title"] == "Studio Titel"  # left alone
+
+
+def test_a_failed_translation_push_keeps_the_draft_and_the_backup(env) -> None:
+    store, writer = env
+    add_translations(store, V5, "en", {"es": ES}, now=NOW)
+    seen = approve_now(store, V5)
+    writer.update_errors[V5] = make_http_error(400, "invalidLocalization", "Bad translation.")
+    item, = push_drafts(writer, store, make_guard(store), {V5: seen}, now=NOW).items
+    assert item.status == "failed" and "invalidLocalization" in item.message
+    assert store.get_draft(V5) is not None
+    assert store.get_push(item.push_id).before["localizations"] == {"de": DE5}
+    assert "es" not in writer.item(V5).get("localizations", {})
+
+
+def test_a_draft_with_translation_errors_is_not_pushed(env) -> None:
+    store, writer = env
+    add_translations(store, V1, "en", {"es": ("x" * 101, "d")}, now=NOW)
+    store.put_draft(replace(store.get_draft(V1), approved_at=NOW.isoformat()))  # approved by force
+    item, = push_drafts(writer, store, make_guard(store), {V1: fingerprint(store.get_draft(V1))}).items
+    assert item.status == "skipped" and "errors" in item.message
+    assert writer.calls == []
+
+
+def test_the_backup_of_a_translation_push_restores_the_translations(env) -> None:
+    store, writer = env
+    original = store.get_video(V5)
+    add_translations(store, V5, "en", {"es": ES}, now=NOW)
+    pushed = push_drafts(writer, store, make_guard(store), {V5: approve_now(store, V5)}, now=NOW)
+    assert set(store.get_video(V5).localizations) == {"de", "es"}
+    restored = restore_draft(store, pushed.items[0].push_id, now=NOW).draft
+    assert restored.localizations == {"de": DE5}  # the full map from before the push
+    assert restored.title == original.title and restored.approved_at is None
+    approve(store, V5, now=NOW)
+    second = push_drafts(writer, store, make_guard(store), {V5: fingerprint(store.get_draft(V5))}, now=NOW)
+    assert second.items[0].status == "pushed"
+    assert writer.item(V5)["localizations"] == {"de": DE5}
+
+
+def test_restoring_a_text_only_push_leaves_later_translations_alone(env) -> None:
+    store, writer = env
+    pushed = push_drafts(writer, store, make_guard(store), {V1: approved_draft(store, V1)}, now=NOW)
+    add_translations(store, V1, "en", {"es": ES}, now=NOW)  # added after, then pushed
+    push_drafts(writer, store, make_guard(store), {V1: approve_now(store, V1)}, now=NOW)
+    restored = restore_draft(store, pushed.items[0].push_id, now=NOW).draft
+    assert restored.localizations is None

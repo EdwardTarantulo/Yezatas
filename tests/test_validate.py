@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from yezatas.validate import Draft, has_errors, validate_draft
+from yezatas.validate import Draft, has_errors, validate_draft, validate_localizations
 
 CHAPTERS = "0:00 Intro\n0:30 Tools\n1:30 Build\n4:00 Wrap up"
 
@@ -336,3 +336,68 @@ def test_has_errors():
     assert warnings_only and not has_errors(warnings_only)
     assert not has_errors(i for i in warnings_only)
     assert has_errors(i for i in validate_draft(make_draft(title="")))
+
+
+def loc(title: str = "Titulo", description: str = "Texto") -> dict:
+    return {"title": title, "description": description}
+
+
+def loc_codes(default, localizations, base=None) -> list[tuple[str, str]]:
+    return [(i.field, i.code) for i in validate_localizations(default, localizations, base)]
+
+
+def test_localizations_nothing_to_check():
+    assert validate_localizations(None, None, None) == []
+    assert validate_localizations(None, {}, None) == []  # no map: no language needed
+    assert loc_codes("en", {"es": loc(), "de": loc("Titel", "")}) == []
+    assert loc_codes(None, {"es": loc()}, "en") == []  # the draft's base language counts
+
+
+def test_localizations_as_on_youtube_are_not_judged():
+    # Studio lists the video's own language among the translations; sending it back is fine.
+    studio = {"en": loc("How to repot", "Step by step."), "de-DE": loc("x" * 120)}
+    assert validate_localizations("en", {**studio, "es": loc()}, "en", studio) == []
+    changed = {**studio, "en": loc("Changed title")}
+    assert [(i.field, i.code) for i in validate_localizations("en", changed, "en", studio)] == [
+        ("localizations.en", "localization_is_default")]
+
+
+def test_localizations_need_a_video_language():
+    issue, = validate_localizations(None, {"es": loc()}, None)
+    assert (issue.field, issue.code, issue.severity) == (
+        "localizations", "localizations_language_missing", "error")
+    assert "Set the video language first" in issue.message
+
+
+def test_localization_in_the_video_language_is_refused():
+    assert loc_codes("en", {"en": loc()}) == [("localizations.en", "localization_is_default")]
+    # the draft's own language wins over the base one
+    assert loc_codes("es", {"en": loc()}, "en") == []
+    assert loc_codes("es", {"es": loc()}, "en") == [("localizations.es", "localization_is_default")]
+
+
+def test_localization_title_rules():
+    assert loc_codes("en", {"es": loc(title="  ")}) == [("localizations.es", "localization_title_empty")]
+    assert loc_codes("en", {"es": loc(title="x" * 100)}) == []
+    assert loc_codes("en", {"es": loc(title="x" * 101)}) == [
+        ("localizations.es", "localization_title_too_long")]
+    assert loc_codes("en", {"es": loc(title="a < b")}) == [
+        ("localizations.es", "localization_title_angle_brackets")]
+
+
+def test_localization_description_rules():
+    assert loc_codes("en", {"es": loc(description="x" * 5000)}) == []
+    assert loc_codes("en", {"es": loc(description="x" * 5001)}) == [
+        ("localizations.es", "localization_description_too_long")]
+    assert loc_codes("en", {"es": loc(description="é" * 2501)}) == [  # 2 bytes each
+        ("localizations.es", "localization_description_too_long")]
+    assert loc_codes("en", {"es": loc(description="a > b")}) == [
+        ("localizations.es", "localization_description_angle_brackets")]
+    issue, = validate_localizations("en", {"es": loc(description="x" * 5001)}, None)
+    assert issue.severity == "error" and "5,000 bytes" in issue.message and "es" in issue.message
+
+
+def test_localization_issues_come_in_sorted_language_order():
+    result = loc_codes("en", {"pt": loc(title=""), "de": loc(title="")})
+    assert result == [("localizations.de", "localization_title_empty"),
+                      ("localizations.pt", "localization_title_empty")]
