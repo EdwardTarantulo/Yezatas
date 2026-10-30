@@ -7,7 +7,7 @@
   <title>{% block title %}Yezatas{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body data-poll="{{ '1' if poll else '0' }}" data-csrf="{{ csrf|default('') }}">
+<body data-poll="{{ '1' if poll|default(false) else '0' }}" data-csrf="{{ csrf|default('') }}">
   <main class="column">
     <header class="masthead">
       <h1>Yezatas</h1>

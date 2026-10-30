@@ -20,6 +20,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
 from .. import auth
@@ -238,6 +239,8 @@ def create_app(
     state = WebState(config, sign_in, reader_factory, credentials_loader, clock, sign_in_timeout)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
+    # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
+    templates.env.undefined = StrictUndefined
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
