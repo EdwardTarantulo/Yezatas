@@ -65,3 +65,14 @@ def test_contributor_or_empty_model_rejected(tmp_path: Path, bad: str) -> None:
     with pytest.raises(ConfigError):
         load_config({"YEZATAS_HOME": str(tmp_path), "YEZATAS_MODEL": bad})
 
+
+def test_translation_defaults_and_overrides(tmp_path: Path) -> None:
+    cfg = load_config({"YEZATAS_HOME": str(tmp_path)})
+    assert cfg.translator_model == "meta-models/muse-spark-open-1026"
+    assert cfg.translator_url == "https://inference.baseten.co/v1"
+    assert cfg.translator_key_path == tmp_path / "credentials" / "translator_api_key"
+    assert (cfg.verifier_model, cfg.verifier_url) == ("muse-glimmer:30b", "http://127.0.0.1:11434")
+    cfg = load_config({"YEZATAS_HOME": str(tmp_path), "YEZATAS_VERIFIER_URL": "http://box:11434/",
+                       "YEZATAS_TRANSLATOR_MODEL": "muse-spark-1.3"})
+    assert cfg.verifier_url == "http://box:11434" and cfg.translator_model == "muse-spark-1.3"
+

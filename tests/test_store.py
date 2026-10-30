@@ -1,10 +1,11 @@
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-from yezatas.store import MIGRATIONS, DraftRow, PushRecord, Store, Video
+from yezatas.store import MIGRATIONS, DraftRow, PushRecord, Store, TranslationRecord, Video
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -39,7 +40,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 3
+        assert s.schema_version == len(MIGRATIONS) == 4
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -49,7 +50,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 3
+        assert s.schema_version == 4
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -144,16 +145,44 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
         s.upsert_video(make_video(), pid, now=T0)
         s.add_quota_entry("videos.list", 1, quota_day="2026-10-01", now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 1 database
-    conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; PRAGMA user_version = 1;")
+    conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; "
+                       "DROP TABLE translations; PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 3
+        assert s.schema_version == 4
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
         assert s.list_drafts() == [] and s.list_pushes() == [] and s.list_agent_runs() == []
         s.put_draft(make_draft())
         assert s.get_draft("vid00000001") is not None
+
+
+def test_v3_drafts_get_the_catalog_language_as_their_base(tmp_path: Path) -> None:
+    path = tmp_path / "v3.sqlite"
+    loc = {"de": {"title": "Kaktus umtopfen", "description": "Schritt für Schritt."}}
+    with Store(path) as s:
+        pid = s.begin_pull("chan0000001", now=T0)
+        s.upsert_video(make_video(default_language="en", localizations=loc), pid, now=T0)
+        s.upsert_video(make_video("vid00000002", default_language=None, localizations={}), pid,
+                       now=T0)
+        s.put_draft(make_draft())
+        s.put_draft(make_draft("vid00000002"))
+    conn = sqlite3.connect(path)  # turn it back into a version 3 database
+    conn.executescript(
+        "DROP TABLE translations; ALTER TABLE drafts DROP COLUMN default_language; "
+        "ALTER TABLE drafts DROP COLUMN localizations_json; "
+        "ALTER TABLE drafts DROP COLUMN base_default_language; "
+        "ALTER TABLE drafts DROP COLUMN base_localizations_json; PRAGMA user_version = 3;")
+    conn.close()
+    with Store(path) as s:
+        row = s.get_draft("vid00000001")
+        assert row is not None and row.base_default_language == "en"
+        assert row.base_localizations == loc
+        assert row.default_language is None and row.localizations is None
+        other = s.get_draft("vid00000002")
+        assert other is not None and other.base_localizations == {}
+        assert other.base_default_language is None
 
 
 def make_draft(vid: str = "vid00000001", **kw: object) -> DraftRow:
@@ -244,4 +273,50 @@ def test_agent_runs_round_trip_newest_first(store: Store) -> None:
     assert [r.id for r in store.list_agent_runs()] == [second, first]
     assert [r.id for r in store.list_agent_runs("vid00000001")] == [first]
     assert store.get_agent_run(999) is None
+
+
+def test_draft_language_and_translations_round_trip(store: Store) -> None:
+    store.upsert_video(make_video(), store.begin_pull("chan0000001", now=T0), now=T0)
+    store.put_draft(make_draft())
+    row = store.get_draft("vid00000001")
+    assert row is not None and row.default_language is None and row.localizations is None
+    assert row.base_default_language is None and row.base_localizations == {}
+    loc = {"es": {"title": "Cactus", "description": "Hola"}}
+    store.put_draft(replace(make_draft(), default_language="en", localizations=loc,
+                            base_default_language="lt", base_localizations={"de": {"title": "x", "description": "y"}}))
+    row = store.get_draft("vid00000001")
+    assert row is not None and row.default_language == "en" and row.localizations == loc
+    assert row.base_default_language == "lt" and row.base_localizations["de"]["title"] == "x"
+    store.put_draft(replace(row, localizations={}))  # an empty map is not "leave alone"
+    assert store.get_draft("vid00000001").localizations == {}
+
+
+def test_update_video_text_sets_language_and_translations_only_when_given(store: Store) -> None:
+    pid = store.begin_pull("chan0000001", now=T0)
+    store.upsert_video(make_video(default_language="lt", localizations={"de": {"title": "a"}}), pid, now=T0)
+    store.update_video_text("vid00000001", "T", "D", ["x"], T0)
+    video = store.get_video("vid00000001")
+    assert video.default_language == "lt" and video.localizations == {"de": {"title": "a"}}
+    loc = {"es": {"title": "T es", "description": "D es"}}
+    store.update_video_text("vid00000001", "T", "D", ["x"], T0, default_language="en", localizations=loc)
+    video = store.get_video("vid00000001")
+    assert video.default_language == "en" and video.localizations == loc
+    assert video.raw["localizations"] == loc
+
+
+def test_translations_round_trip_and_latest_per_language(store: Store) -> None:
+    def record(language: str, title: str, status: str = "verified") -> TranslationRecord:
+        return TranslationRecord(0, "vid00000001", language, "en", "abc123", title, "desc",
+                                 "muse-spark-open", "muse-glimmer:30b", status, 5, [], [],
+                                 {"title": "back", "description": "back d"}, 100, 50, "")
+    first = store.add_translation(record("es", "Uno"), now=T0)
+    store.add_translation(record("de", "Eins"), now=T0)
+    newest = store.add_translation(record("es", "Uno bis", "flagged"), now=T0)
+    got = store.get_translation(first)
+    assert got is not None and got.title == "Uno" and got.back_translation["title"] == "back"
+    assert got.created_at and got.id == first
+    assert [t.id for t in store.list_translations("vid00000001")][0] == newest
+    latest = store.latest_translations("vid00000001")
+    assert set(latest) == {"es", "de"} and latest["es"].title == "Uno bis"
+    assert latest["es"].status == "flagged" and store.list_translations("other") == []
 

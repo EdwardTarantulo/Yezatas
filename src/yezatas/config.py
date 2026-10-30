@@ -12,6 +12,12 @@ DEFAULT_DAILY_QUOTA = 10000
 # Standard mode: Meta does not train on the prompts. Contributor models (`*-contributor`) may, so
 # Yezatas never sends channel data to them.
 DEFAULT_MODEL = "muse-spark-1.3"
+# Translations: Muse Spark Open through Baseten (OpenAI-compatible); checked by Muse Glimmer on
+# the creator's own machine through Ollama.
+DEFAULT_TRANSLATOR_MODEL = "meta-models/muse-spark-open-1026"
+DEFAULT_TRANSLATOR_URL = "https://inference.baseten.co/v1"
+DEFAULT_VERIFIER_MODEL = "muse-glimmer:30b"
+DEFAULT_VERIFIER_URL = "http://127.0.0.1:11434"
 
 
 class ConfigError(ValueError):
@@ -28,6 +34,11 @@ class Config:
     daily_quota_budget: int = DEFAULT_DAILY_QUOTA
     model: str = DEFAULT_MODEL
     model_key_path: Path | None = None  # the saved Meta API key (MODEL_API_KEY in the environment wins)
+    translator_model: str = DEFAULT_TRANSLATOR_MODEL
+    translator_url: str = DEFAULT_TRANSLATOR_URL
+    translator_key_path: Path | None = None  # the saved Baseten key (BASETEN_API_KEY wins)
+    verifier_model: str = DEFAULT_VERIFIER_MODEL
+    verifier_url: str = DEFAULT_VERIFIER_URL
 
 
 def _default_home(env: Mapping[str, str]) -> Path:
@@ -82,6 +93,11 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         daily_quota_budget=budget,
         model=model,
         model_key_path=credentials_dir / "model_api_key",
+        translator_model=env.get("YEZATAS_TRANSLATOR_MODEL", "").strip() or DEFAULT_TRANSLATOR_MODEL,
+        translator_url=env.get("YEZATAS_TRANSLATOR_URL", "").strip() or DEFAULT_TRANSLATOR_URL,
+        translator_key_path=credentials_dir / "translator_api_key",
+        verifier_model=env.get("YEZATAS_VERIFIER_MODEL", "").strip() or DEFAULT_VERIFIER_MODEL,
+        verifier_url=(env.get("YEZATAS_VERIFIER_URL", "").strip() or DEFAULT_VERIFIER_URL).rstrip("/"),
     )
 
 

@@ -107,8 +107,44 @@ _SCHEMA_V3: tuple[str, ...] = (
     "CREATE INDEX idx_agent_runs_video ON agent_runs(video_id, id)",
 )
 
+# v4: drafts may also set the video language and the translations (NULL: leave YouTube's as is),
+# and every machine translation is kept with its checks.
+_SCHEMA_V4: tuple[str, ...] = (
+    "ALTER TABLE drafts ADD COLUMN default_language TEXT",
+    "ALTER TABLE drafts ADD COLUMN localizations_json TEXT",
+    "ALTER TABLE drafts ADD COLUMN base_default_language TEXT",
+    "ALTER TABLE drafts ADD COLUMN base_localizations_json TEXT NOT NULL DEFAULT '{}'",
+    # Older drafts were made from the catalog's current language and translations: record them as
+    # the base, or every such draft would look stale.
+    """UPDATE drafts SET
+        base_default_language = (SELECT default_language FROM videos
+                                 WHERE videos.video_id = drafts.video_id),
+        base_localizations_json = COALESCE((SELECT localizations_json FROM videos
+                                            WHERE videos.video_id = drafts.video_id), '{}')""",
+    """CREATE TABLE translations (
+        id INTEGER PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        language TEXT NOT NULL,
+        source_language TEXT NOT NULL,
+        source_hash TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        translator TEXT NOT NULL,
+        verifier TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        score INTEGER,
+        issues_json TEXT NOT NULL DEFAULT '[]',
+        problems_json TEXT NOT NULL DEFAULT '[]',
+        back_translation_json TEXT NOT NULL DEFAULT '{}',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_translations_video ON translations(video_id, language, id)",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
-MIGRATIONS: tuple[tuple[str, ...], ...] = (_SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3)
+MIGRATIONS: tuple[tuple[str, ...], ...] = (_SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4)
 
 _ORDER_COLUMNS = frozenset(
     {"view_count", "like_count", "comment_count", "published_at", "title", "updated_at", "video_id"}
@@ -171,6 +207,12 @@ class DraftRow:
     created_at: str
     updated_at: str
     approved_at: str | None
+    # None: the draft leaves YouTube's value alone. Otherwise the value to send: the video
+    # language, and the complete translations map {language: {"title", "description"}}.
+    default_language: str | None = None
+    localizations: dict[str, dict[str, str]] | None = None
+    base_default_language: str | None = None
+    base_localizations: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @property
     def draft(self) -> "Draft":
@@ -216,6 +258,29 @@ class AgentRun:
     input_tokens: int
     cached_tokens: int
     output_tokens: int
+
+
+@dataclass(frozen=True)
+class TranslationRecord:
+    """One machine translation of a video's title and description, with its checks."""
+
+    id: int  # 0 before it is stored
+    video_id: str
+    language: str  # YouTube language code of the translation, e.g. "es"
+    source_language: str  # the language of the text that was translated
+    source_hash: str  # identifies the exact source title + description (see translate.py)
+    title: str
+    description: str
+    translator: str  # model id that translated
+    verifier: str  # model id that checked it ("" when it could not be checked)
+    status: str  # "verified" | "flagged" | "unverified" | "failed"
+    score: int | None  # the verifier's 1-5 score
+    issues: list[str]  # the verifier's issues
+    problems: list[str]  # the code checks' problems (links, times, limits)
+    back_translation: dict[str, str]  # the verifier's blind back-translation: title, description
+    input_tokens: int
+    output_tokens: int
+    created_at: str
 
 
 class Store:
@@ -426,6 +491,11 @@ class Store:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             approved_at=row["approved_at"],
+            default_language=row["default_language"],
+            localizations=(json.loads(row["localizations_json"])
+                           if row["localizations_json"] is not None else None),
+            base_default_language=row["base_default_language"],
+            base_localizations=json.loads(row["base_localizations_json"] or "{}"),
         )
 
     def put_draft(self, row: DraftRow) -> None:
@@ -435,20 +505,28 @@ class Store:
                 """
                 INSERT INTO drafts (video_id, title, description, tags_json, base_title,
                     base_description, base_tags_json, source, note, created_at, updated_at,
-                    approved_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    approved_at, default_language, localizations_json, base_default_language,
+                    base_localizations_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(video_id) DO UPDATE SET
                     title=excluded.title, description=excluded.description,
                     tags_json=excluded.tags_json, base_title=excluded.base_title,
                     base_description=excluded.base_description,
                     base_tags_json=excluded.base_tags_json, source=excluded.source,
                     note=excluded.note, created_at=excluded.created_at,
-                    updated_at=excluded.updated_at, approved_at=excluded.approved_at
+                    updated_at=excluded.updated_at, approved_at=excluded.approved_at,
+                    default_language=excluded.default_language,
+                    localizations_json=excluded.localizations_json,
+                    base_default_language=excluded.base_default_language,
+                    base_localizations_json=excluded.base_localizations_json
                 """,
                 (
                     row.video_id, row.title, row.description, _dumps(list(row.tags)),
                     row.base_title, row.base_description, _dumps(list(row.base_tags)),
                     row.source, row.note, row.created_at, row.updated_at, row.approved_at,
+                    row.default_language,
+                    _dumps(row.localizations) if row.localizations is not None else None,
+                    row.base_default_language, _dumps(row.base_localizations),
                 ),
             )
 
@@ -478,10 +556,17 @@ class Store:
         description: str,
         tags: Sequence[str],
         now: datetime | None = None,
+        *,
+        default_language: str | None = None,
+        localizations: dict[str, Any] | None = None,
     ) -> None:
-        """Set the catalog text of a video (also inside raw_json's snippet). No snapshot."""
+        """Set the catalog text of a video (also inside raw_json). No snapshot.
+
+        `default_language` and `localizations` are only changed when given (None: leave them).
+        """
         row = self._conn.execute(
-            "SELECT raw_json FROM videos WHERE video_id = ?", (video_id,)
+            "SELECT raw_json, default_language, localizations_json FROM videos WHERE video_id = ?",
+            (video_id,),
         ).fetchone()
         if row is None:
             raise KeyError(video_id)
@@ -489,11 +574,19 @@ class Store:
         snippet = raw.get("snippet")
         if isinstance(snippet, dict):
             snippet.update(title=title, description=description, tags=list(tags))
+            if default_language is not None:
+                snippet["defaultLanguage"] = default_language
+        if localizations is not None and isinstance(raw, dict):
+            raw["localizations"] = localizations
+        language = default_language if default_language is not None else row["default_language"]
+        localized = (_dumps(localizations) if localizations is not None
+                     else row["localizations_json"])
         with self._conn:
             self._conn.execute(
                 "UPDATE videos SET title = ?, description = ?, tags_json = ?, raw_json = ?, "
-                "updated_at = ? WHERE video_id = ?",
-                (title, description, _dumps(list(tags)), _dumps(raw), _iso(now), video_id),
+                "default_language = ?, localizations_json = ?, updated_at = ? WHERE video_id = ?",
+                (title, description, _dumps(list(tags)), _dumps(raw), language, localized,
+                 _iso(now), video_id),
             )
 
     # --- pushes ----------------------------------------------------------
@@ -617,3 +710,62 @@ class Store:
                 (video_id, limit),
             ).fetchall()
         return [self._row_to_agent_run(r) for r in rows]
+
+    # --- translations ----------------------------------------------------
+    @staticmethod
+    def _row_to_translation(row: sqlite3.Row) -> TranslationRecord:
+        return TranslationRecord(
+            id=row["id"],
+            video_id=row["video_id"],
+            language=row["language"],
+            source_language=row["source_language"],
+            source_hash=row["source_hash"],
+            title=row["title"],
+            description=row["description"],
+            translator=row["translator"],
+            verifier=row["verifier"],
+            status=row["status"],
+            score=row["score"],
+            issues=json.loads(row["issues_json"]),
+            problems=json.loads(row["problems_json"]),
+            back_translation=json.loads(row["back_translation_json"]),
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output_tokens"],
+            created_at=row["created_at"],
+        )
+
+    def add_translation(self, record: TranslationRecord, now: datetime | None = None) -> int:
+        """Store a translation (its `id` and `created_at` are ignored); returns the new id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO translations (video_id, language, source_language, source_hash, "
+                "title, description, translator, verifier, status, score, issues_json, "
+                "problems_json, back_translation_json, input_tokens, output_tokens, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record.video_id, record.language, record.source_language, record.source_hash,
+                 record.title, record.description, record.translator, record.verifier,
+                 record.status, record.score, _dumps(record.issues), _dumps(record.problems),
+                 _dumps(record.back_translation), record.input_tokens, record.output_tokens,
+                 _iso(now)),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def get_translation(self, translation_id: int) -> TranslationRecord | None:
+        row = self._conn.execute(
+            "SELECT * FROM translations WHERE id = ?", (translation_id,)
+        ).fetchone()
+        return self._row_to_translation(row) if row else None
+
+    def list_translations(self, video_id: str) -> list[TranslationRecord]:
+        """Every translation of a video, newest first."""
+        rows = self._conn.execute(
+            "SELECT * FROM translations WHERE video_id = ? ORDER BY id DESC", (video_id,)
+        ).fetchall()
+        return [self._row_to_translation(r) for r in rows]
+
+    def latest_translations(self, video_id: str) -> dict[str, TranslationRecord]:
+        """The newest translation of a video per language."""
+        latest: dict[str, TranslationRecord] = {}
+        for record in self.list_translations(video_id):
+            latest.setdefault(record.language, record)
+        return latest
