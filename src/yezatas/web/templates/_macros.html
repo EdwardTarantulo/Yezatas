@@ -1,0 +1,21 @@
+{# Our own simple line icons and small building blocks. No third-party artwork. #}
+
+{% macro mark() %}<svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="30" height="30" rx="8"/><path d="M9 9l7 8 7-8M16 17v7"/><circle cx="24" cy="8" r="1.6"/></svg>{% endmacro %}
+
+{% macro icon(name) %}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+{%- if name == 'dashboard' -%}<rect x="3.5" y="3.5" width="7" height="9" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="5" rx="1.5"/><rect x="13.5" y="11.5" width="7" height="9" rx="1.5"/><rect x="3.5" y="15.5" width="7" height="5" rx="1.5"/>
+{%- elif name == 'content' -%}<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 14h8M8 17h5"/>
+{%- elif name == 'setup' -%}<path d="M4 7h9M17 7h3M4 17h3M11 17h9M4 12h3M11 12h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/><circle cx="9" cy="12" r="0.1"/>
+{%- elif name == 'search' -%}<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/>
+{%- elif name == 'check' -%}<circle cx="12" cy="12" r="9"/><path d="M7.5 12.5l3 3 6-6.5"/>
+{%- elif name == 'close' -%}<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>
+{%- elif name == 'partial' -%}<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.2v.1"/>
+{%- elif name == 'minus' -%}<circle cx="12" cy="12" r="9"/><path d="M8.5 12h7"/>
+{%- elif name == 'back' -%}<path d="M15 5l-7 7 7 7"/>
+{%- elif name == 'external' -%}<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>
+{%- endif -%}
+</svg>{% endmacro %}
+
+{% macro score_badge(score, band) %}<span class="badge {{ band }}" title="SEO score {{ score }} of 100">{{ score }}</span>{% endmacro %}
+
+{% macro thumb(url, size='') %}{% if url %}<img class="thumb {{ size }}" src="{{ url }}" alt="" loading="lazy" width="320" height="180">{% else %}<span class="thumb empty {{ size }}" aria-hidden="true"></span>{% endif %}{% endmacro %}

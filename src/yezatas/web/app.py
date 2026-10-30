@@ -1,4 +1,4 @@
-"""The Yezatas web app. Today: the setup screen that connects a YouTube channel.
+"""The Yezatas web app: the setup screen, the SEO dashboard, the content table and video pages.
 
 Everything here is read-only towards YouTube. Background jobs open their own Store, because a
 SQLite connection must not cross threads.
@@ -27,6 +27,7 @@ from .. import auth
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
 from ..quota import QuotaGuard
+from ..seo import score_catalog
 from ..store import Store
 from ..youtube import GoogleYouTubeReader, YouTubeReader
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
@@ -35,6 +36,8 @@ from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
 from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
+from .views import (Entry, build_listing, dashboard_model, format_count, format_date, group_checks,
+                    make_entries, thumb_url)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -306,23 +309,81 @@ def create_app(
             "flash": [],
         }
 
-    def render(request: Request, name: str, extra: dict[str, Any]) -> Response:
+    def catalog_data() -> dict[str, Any] | None:
+        """Videos, scores and quota for the catalog pages; None before the first finished pull.
+
+        Runs in a worker thread (it opens its own Store) and scores the catalog on every call.
+        """
+        with Store(config.catalog_db) as store:
+            latest = _latest_pull(store)
+            if latest is None:
+                return None
+            videos = store.list_videos()
+            guard = QuotaGuard(store, config.daily_quota_budget)
+            used, remaining = guard.used(), guard.remaining()
+        entries = make_entries(videos, score_catalog(videos))
+        return {
+            "entries": entries,
+            "latest_pull": {"videos": latest[0], "when": _local_time(latest[1])},
+            "quota": {"used": used, "remaining": remaining, "budget": config.daily_quota_budget},
+        }
+
+    def render(request: Request, name: str, extra: dict[str, Any],
+               status_code: int = 200) -> Response:
         context = {"csrf": request.state.csrf, **extra}
-        return templates.TemplateResponse(request, name, context)
+        return templates.TemplateResponse(request, name, context, status_code=status_code)
 
     # --- pages ------------------------------------------------------------------------------
     @app.get("/")
     def index(request: Request) -> Response:
-        data = page_data()
-        if data["latest_pull"] is None:
-            return RedirectResponse("/setup", status_code=303)
-        return render(request, "home.html", data)
+        data = catalog_data()
+        if data is None:
+            return back_to_setup()
+        model = dashboard_model(data["entries"])
+        return render(request, "dashboard.html", {
+            "active": "dashboard", "latest_pull": data["latest_pull"], "quota": data["quota"],
+            **model,
+        })
+
+    @app.get("/videos")
+    def videos_page(request: Request) -> Response:
+        data = catalog_data()
+        if data is None:
+            return back_to_setup()
+        listing = build_listing(data["entries"], dict(request.query_params))
+        return render(request, "videos.html", {"active": "content", "listing": listing,
+                                               "q": listing.q})
+
+    @app.get("/videos/{video_id}")
+    def video_page(request: Request, video_id: str) -> Response:
+        data = catalog_data()
+        if data is None:
+            return back_to_setup()
+        entry: Entry | None = next((e for e in data["entries"] if e.video.video_id == video_id),
+                                   None)
+        if entry is None:
+            return render(request, "error.html", {
+                "layout": "shell.html", "active": "content",
+                "heading": "Video not found",
+                "text": "There is no video with this id in your pulled catalog. It may have been "
+                        "removed from your channel, or the catalog is out of date.",
+                "link_url": "/videos", "link_text": "Back to Content",
+            }, status_code=404)
+        video = entry.video
+        return render(request, "video.html", {
+            "active": "content", "entry": entry, "video": video, "card": entry.card,
+            "groups": group_checks(entry.card),
+            "big_thumb": thumb_url(video, ("high", "medium", "default")),
+            "views": format_count(video.view_count), "likes": format_count(video.like_count),
+            "comments": format_count(video.comment_count),
+            "published": format_date(video.published_at),
+        })
 
     @app.get("/setup")
     def setup(request: Request) -> Response:
         data = page_data()
         data["flash"] = state.pop_flash(request.state.session_id)
-        return render(request, "setup.html", data)
+        return render(request, "setup.html", {**data, "active": "setup"})
 
     @app.get("/api/status")
     def api_status() -> JSONResponse:

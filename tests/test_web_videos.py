@@ -1,0 +1,236 @@
+"""The content table (/videos) and the video page (/videos/{id}). Structure, not specific checks."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+from markupsafe import escape
+
+from webhelpers import make_ui, make_video, seed_catalog
+from yezatas.seo import CATEGORIES, fix_priority, score_catalog
+from yezatas.store import Video
+from yezatas.web.views import PAGE_SIZE
+
+
+def seeded(tmp_path: Path, count: int = 30, videos: list[Video] | None = None) -> Any:
+    ui = make_ui(tmp_path)
+    videos = videos if videos is not None else [make_video(n) for n in range(1, count + 1)]
+    seed_catalog(ui.config, videos)
+    ui.videos = {v.video_id: v for v in videos}  # type: ignore[attr-defined]
+    ui.cards = score_catalog(videos)  # type: ignore[attr-defined]
+    return ui
+
+
+def row_ids(html: str) -> list[str]:
+    return re.findall(r'class="vtitle" href="/videos/([^"]+)"', html)
+
+
+def listed(ui: Any, query: str = "") -> list[str]:
+    resp = ui.client.get("/videos" + query)
+    assert resp.status_code == 200, query
+    return row_ids(resp.text)
+
+
+def test_content_page_renders_rows_with_all_columns(tmp_path: Path) -> None:
+    ui = seeded(tmp_path)
+    html = ui.client.get("/videos").text
+    assert "Channel content" in html
+    assert f"{len(ui.videos)} videos" in html
+    ids = row_ids(html)
+    assert sorted(ids) == sorted(ui.videos)
+    first = ui.videos[ids[0]]
+    row = html.split(f'class="vtitle" href="/videos/{first.video_id}"')[1].split("</tr>")[0]
+    assert str(escape(first.title)) in row
+    assert 'class="badge ' in row
+    # a description snippet of at most ~90 characters
+    snippets = re.findall(r'class="vdesc">([^<]*)<', html)
+    assert snippets and all(len(s) <= 91 for s in snippets)
+    assert re.search(r"[A-Z][a-z]{2} \d{1,2}, 2026", html)
+
+
+def test_default_sort_is_fix_priority(tmp_path: Path) -> None:
+    ui = seeded(tmp_path)
+    for query in ("", "?sort=fix", "?sort=nonsense"):
+        ids = listed(ui, query)
+        prio = [fix_priority(ui.videos[i], ui.cards[i]) for i in ids]
+        assert prio == sorted(prio, reverse=True), query
+
+
+def test_sort_score_views_newest(tmp_path: Path) -> None:
+    ui = seeded(tmp_path)
+    scores = [ui.cards[i].score for i in listed(ui, "?sort=score")]
+    assert scores == sorted(scores)
+    views = [ui.videos[i].view_count for i in listed(ui, "?sort=views")]
+    assert views == sorted(views, reverse=True)
+    dates = [ui.videos[i].published_at for i in listed(ui, "?sort=newest")]
+    assert dates == sorted(dates, reverse=True)
+    assert len(set(listed(ui, "?sort=score"))) == len(ui.videos)
+
+
+def test_search_matches_title_description_and_tags_case_insensitively(tmp_path: Path) -> None:
+    videos = [
+        make_video(1, title="Zebra plant care", description="plain", tags=["a"]),
+        make_video(2, title="Plain title", description="Sunlight and the ALOE vera", tags=["a"]),
+        make_video(3, title="Plain again", description="plain", tags=["Haworthia", "b"]),
+        make_video(4, title="Nothing here", description="plain", tags=["a"]),
+    ]
+    ui = seeded(tmp_path, videos=videos)
+    assert listed(ui, "?q=zebra") == ["vid000001"]
+    assert listed(ui, "?q=aloe%20VERA") == ["vid000002"]
+    assert listed(ui, "?q=HAWORTHIA") == ["vid000003"]
+    assert sorted(listed(ui, "?q=plain")) == ["vid000001", "vid000002", "vid000003", "vid000004"]
+    assert listed(ui, "?q=%20%20") == listed(ui, "")  # blank search = no filter
+    html = ui.client.get("/videos?q=nomatchatall").text
+    assert "No videos match" in html and "0 videos" in html and 'id="no-videos"' in html
+
+
+def test_visibility_and_band_filters(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 40)
+    for vis in ("public", "unlisted", "private"):
+        ids = listed(ui, f"?visibility={vis}")
+        assert ids and all(ui.videos[i].privacy_status == vis for i in ids)
+        assert len(ids) == sum(v.privacy_status == vis for v in ui.videos.values())
+    assert len(listed(ui, "?visibility=all")) == 40
+    assert len(listed(ui, "?visibility=bogus")) == 40
+    bounds = {"good": (80, 100), "ok": (50, 79), "poor": (0, 49)}
+    seen = 0
+    for band, (lo, hi) in bounds.items():
+        ids = listed(ui, f"?band={band}")
+        assert all(lo <= ui.cards[i].score <= hi for i in ids)
+        seen += len(ids)
+    assert seen == 40
+    assert len(listed(ui, "?band=bogus")) == 40
+    both = listed(ui, "?visibility=public&band=poor")
+    assert all(ui.videos[i].privacy_status == "public" and ui.cards[i].score < 50 for i in both)
+
+
+def test_check_filter_lists_videos_failing_that_check(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 40)
+    failing: dict[str, set[str]] = {}
+    for vid, card in ui.cards.items():
+        for c in card.checks:
+            if c.applicable and not c.passed:
+                failing.setdefault(c.check_id, set()).add(vid)
+    assert failing, "the seeded catalog should fail at least one check"
+    for check_id, expected in list(failing.items())[:3]:
+        assert set(listed(ui, f"?check={check_id}")) == expected
+    html = ui.client.get("/videos?check=no_such_check").text
+    assert "No videos match" in html
+
+
+def test_check_chip_shows_title_and_clears(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 40)
+    check_id = next(c.check_id for card in ui.cards.values() for c in card.failed)
+    title = next(c.title for card in ui.cards.values() for c in card.checks
+                 if c.check_id == check_id)
+    html = ui.client.get(f"/videos?check={check_id}&sort=views").text
+    assert str(escape(title)) in html
+    assert 'href="/videos?sort=views"' in html  # "Clear" keeps the other params
+
+
+def test_filter_chips_are_links_that_mark_the_active_one(tmp_path: Path) -> None:
+    ui = seeded(tmp_path)
+    html = ui.client.get("/videos?visibility=public&sort=views").text
+    assert re.search(r'class="chip active" href="/videos\?sort=views&amp;visibility=public"', html)
+    assert 'href="/videos?sort=views&amp;visibility=private"' in html
+    assert re.search(r'class="chip active" href="/videos\?sort=views&amp;visibility=public"'
+                     r'[^>]*>Most views', html)
+
+
+def test_pagination_with_120_videos(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 120)
+    page1 = ui.client.get("/videos?sort=views").text
+    assert "120 videos" in page1 and "Page 1 of 3" in page1
+    ids1, ids2, ids3 = (listed(ui, f"?sort=views&page={p}") for p in (1, 2, 3))
+    assert (len(ids1), len(ids2), len(ids3)) == (PAGE_SIZE, PAGE_SIZE, 20)
+    assert len(set(ids1 + ids2 + ids3)) == 120
+    assert re.search(r'rel="next" href="/videos\?sort=views&amp;page=2"', page1)
+    assert 'rel="prev"' not in page1
+    page2 = ui.client.get("/videos?sort=views&page=2").text
+    assert 'rel="prev" href="/videos?sort=views"' in page2
+    assert 'rel="next" href="/videos?sort=views&amp;page=3"' in page2
+    page3 = ui.client.get("/videos?sort=views&page=3").text
+    assert 'rel="next"' not in page3 and "Page 3 of 3" in page3
+
+
+def test_pagination_keeps_filters_in_links(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 160)
+    html = ui.client.get("/videos?visibility=public&band=poor&q=cactus&sort=score").text
+    # whatever the number of pages, every link that is built keeps the other params
+    for href in re.findall(r'rel="(?:next|prev)" href="([^"]+)"', html):
+        assert "visibility=public" in href and "q=cactus" in href and "sort=score" in href
+
+
+def test_bad_page_parameters_never_500(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 120)
+    first = listed(ui, "?sort=views&page=1")
+    for bad in ("abc", "", "0", "-5", "1.5", "%20", "9" * 5000):
+        assert listed(ui, f"?sort=views&page={bad}") == first, bad
+    assert listed(ui, "?sort=views&page=999") == listed(ui, "?sort=views&page=3")
+    for query in ("?q=" + "x" * 5000, "?sort=%FF", "?check=" + "y" * 500, "?band=&visibility="):
+        assert ui.client.get("/videos" + query).status_code == 200, query[:30]
+
+
+def test_video_page_header_and_links(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, videos=[make_video(7, view_count=21_100, like_count=1500,
+                                              comment_count=12,
+                                              published_at="2026-10-30T10:00:00Z")])
+    html = ui.client.get("/videos/vid000007").text
+    assert 'href="/videos"' in html and "Content" in html
+    assert "21.1K views" in html and "1.5K likes" in html and "12 comments" in html
+    assert "Oct 30, 2026" in html
+    assert re.search(r'<a class="button primary" href="https://studio.youtube.com/video/vid000007/edit" '
+                     r'target="_blank" rel="noopener noreferrer">Edit in YouTube Studio</a>', html)
+    assert re.search(r'href="https://www.youtube.com/watch\?v=vid000007" target="_blank" '
+                     r'rel="noopener noreferrer">Watch on YouTube</a>', html)
+    score = ui.cards["vid000007"].score
+    assert re.search(rf'id="video-score">.*?<span class="avg">{score}</span>', html, flags=re.S)
+
+
+def test_video_page_groups_checks_and_shows_fixes(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 40)
+    # pick a video that has at least one failed check with a fix text
+    vid = next(i for i, card in ui.cards.items() if any(c.fix for c in card.failed))
+    card = ui.cards[vid]
+    html = ui.client.get(f"/videos/{vid}").text
+    groups = re.findall(r'id="group-(\w+)"', html)
+    expected = [k for k in CATEGORIES if any(c.category == k for c in card.checks)]
+    assert groups == expected
+    for c in card.checks:
+        assert f'id="check-{c.check_id}"' in html
+        assert str(escape(c.title)) in html
+    for c in card.failed:
+        if c.fix:
+            assert str(escape(c.fix)) in html
+            assert f"{c.points}/{c.max_points}" in html
+    # inside each group: failed first, then passed, then not applicable
+    order = {"fail": 0, "part": 0, "pass": 1, "na": 2}
+    for section in html.split('<section class="card check-group"')[1:]:
+        states = [order[s] for s in re.findall(r'<li class="check (\w+)"', section)]
+        assert states == sorted(states)
+    # passed checks show no fix box
+    for item in re.findall(r'<li class="check pass".*?</li>', html, flags=re.S):
+        assert "check-fix" not in item
+
+
+def test_unknown_video_is_a_404_page(tmp_path: Path) -> None:
+    ui = seeded(tmp_path)
+    for path in ("/videos/nope", "/videos/%22%3E%3Cscript%3Ealert(1)%3C",
+                 "/videos/vid000001%20"):
+        resp = ui.client.get(path)
+        assert resp.status_code == 404, path
+        assert resp.headers["content-type"].startswith("text/html")
+        assert "Video not found" in resp.text and 'href="/videos"' in resp.text
+        assert "Back to Content" in resp.text
+        assert "<script>alert" not in resp.text
+    assert 'class="topbar"' in ui.client.get("/videos/nope").text  # shown inside the shell
+
+
+def test_csp_allows_only_the_thumbnail_host_for_images(tmp_path: Path) -> None:
+    ui = seeded(tmp_path)
+    for path in ("/", "/videos", "/videos/vid000001", "/setup"):
+        csp = ui.client.get(path).headers["content-security-policy"]
+        assert "img-src 'self' https://i.ytimg.com;" in csp
+        assert "script-src 'self';" in csp and "style-src 'self';" in csp

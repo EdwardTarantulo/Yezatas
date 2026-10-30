@@ -147,7 +147,10 @@ def test_security_headers(tmp_path: Path) -> None:
     resp = ui.client.get("/setup")
     assert resp.headers["cache-control"] == "no-store"
     assert "frame-ancestors 'none'" in resp.headers["content-security-policy"]
-    assert "http" not in resp.headers["content-security-policy"]  # no external sources
+    csp = resp.headers["content-security-policy"]
+    # The only external source is YouTube's thumbnail host, for images.
+    assert "img-src 'self' https://i.ytimg.com;" in csp
+    assert csp.replace("https://i.ytimg.com", "").count("http") == 0
     assert "cdn" not in resp.text.lower()
 
 

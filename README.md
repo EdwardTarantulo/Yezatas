@@ -27,6 +27,12 @@ as it lands; the git history is the detailed record.
   (400+ videos, including private ones, for about 20 quota units). Fixes from the test: form posts no longer refused
   (Referrer-Policy), tabs stay signed in across restarts, "Add yourself as a test user" is now its own step (8 steps),
   pictures of Google's sign-in pages, and the API link opens the client's own project.
+- **2026-10-30**: **SEO scorecard**: 24 deterministic checks per video (title, description, chapters, hashtags, tags,
+  languages, translations, thumbnail) worth 100 points, each with what was found and a one-line fix. Shorts skip checks
+  that don't apply. **Fix next** ranks videos by views × missing points.
+- **2026-10-30**: **light, Studio-style UI**: app shell with search and sidebar, **channel dashboard** (average score,
+  Fix next, most common problems, catalog and quota), **content table** (search, filters, sorting, paging) and a
+  **video page** with every check and its fix.
 
 ## Setup
 

@@ -18,6 +18,7 @@ from googleapiclient.errors import HttpError
 from fakes import FakeYouTubeReader
 from yezatas import auth
 from yezatas.config import Config, load_config
+from yezatas.store import Store, Video
 from yezatas.web.app import create_app
 
 PORT = 8765
@@ -133,3 +134,36 @@ def step_class(html: str, key: str) -> str:
     match = re.search(rf'<section class="([^"]*)" id="step-{key}"', html)
     assert match, f"step {key} not found"
     return match.group(1)
+
+
+# --- a seeded catalog (made-up videos) for the dashboard, content and video pages -------------
+PRIVACY_CYCLE = ("public", "public", "unlisted", "private")
+
+
+def make_video(n: int, **overrides: Any) -> Video:
+    """A made-up video whose title/description/tags vary with `n`, so scores differ."""
+    fields: dict[str, Any] = {
+        "video_id": f"vid{n:06d}",
+        "channel_id": "UC_fake_channel",
+        "title": f"Repotting cactus {'tips ' * (n % 9)}#{n}",
+        "description": ("How to repot a cactus. " * (n % 13)).strip(),
+        "tags": ["cactus", "garden", f"topic{n}"][: (n % 3) + 1],
+        "privacy_status": PRIVACY_CYCLE[n % len(PRIVACY_CYCLE)],
+        "published_at": f"2026-{(n % 12) + 1:02d}-{(n % 27) + 1:02d}T10:00:00Z",
+        "duration": "PT5M30S",
+        "view_count": (n * 37) % 1000 * 25,
+        "like_count": n,
+        "comment_count": n % 5,
+        "thumbnails": {"medium": {"url": f"https://i.ytimg.com/vi/vid{n:06d}/mqdefault.jpg"}},
+    }
+    fields.update(overrides)
+    return Video(**fields)
+
+
+def seed_catalog(config: Config, videos: list[Video]) -> None:
+    """Store `videos` through one finished pull, the way a real pull would."""
+    with Store(config.catalog_db) as store:
+        pull_id = store.begin_pull("UC_fake_channel")
+        for video in videos:
+            store.upsert_video(video, pull_id)
+        store.finish_pull(pull_id, len(videos))

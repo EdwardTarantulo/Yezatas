@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "shell.html" %}
 {% block title %}Set up - Yezatas{% endblock %}
 
 {% macro card(step) %}
@@ -99,6 +99,8 @@
 {% endmacro %}
 
 {% block content %}
+<div class="narrow">
+<h1 class="page-title">Set up Yezatas</h1>
 <p class="intro">Connect your channel in eight short steps. Yezatas only <strong>reads</strong> your
   channel here. Nothing is changed on YouTube. Use the Google account that owns the channel for every step.</p>
 
@@ -381,4 +383,5 @@
 {% endcall %}
 
 {% include "_footer.html" %}
+</div>
 {% endblock %}

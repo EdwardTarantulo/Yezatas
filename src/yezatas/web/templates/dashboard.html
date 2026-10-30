@@ -1,0 +1,76 @@
+{% extends "shell.html" %}
+{% from "_macros.html" import score_badge, thumb %}
+{% block title %}Channel dashboard - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Channel dashboard</h1>
+
+<div class="dash-grid">
+  <section class="card dash-card area-seo" id="card-seo" aria-labelledby="h-seo">
+    <h2 id="h-seo">SEO score</h2>
+    {% if average is none %}
+    <p class="muted">No public videos to score yet.</p>
+    {% else %}
+    <p class="big-number band-text {{ 'good' if average >= 80 else 'ok' if average >= 50 else 'poor' }}"><span class="avg">{{ average }}</span><span class="out-of"> / 100</span></p>
+    {% endif %}
+    <p class="muted">Average over {{ public_count }} public video{{ '' if public_count == 1 else 's' }} scored.</p>
+    <ul class="bands">
+      {% for band in bands %}
+      <li class="band-row">
+        <span class="band-label">{{ band.label }} <span class="muted">{{ band.range }}</span></span>
+        <span class="bar {{ band.key }}" aria-hidden="true"><span class="{{ band.bar }}"></span></span>
+        <span class="band-count">{{ band.count }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="card dash-card area-fix" id="card-fix" aria-labelledby="h-fix">
+    <div class="card-title-row">
+      <h2 id="h-fix">Fix next</h2>
+      <a class="button secondary" href="/videos?sort=fix">See all</a>
+    </div>
+    <p class="muted">Videos where a fix helps most: many views and many points missing.</p>
+    {% if fix_next %}
+    <ul class="fix-list">
+      {% for e in fix_next %}
+      <li>
+        <a class="fix-row" href="/videos/{{ e.video.video_id|urlencode }}">
+          {{ thumb(e.thumb, 'sm') }}
+          <span class="fix-main">
+            <span class="fix-title">{{ e.video.title }}</span>
+            <span class="fix-meta">{{ e.views_text }} views{% if e.top_failed %} &middot; {{ e.top_failed }}{% endif %}</span>
+          </span>
+          {{ score_badge(e.card.score, e.band) }}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-note">Nothing to fix right now.</p>
+    {% endif %}
+  </section>
+
+  <section class="card dash-card area-problems" id="card-problems" aria-labelledby="h-problems">
+    <h2 id="h-problems">Most common problems</h2>
+    <p class="muted">Checks that the most public videos fail.</p>
+    {% if problems %}
+    <ul class="problem-list">
+      {% for p in problems %}
+      <li><a class="problem-row" href="{{ p.href }}"><span class="problem-title">{{ p.title }}</span><span class="problem-count">{{ p.count }} video{{ '' if p.count == 1 else 's' }}</span></a></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-note">No failed checks on public videos.</p>
+    {% endif %}
+  </section>
+
+  <section class="card dash-card area-catalog" id="card-catalog" aria-labelledby="h-catalog">
+    <h2 id="h-catalog">Catalog</h2>
+    <p class="big-number"><span class="avg">{{ totals.all }}</span><span class="out-of"> video{{ '' if totals.all == 1 else 's' }}</span></p>
+    <p class="muted">{{ totals.public }} public &middot; {{ totals.unlisted }} unlisted &middot; {{ totals.private }} private</p>
+    <p>{{ latest_pull.videos }} videos were pulled on {{ latest_pull.when }}.</p>
+    <p>Quota today: {{ quota.used }} used, {{ quota.remaining }} left of {{ quota.budget }}.</p>
+    <p><a class="button secondary" href="/setup#step-pull">Pull again</a></p>
+  </section>
+</div>
+{% endblock %}

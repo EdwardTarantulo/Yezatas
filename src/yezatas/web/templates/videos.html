@@ -1,0 +1,81 @@
+{% extends "shell.html" %}
+{% from "_macros.html" import score_badge, thumb %}
+{% block title %}Channel content - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Channel content</h1>
+
+<div class="filters">
+  <div class="chip-row" role="group" aria-label="Visibility">
+    {% for chip in listing.visibility_chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }}</a>{% endfor %}
+  </div>
+  <div class="chip-row" role="group" aria-label="SEO score">
+    {% for chip in listing.band_chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }}</a>{% endfor %}
+  </div>
+  <div class="chip-row" role="group" aria-label="Sort by">
+    <span class="chip-label">Sort by</span>
+    {% for chip in listing.sort_chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }}</a>{% endfor %}
+  </div>
+  {% if listing.check %}
+  <div class="chip-row">
+    <span class="chip-label">Failing check</span>
+    <span class="chip active">{{ listing.check_title or listing.check }}</span>
+    <a class="chip" href="{{ listing.clear_check_href }}">Clear</a>
+  </div>
+  {% endif %}
+  {% if listing.q %}
+  <div class="chip-row">
+    <span class="chip-label">Search</span>
+    <span class="chip active">{{ listing.q }}</span>
+  </div>
+  {% endif %}
+</div>
+
+<p class="result-count" id="result-count">{{ listing.total }} video{{ '' if listing.total == 1 else 's' }}{% if listing.pages > 1 %} &middot; showing {{ listing.first }}-{{ listing.last }}{% endif %}</p>
+
+{% if listing.entries %}
+<table class="vtable">
+  <thead>
+    <tr>
+      <th class="col-video" scope="col">Video</th>
+      <th class="col-vis" scope="col">Visibility</th>
+      <th class="col-date" scope="col">Date</th>
+      <th class="col-num" scope="col">Views</th>
+      <th class="col-score" scope="col">SEO score</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in listing.entries %}
+    <tr>
+      <td class="col-video">
+        <div class="vcell">
+          <a class="vthumb" href="/videos/{{ e.video.video_id|urlencode }}" tabindex="-1" aria-hidden="true">{{ thumb(e.thumb, 'sm') }}</a>
+          <div class="vtext">
+            <a class="vtitle" href="/videos/{{ e.video.video_id|urlencode }}">{{ e.video.title }}</a>
+            {% if e.snippet %}<span class="vdesc">{{ e.snippet }}</span>{% endif %}
+          </div>
+        </div>
+      </td>
+      <td class="col-vis">{{ e.visibility }}</td>
+      <td class="col-date">{{ e.date_text }}</td>
+      <td class="col-num">{{ e.views_text }}</td>
+      <td class="col-score">{{ score_badge(e.card.score, e.band) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if listing.pages > 1 %}
+<nav class="pager" aria-label="Pages">
+  {% if listing.prev_href %}<a class="button secondary" rel="prev" href="{{ listing.prev_href }}">Previous</a>{% else %}<span class="button secondary disabled" aria-disabled="true">Previous</span>{% endif %}
+  <span class="muted">Page {{ listing.page }} of {{ listing.pages }}</span>
+  {% if listing.next_href %}<a class="button secondary" rel="next" href="{{ listing.next_href }}">Next</a>{% else %}<span class="button secondary disabled" aria-disabled="true">Next</span>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<section class="empty-state" id="no-videos">
+  <h2>No videos match</h2>
+  <p class="muted">{% if listing.filtered %}Try another search or clear a filter.{% else %}Your catalog has no videos yet.{% endif %}</p>
+  {% if listing.filtered %}<p><a class="button secondary" href="/videos">Clear all filters</a></p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

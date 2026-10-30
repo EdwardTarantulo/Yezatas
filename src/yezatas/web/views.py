@@ -1,0 +1,363 @@
+"""Page models for the dashboard, the content table and the video page.
+
+Pure functions: they take videos and scorecards and return plain data for the templates, so
+nothing here touches the disk or YouTube. Formatting (view counts, dates) lives here too.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Mapping, Sequence
+from urllib.parse import urlencode
+
+from ..seo import CATEGORIES, CheckResult, Scorecard, fix_priority
+from ..store import Video
+
+PAGE_SIZE = 50
+MAX_QUERY_CHARS = 200
+FIX_NEXT_ROWS = 8
+PROBLEM_ROWS = 6
+DESCRIPTION_SNIPPET_CHARS = 90
+
+GOOD_FROM = 80
+OK_FROM = 50
+
+# (key, label, range text) in display order.
+BANDS: tuple[tuple[str, str, str], ...] = (
+    ("good", "Good", "80+"),
+    ("ok", "OK", "50-79"),
+    ("poor", "Needs work", "under 50"),
+)
+BAND_KEYS = tuple(b[0] for b in BANDS)
+SORTS: tuple[tuple[str, str], ...] = (
+    ("fix", "Fix next"),
+    ("score", "Lowest score"),
+    ("views", "Most views"),
+    ("newest", "Newest"),
+)
+SORT_KEYS = tuple(s[0] for s in SORTS)
+VISIBILITIES: tuple[tuple[str, str], ...] = (
+    ("all", "All"),
+    ("public", "Public"),
+    ("unlisted", "Unlisted"),
+    ("private", "Private"),
+)
+VISIBILITY_KEYS = tuple(v[0] for v in VISIBILITIES)
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+# --- formatting -------------------------------------------------------------------------------
+def band_of(score: int) -> str:
+    """'good' (80+), 'ok' (50-79) or 'poor' (under 50)."""
+    if score >= GOOD_FROM:
+        return "good"
+    return "ok" if score >= OK_FROM else "poor"
+
+
+def format_count(n: int) -> str:
+    """Like YouTube: 999, 1.5K, 21.1K, 1.2M. Rounds down, never up to the next unit."""
+    if n < 1000:
+        return str(max(n, 0))
+    for size, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if n >= size:
+            whole, frac = divmod(n * 10 // size, 10)
+            return f"{whole}{suffix}" if frac == 0 or whole >= 100 else f"{whole}.{frac}{suffix}"
+    return str(n)
+
+
+def format_date(iso: str) -> str:
+    """'2026-10-30T10:00:00Z' -> 'Oct 30, 2026'. Anything unreadable gives ''."""
+    try:
+        d = date.fromisoformat((iso or "")[:10])
+    except ValueError:
+        return ""
+    return f"{_MONTHS[d.month - 1]} {d.day}, {d.year}"
+
+
+def thumb_url(video: Video, prefer: Sequence[str] = ("medium", "default")) -> str:
+    """The first usable https thumbnail URL among `prefer`, or '' (the page shows a grey box)."""
+    thumbs = video.thumbnails if isinstance(video.thumbnails, dict) else {}
+    for name in prefer:
+        entry = thumbs.get(name)
+        url = entry.get("url") if isinstance(entry, dict) else None
+        if isinstance(url, str) and url.startswith("https://"):
+            return url
+    return ""
+
+
+def bar_class(count: int, total: int) -> str:
+    """A width class (w-0 ... w-100, 5% steps; at least w-5 when count > 0)."""
+    if total <= 0 or count <= 0:
+        return "w-0"
+    return f"w-{min(100, max(5, round(100 * count / total / 5) * 5))}"
+
+
+# --- entries ----------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Entry:
+    """A video with its scorecard and the display strings the templates need."""
+
+    video: Video
+    card: Scorecard
+
+    @property
+    def band(self) -> str:
+        return band_of(self.card.score)
+
+    @property
+    def views_text(self) -> str:
+        return format_count(self.video.view_count)
+
+    @property
+    def date_text(self) -> str:
+        return format_date(self.video.published_at)
+
+    @property
+    def visibility(self) -> str:
+        return (self.video.privacy_status or "").capitalize()
+
+    @property
+    def thumb(self) -> str:
+        return thumb_url(self.video)
+
+    @property
+    def snippet(self) -> str:
+        text = " ".join((self.video.description or "").split())
+        if len(text) <= DESCRIPTION_SNIPPET_CHARS:
+            return text
+        return text[:DESCRIPTION_SNIPPET_CHARS].rstrip() + "…"
+
+    @property
+    def top_failed(self) -> str:
+        failed = self.card.failed
+        return failed[0].title if failed else ""
+
+    @property
+    def priority(self) -> float:
+        return fix_priority(self.video, self.card)
+
+
+def make_entries(videos: Sequence[Video], cards: Mapping[str, Scorecard]) -> list[Entry]:
+    return [Entry(v, cards[v.video_id]) for v in videos if v.video_id in cards]
+
+
+# --- dashboard --------------------------------------------------------------------------------
+def dashboard_model(entries: Sequence[Entry]) -> dict[str, object]:
+    public = [e for e in entries if e.video.privacy_status == "public"]
+    average: int | None = None
+    if public:
+        average = int(sum(e.card.score for e in public) / len(public) + 0.5)
+
+    bands = []
+    for key, label, rng in BANDS:
+        count = sum(1 for e in public if e.band == key)
+        bands.append({"key": key, "label": label, "range": rng, "count": count,
+                      "bar": bar_class(count, len(public))})
+
+    fixable = [e for e in entries if e.card.failed]
+    fixable.sort(key=lambda e: (-e.priority, -e.card.missing, e.video.video_id))
+
+    counts: dict[str, int] = {}
+    titles: dict[str, str] = {}
+    for e in public:
+        for c in e.card.checks:
+            if c.applicable and not c.passed:
+                counts[c.check_id] = counts.get(c.check_id, 0) + 1
+                titles.setdefault(c.check_id, c.title)
+    ranked = sorted(counts, key=lambda cid: (-counts[cid], titles[cid], cid))[:PROBLEM_ROWS]
+    problems = [{"check_id": cid, "title": titles[cid], "count": counts[cid],
+                 "href": "/videos?" + urlencode({"check": cid})} for cid in ranked]
+
+    def by_status(status: str) -> int:
+        return sum(1 for e in entries if e.video.privacy_status == status)
+
+    return {
+        "average": average,
+        "public_count": len(public),
+        "bands": bands,
+        "fix_next": fixable[:FIX_NEXT_ROWS],
+        "problems": problems,
+        "totals": {"all": len(entries), "public": len(public), "unlisted": by_status("unlisted"),
+                   "private": by_status("private")},
+    }
+
+
+# --- content table ----------------------------------------------------------------------------
+def _pick(value: str | None, allowed: Sequence[str], default: str) -> str:
+    return value if value in allowed else default
+
+
+def _page_number(raw: str | None) -> int:
+    try:
+        return int((raw or "").strip())
+    except ValueError:
+        return 1
+
+
+def listing_href(q: str = "", sort: str = "fix", visibility: str = "all", band: str = "",
+                 check: str = "", page: int = 1) -> str:
+    """A /videos URL that carries only the non-default parameters."""
+    params: list[tuple[str, str]] = []
+    if q:
+        params.append(("q", q))
+    if sort != "fix":
+        params.append(("sort", sort))
+    if visibility != "all":
+        params.append(("visibility", visibility))
+    if band:
+        params.append(("band", band))
+    if check:
+        params.append(("check", check))
+    if page > 1:
+        params.append(("page", str(page)))
+    return "/videos" + (f"?{urlencode(params)}" if params else "")
+
+
+@dataclass
+class Chip:
+    label: str
+    href: str
+    active: bool
+
+
+@dataclass
+class Listing:
+    entries: list[Entry]
+    total: int
+    page: int
+    pages: int
+    q: str
+    sort: str
+    visibility: str
+    band: str
+    check: str
+    check_title: str
+    visibility_chips: list[Chip] = field(default_factory=list)
+    band_chips: list[Chip] = field(default_factory=list)
+    sort_chips: list[Chip] = field(default_factory=list)
+    prev_href: str = ""
+    next_href: str = ""
+    clear_check_href: str = ""
+    filtered: bool = False
+
+    @property
+    def first(self) -> int:
+        return (self.page - 1) * PAGE_SIZE + 1 if self.total else 0
+
+    @property
+    def last(self) -> int:
+        return min(self.page * PAGE_SIZE, self.total)
+
+
+def _matches(entry: Entry, needle: str) -> bool:
+    v = entry.video
+    haystack = [v.title or "", v.description or "", *(str(t) for t in (v.tags or []))]
+    return any(needle in part.casefold() for part in haystack)
+
+
+def _failed_check(entry: Entry, check_id: str) -> CheckResult | None:
+    for c in entry.card.checks:
+        if c.check_id == check_id and c.applicable and not c.passed:
+            return c
+    return None
+
+
+def _sort(entries: list[Entry], sort: str) -> list[Entry]:
+    if sort == "score":
+        return sorted(entries, key=lambda e: (e.card.score, -e.video.view_count, e.video.video_id))
+    if sort == "views":
+        return sorted(entries, key=lambda e: (-e.video.view_count, e.video.video_id))
+    if sort == "newest":
+        return sorted(entries, key=lambda e: (e.video.published_at or "", e.video.video_id),
+                      reverse=True)
+    return sorted(entries, key=lambda e: (-e.priority, -e.card.missing, e.video.video_id))
+
+
+def build_listing(entries: Sequence[Entry], params: Mapping[str, str]) -> Listing:
+    """Filter, sort and paginate. Unknown values fall back to the defaults; never raises."""
+    q = (params.get("q") or "").strip()[:MAX_QUERY_CHARS]
+    sort = _pick(params.get("sort"), SORT_KEYS, "fix")
+    visibility = _pick(params.get("visibility"), VISIBILITY_KEYS, "all")
+    band = _pick(params.get("band"), BAND_KEYS, "")
+    check = (params.get("check") or "").strip()[:100]
+
+    rows = list(entries)
+    if q:
+        needle = q.casefold()
+        rows = [e for e in rows if _matches(e, needle)]
+    if visibility != "all":
+        rows = [e for e in rows if e.video.privacy_status == visibility]
+    if band:
+        rows = [e for e in rows if e.band == band]
+    check_title = ""
+    if check:
+        for e in entries:
+            for c in e.card.checks:
+                if c.check_id == check:
+                    check_title = c.title
+                    break
+            if check_title:
+                break
+        rows = [e for e in rows if _failed_check(e, check) is not None]
+    rows = _sort(rows, sort)
+
+    total = len(rows)
+    pages = max(1, -(-total // PAGE_SIZE))
+    page = min(max(_page_number(params.get("page")), 1), pages)
+    shown = rows[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
+
+    def href(**changes: object) -> str:
+        args: dict[str, object] = {"q": q, "sort": sort, "visibility": visibility, "band": band,
+                                   "check": check, "page": 1}
+        args.update(changes)
+        return listing_href(**args)  # type: ignore[arg-type]
+
+    listing = Listing(
+        entries=shown, total=total, page=page, pages=pages, q=q, sort=sort,
+        visibility=visibility, band=band, check=check, check_title=check_title,
+        visibility_chips=[Chip(label, href(visibility=key), key == visibility)
+                          for key, label in VISIBILITIES],
+        band_chips=[Chip("Any score", href(band=""), band == "")]
+        + [Chip(f"{label} ({rng})", href(band=key), key == band) for key, label, rng in BANDS],
+        sort_chips=[Chip(label, href(sort=key), key == sort) for key, label in SORTS],
+        prev_href=href(page=page - 1) if page > 1 else "",
+        next_href=href(page=page + 1) if page < pages else "",
+        clear_check_href=href(check=""),
+        filtered=bool(q or check or band or visibility != "all"),
+    )
+    return listing
+
+
+# --- video page -------------------------------------------------------------------------------
+@dataclass
+class CheckGroup:
+    key: str
+    label: str
+    checks: list[CheckResult]
+    earned: int
+    possible: int
+
+
+def group_checks(card: Scorecard) -> list[CheckGroup]:
+    """Checks grouped in CATEGORIES order (unknown categories last); failed ones first."""
+    keys = list(CATEGORIES) + sorted({c.category for c in card.checks} - set(CATEGORIES))
+
+    def rank(c: CheckResult) -> int:
+        if not c.applicable:
+            return 2
+        return 1 if c.passed else 0
+
+    groups: list[CheckGroup] = []
+    for key in keys:
+        members = [c for c in card.checks if c.category == key]
+        if not members:
+            continue
+        members.sort(key=rank)  # stable: keeps the engine's order inside each rank
+        live = [c for c in members if c.applicable]
+        groups.append(CheckGroup(
+            key=key, label=CATEGORIES.get(key, key.capitalize()), checks=members,
+            earned=sum(c.points for c in live), possible=sum(c.max_points for c in live),
+        ))
+    return groups

@@ -1,0 +1,46 @@
+{% extends "shell.html" %}
+{% from "_macros.html" import icon, thumb %}
+{% block title %}{{ video.title }} - Yezatas{% endblock %}
+{% block content %}
+<p class="backlink"><a href="/videos">{{ icon('back') }}<span>Content</span></a></p>
+
+<section class="vhead" id="video-head">
+  <div class="vhead-thumb">{{ thumb(big_thumb, 'lg') }}</div>
+  <div class="vhead-info">
+    <h1 class="video-title">{{ video.title }}</h1>
+    <p class="muted vstats">{{ views }} views &middot; {{ likes }} likes &middot; {{ comments }} comments</p>
+    <p class="muted">{% if published %}Published {{ published }} &middot; {% endif %}{{ entry.visibility or 'Unknown visibility' }}</p>
+    <p class="vactions">
+      <a class="button primary" href="https://studio.youtube.com/video/{{ video.video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">Edit in YouTube Studio</a>
+      <a class="button secondary" href="https://www.youtube.com/watch?v={{ video.video_id|urlencode }}" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>
+    </p>
+  </div>
+  <div class="vhead-score" id="video-score">
+    <span class="big-number band-text {{ entry.band }}"><span class="avg">{{ card.score }}</span><span class="out-of"> / 100</span></span>
+    <span class="muted">SEO score</span>
+  </div>
+</section>
+
+{% for group in groups %}
+<section class="card check-group" id="group-{{ group.key }}" aria-labelledby="g-{{ group.key }}">
+  <div class="card-title-row">
+    <h2 id="g-{{ group.key }}">{{ group.label }}</h2>
+    <span class="muted">{{ group.earned }}/{{ group.possible }} points</span>
+  </div>
+  <ul class="checks">
+    {% for c in group.checks %}
+    {% set state = 'na' if not c.applicable else 'pass' if c.passed else ('part' if c.points > 0 else 'fail') %}
+    <li class="check {{ state }}" id="check-{{ c.check_id }}">
+      <span class="check-icon">{{ icon('minus' if state == 'na' else 'check' if state == 'pass' else 'partial' if state == 'part' else 'close') }}<span class="visually-hidden">{{ 'Not applicable' if state == 'na' else 'Passed' if state == 'pass' else 'Failed' }}</span></span>
+      <div class="check-body">
+        <p class="check-title">{{ c.title }}</p>
+        {% if c.detail %}<p class="check-detail">{{ c.detail }}</p>{% endif %}
+        {% if state in ('fail', 'part') and c.fix %}<p class="check-fix"><strong>Fix:</strong> {{ c.fix }}</p>{% endif %}
+      </div>
+      <span class="check-points">{% if c.applicable %}{{ c.points }}/{{ c.max_points }}{% else %}n.a.{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endfor %}
+{% endblock %}

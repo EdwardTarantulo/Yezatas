@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, mark %}
+{% block body_class %}app{% endblock %}
+{% block body %}
+{% set nav = [('dashboard', 'Dashboard', '/'), ('content', 'Content', '/videos'), ('setup', 'Setup', '/setup')] %}
+<header class="topbar">
+  <a class="brand" href="/" aria-label="Yezatas home">{{ mark() }}<span class="brand-name">Yezatas</span></a>
+  <form class="search" action="/videos" method="get" role="search">
+    <label class="visually-hidden" for="q">Search your videos</label>
+    <input id="q" type="search" name="q" value="{{ q|default('') }}" placeholder="Search across your channel" maxlength="200" autocomplete="off">
+    <button type="submit" class="search-btn" aria-label="Search">{{ icon('search') }}</button>
+  </form>
+  <a class="top-link" href="/setup" aria-label="Setup" title="Setup">{{ icon('setup') }}</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Main">
+    {% for key, label, href in nav %}
+    <a class="nav-item{% if active|default('') == key %} active{% endif %}" href="{{ href }}"{% if active|default('') == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span></a>
+    {% endfor %}
+  </nav>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% endblock %}

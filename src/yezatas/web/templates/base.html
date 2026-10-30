@@ -3,19 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="light">
   <title>{% block title %}Yezatas{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body data-poll="{{ '1' if poll|default(false) else '0' }}" data-csrf="{{ csrf|default('') }}">
+<body class="{% block body_class %}bare{% endblock %}" data-poll="{{ '1' if poll|default(false) else '0' }}" data-csrf="{{ csrf|default('') }}">
+{% block body %}
+  {# Bare layout, used when the browser is not signed in (no menu to show). #}
   <main class="column">
-    <header class="masthead">
-      <h1>Yezatas</h1>
-      <p class="tagline">Your YouTube channel assistant. It runs on your computer.</p>
+    <header class="bare-head">
+      {% from "_macros.html" import mark %}
+      <span class="brand-static">{{ mark() }}<span class="brand-name">Yezatas</span></span>
     </header>
     {% block content %}{% endblock %}
     {% block footer %}{% endblock %}
   </main>
+{% endblock %}
   <script src="/static/app.js"></script>
 </body>
 </html>
