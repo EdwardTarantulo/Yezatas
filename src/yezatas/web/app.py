@@ -21,20 +21,21 @@ from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
 from .. import agent, auth, edits, push, subtitle_translate
 from .. import chapters as chapters_mod
+from .. import packaging as packaging_mod
 from .. import transcribe as transcribe_mod
 from .. import translate
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
 from ..quota import QuotaGuard
 from ..seo import score_catalog
-from ..store import Store
+from ..store import Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import GoogleYouTubeReader, GoogleYouTubeWriter, YouTubeReader, YouTubeWriter
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
@@ -44,10 +45,12 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (Entry, RunView, SuggestBatch, SuggestItem, build_listing, build_subtitles_view,
-                    build_transcript_view, build_translate_view, change_cards, chapters_blocker,
-                    dashboard_model, format_cost, format_count, format_date, group_checks, history_rows,
-                    lang_name, make_entries, plan_lines, push_results, run_view, stops_batch, thumb_url)
+from .views import (Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem, build_listing,
+                    build_packaging_view, build_preview, build_subtitles_view, build_transcript_view,
+                    build_translate_view, change_cards, chapters_blocker, dashboard_model, format_cost,
+                    format_count, format_date, group_checks, history_rows, lang_name, make_entries,
+                    plan_lines, preview_card, push_results, run_view, stops_batch, thumb_url,
+                    top_other_videos)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -87,6 +90,17 @@ SUBTITLES_TIMEOUT_MESSAGE = (
     "The subtitles took more than 60 minutes, so Yezatas stopped waiting. Languages that "
     "finished are kept below."
 )
+PACKAGING_TIMEOUT_SECONDS = 5 * 60.0
+PACKAGING_TIMEOUT_MESSAGE = (
+    "The packaging check took more than 5 minutes, so Yezatas stopped waiting. Try again."
+)
+VARIANTS_TIMEOUT_SECONDS = 10 * 60.0
+VARIANTS_TIMEOUT_MESSAGE = (
+    "Making the variants took more than 10 minutes, so Yezatas stopped waiting. Variants that "
+    "finished are kept on this page."
+)
+NO_PACKAGING_KEY = "There is no Meta API key. Add one in Setup. Nothing was sent."
+MAX_ID_DIGITS = 12  # a variant id in a URL; longer is never a real one
 MAX_PATH_CHARS = 1000
 MAX_KEYWORDS = 20
 MAX_KEYWORD_CHARS = 40
@@ -103,6 +117,8 @@ TranslateTools = Callable[[Config], "tuple[translate.Translator | None, translat
 # (store, video id, media path, language, report); `keywords=` is added only when the creator typed some.
 TranscribeFn = Callable[..., "transcribe_mod.TranscribeResult"]
 ChaptersFn = Callable[[Store, str, Report], "chapters_mod.ChaptersResult"]
+# The three packaging clients (None without a Meta API key); the real one reads the key from the config.
+PackagingToolsFactory = Callable[[Config], "packaging_mod.PackagingTools | None"]
 
 
 def default_translate_tools(config: Config) -> "tuple[translate.Translator | None, translate.Verifier]":
@@ -177,6 +193,22 @@ def map_subtitles_error(exc: BaseException) -> tuple[str, str]:
     if type(exc) is ValueError:  # translate_subtitles' own plain sentences
         return "subtitles", str(exc)
     return "subtitles", f"The subtitles stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def map_packaging_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if isinstance(exc, packaging_mod.PackagingError):
+        return "packaging", str(exc)
+    return "packaging", f"The packaging check stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def map_variants_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if isinstance(exc, packaging_mod.PackagingError):
+        return "variants", str(exc)
+    return "variants", f"Making the variants stopped unexpectedly ({exc.__class__.__name__})."
 
 
 def map_transcribe_error(exc: BaseException) -> tuple[str, str]:
@@ -308,6 +340,8 @@ class WebState:
         translate_tools: TranslateTools = default_translate_tools,
         transcribe_fn: TranscribeFn | None = None,
         chapters_fn: ChaptersFn | None = None,
+        packaging_tools: PackagingToolsFactory = packaging_mod.packaging_tools_from_config,
+        packaging_fetch: Callable[[str], bytes] = packaging_mod.fetch_thumbnail,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -320,6 +354,9 @@ class WebState:
         self._translate_tools = translate_tools
         self._transcribe = transcribe_fn or make_default_transcribe(config)
         self._chapters = chapters_fn or make_default_chapters(config)
+        self.packaging_tools = packaging_tools
+        self._packaging_fetch = packaging_fetch
+        self.images_dir = config.home / "thumbnails"  # review pictures and variants, by file name
         self.signin_job = Job(
             map_sign_in_error, sign_in_timeout, SIGN_IN_TIMEOUT_MESSAGE, clock
         )
@@ -348,6 +385,14 @@ class WebState:
                                 CHAPTERS_TIMEOUT_MESSAGE, clock)
         self._chapters_seen: JobSnapshot | None = None
         self._chapters_video = ""
+        self.packaging_job = Job(map_packaging_error, PACKAGING_TIMEOUT_SECONDS,
+                                 PACKAGING_TIMEOUT_MESSAGE, clock)
+        self._packaging_seen: JobSnapshot | None = None
+        self._packaging_video = ""
+        self.variants_job = Job(map_variants_error, VARIANTS_TIMEOUT_SECONDS,
+                                VARIANTS_TIMEOUT_MESSAGE, clock)
+        self._variants_seen: JobSnapshot | None = None
+        self._variants_video = ""
         self._lock = threading.Lock()
         self._check_lock = threading.Lock()
         self._check: CheckState | None = None
@@ -699,6 +744,74 @@ class WebState:
             with self._lock:
                 self._chapters_seen = snap
 
+    # --- packaging check and variant ideas ----------------------------------------------------
+    def start_packaging(self, video_id: str) -> bool:
+        """Check one video's title and thumbnail together, in the one packaging job."""
+        def work(report: Report) -> "packaging_mod.PackagingResult":
+            return self._run_packaging(video_id, report)
+
+        if not self.packaging_job.start(work):
+            return False
+        with self._lock:
+            self._packaging_video = video_id
+        return True
+
+    def _run_packaging(self, video_id: str, report: Report) -> "packaging_mod.PackagingResult":
+        tools = self.packaging_tools(self.config)
+        if tools is None:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        with Store(self.config.catalog_db) as store:
+            return packaging_mod.review_packaging(
+                store, tools.vision, tools.segmenter, video_id, images_dir=self.images_dir,
+                fetch=self._packaging_fetch, report=report)
+
+    def packaging_state(self) -> tuple[JobSnapshot, str]:
+        """(job snapshot, the video id it works on). A finished job the creator dismissed is idle."""
+        snap = self.packaging_job.snapshot()
+        with self._lock:
+            if snap is self._packaging_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._packaging_video
+
+    def dismiss_packaging_result(self) -> None:
+        snap = self.packaging_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._packaging_seen = snap
+
+    def start_variants(self, video_id: str, review_id: int) -> bool:
+        """Make the variant ideas of one stored check, in the one variants job."""
+        def work(report: Report) -> "packaging_mod.VariantsResult":
+            return self._run_variants(review_id, report)
+
+        if not self.variants_job.start(work):
+            return False
+        with self._lock:
+            self._variants_video = video_id
+        return True
+
+    def _run_variants(self, review_id: int, report: Report) -> "packaging_mod.VariantsResult":
+        tools = self.packaging_tools(self.config)
+        if tools is None:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        with Store(self.config.catalog_db) as store:
+            return packaging_mod.make_variants(
+                store, tools.maker, tools.vision, tools.segmenter, review_id,
+                images_dir=self.images_dir, report=report)
+
+    def variants_state(self) -> tuple[JobSnapshot, str]:
+        snap = self.variants_job.snapshot()
+        with self._lock:
+            if snap is self._variants_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._variants_video
+
+    def dismiss_variants_result(self) -> None:
+        snap = self.variants_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._variants_seen = snap
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -731,6 +844,8 @@ def create_app(
     translate_tools: TranslateTools | None = None,
     transcribe: TranscribeFn | None = None,
     chapters: ChaptersFn | None = None,
+    packaging_tools: PackagingToolsFactory | None = None,
+    packaging_fetch: Callable[[str], bytes] | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -740,7 +855,9 @@ def create_app(
     state = WebState(config, sign_in, reader_factory, credentials_loader, clock, sign_in_timeout,
                      write_sign_in, write_credentials_loader, writer_factory,
                      suggest or make_default_suggest(config),
-                     tools, transcribe, chapters)
+                     tools, transcribe, chapters,
+                     packaging_tools or packaging_mod.packaging_tools_from_config,
+                     packaging_fetch or packaging_mod.fetch_thumbnail)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -961,6 +1078,31 @@ def create_app(
                                          "verifier_ready")})
         return panel
 
+    def packaging_tools_or_none() -> "packaging_mod.PackagingTools | None":
+        """The packaging clients; a broken setup just means "not available"."""
+        try:
+            return state.packaging_tools(config)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def packaging_panel(video_id: str) -> dict[str, Any]:
+        """What the packaging and variants jobs are doing, for one video page (worker thread)."""
+        snap, job_video = state.packaging_state()
+        checking = job_panel(snap, job_video, video_id)
+        if snap.status == "done" and job_video == video_id and isinstance(
+                snap.result, packaging_mod.PackagingResult):
+            checking["done"] = {"tone": "ok" if snap.result.status == "done" else "error",
+                                "text": snap.result.message}
+        snap, job_video = state.variants_state()
+        making = job_panel(snap, job_video, video_id)
+        if snap.status == "done" and job_video == video_id and isinstance(
+                snap.result, packaging_mod.VariantsResult):
+            making["done"] = {"tone": "ok" if snap.result.status == "done" else "error",
+                              "text": snap.result.message}
+        return {"has_tools": packaging_tools_or_none() is not None,
+                "vision": config.model, "segmenter": packaging_mod.SAM_MODEL,
+                "maker": packaging_mod.IMAGE_MODEL, "check": checking, "variants": making}
+
     def video_not_found(request: Request) -> Response:
         return render(request, "error.html", {
             "layout": "shell.html", "active": "content",
@@ -1021,6 +1163,10 @@ def create_app(
                                    _local_time(record.created_at) if record else "")
         sv = build_subtitles_view(video_id, record, subtitle_records)
         sb = subtitles_panel(video_id, tr)
+        pk = packaging_panel(video_id)
+        with Store(config.catalog_db) as store:
+            review = store.latest_packaging_review(video_id)
+            made = store.list_thumbnail_variants(review.id) if review is not None else []
         text = ((row.title, row.description, row.tags) if row is not None
                 else (video.title, video.description, tuple(video.tags)))
         return render(request, "video.html", {
@@ -1036,11 +1182,82 @@ def create_app(
             "sg": panel, "latest_run": latest,
             "tr": tr, "tv": build_translate_view(video, row, records), "ts": ts, "tt": tt,
             "sv": sv, "sb": sb,
+            "pk": pk, "pv": build_packaging_view(
+                video_id, text[0], thumb_url(video, ("high", "medium", "default")), review, made,
+                _local_time),
             "poll": (panel["running"] or panel["busy"] or tr["running"] or tr["busy"]
                      or ts["transcribe"]["running"] or ts["transcribe"]["busy"]
                      or ts["chapters"]["running"] or ts["chapters"]["busy"]
-                     or sb["running"] or sb["busy"]),
+                     or sb["running"] or sb["busy"]
+                     or pk["check"]["running"] or pk["check"]["busy"]
+                     or pk["variants"]["running"] or pk["variants"]["busy"]),
         })
+
+    def usable_variant(video_id: str, raw: str) -> ThumbnailVariant | None:
+        """The stored variant with this id if it belongs to this video and has a picture, else None.
+        The id is the only thing taken from the request."""
+        if not raw.isascii() or not raw.isdigit() or len(raw) > MAX_ID_DIGITS:
+            return None
+        with Store(config.catalog_db) as store:
+            variant = store.get_thumbnail_variant(int(raw))
+        if variant is None or variant.video_id != video_id or variant.status == "failed":
+            return None
+        return variant
+
+    @app.get("/videos/{video_id}/packaging")
+    def packaging_preview(request: Request, video_id: str) -> Response:
+        """The video among the channel's own top videos in a mock feed. No model is called."""
+        data = catalog_data()
+        if data is None:
+            return back_to_setup()
+        entry: Entry | None = next((e for e in data["entries"] if e.video.video_id == video_id),
+                                   None)
+        if entry is None:
+            return video_not_found(request)
+        video = entry.video
+        chosen_raw = request.query_params.get("variant")
+        chosen = usable_variant(video_id, chosen_raw) if chosen_raw is not None else None
+        with Store(config.catalog_db) as store:
+            row = store.get_draft(video_id)
+            review = store.latest_packaging_review(video_id)
+            variants = store.list_thumbnail_variants(review.id) if review is not None else []
+        base = f"/videos/{quote(video_id)}/packaging"
+        shown = [v for v in variants if v.status != "failed"]
+        if chosen is not None and all(v.id != chosen.id for v in shown):
+            shown.append(chosen)
+        choices = [PreviewChoice("Current thumbnail", base, chosen is None)]
+        choices += [PreviewChoice(f"Variant {n}", f"{base}?variant={v.id}",
+                                  chosen is not None and v.id == chosen.id)
+                    for n, v in enumerate(shown, 1)]
+        image = (f"{base}/variants/{chosen.id}.jpg" if chosen is not None
+                 else thumb_url(video, ("maxres", "medium", "default")))
+        mine = preview_card(video, mine=True, title=row.title if row is not None else video.title,
+                            thumb=image)
+        feed = build_preview(mine, top_other_videos(video_id, [e.video for e in data["entries"]]))
+        return render(request, "packaging_preview.html", {
+            "active": "content", "video": video, "feed": feed, "choices": choices,
+            "chosen": chosen, "bad_variant": chosen_raw is not None and chosen is None,
+            "draft_title": row is not None,
+        })
+
+    @app.get("/videos/{video_id}/packaging/variants/{variant_id}.jpg")
+    def packaging_variant_image(request: Request, video_id: str, variant_id: str) -> Response:
+        """A variant's picture, by its stored id. The file name comes from the database."""
+        missing = Response("There is no such picture.", status_code=404, media_type="text/plain")
+        variant = usable_variant(video_id, variant_id)
+        if variant is None:
+            return missing
+        try:
+            path = packaging_mod.stored_image_path(state.images_dir, video_id, variant.image_file)
+        except packaging_mod.PackagingError:
+            return missing
+        if not path.is_file():
+            return missing
+        headers = {}
+        if request.query_params.get("download") == "1":
+            headers["Content-Disposition"] = (
+                f'attachment; filename="{video_id}-variant-{variant.id}.jpg"')
+        return FileResponse(path, media_type="image/jpeg", headers=headers)
 
     @app.get("/setup")
     def setup(request: Request) -> Response:
@@ -1070,6 +1287,8 @@ def create_app(
             "subtitles": _job_json(state.subtitles_job.snapshot()),
             "transcribe": _job_json(state.transcribe_job.snapshot()),
             "chapters": _job_json(state.chapters_job.snapshot()),
+            "packaging": _job_json(state.packaging_job.snapshot()),
+            "variants": _job_json(state.variants_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
 
@@ -1787,6 +2006,66 @@ def create_app(
         return Response(
             to_srt(record.segments), media_type="application/x-subrip",
             headers={"Content-Disposition": f'attachment; filename="{video_id}.srt"'})
+
+    # --- packaging check and variant ideas ----------------------------------------------------
+    @app.post("/videos/{video_id}/packaging")
+    async def check_video_packaging(request: Request, video_id: str) -> Response:
+        await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#packaging")
+
+        def exists() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.get_video(video_id) is not None
+
+        if not await run_in_threadpool(exists):
+            return video_not_found(request)
+        if await run_in_threadpool(packaging_tools_or_none) is None:
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif not state.start_packaging(video_id):
+            flash(request, "error", "A packaging check is already running. Wait for it to finish.")
+        return back
+
+    @app.post("/packaging/done")
+    async def dismiss_packaging(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_packaging_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#packaging" if video_id else "/")
+
+    @app.post("/videos/{video_id}/packaging/variants")
+    async def make_video_variants(request: Request, video_id: str) -> Response:
+        await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#packaging")
+
+        def lookup() -> tuple[bool, int]:
+            """(the video exists, the id of its newest check if it has ideas to work from, else 0)."""
+            with Store(config.catalog_db) as store:
+                if store.get_video(video_id) is None:
+                    return False, 0
+                review = store.latest_packaging_review(video_id)
+                if review is None or review.status != "done" or not review.image_file:
+                    return True, 0
+                ideas = review.critique.get("ideas") if isinstance(review.critique, dict) else None
+                return True, review.id if isinstance(ideas, list) and ideas else 0
+
+        found, review_id = await run_in_threadpool(lookup)
+        if not found:
+            return video_not_found(request)
+        if not review_id:
+            flash(request, "error", "There is no packaging check with ideas for this video yet. "
+                  "Run the check first. Nothing was sent.")
+        elif await run_in_threadpool(packaging_tools_or_none) is None:
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif not state.start_variants(video_id, review_id):
+            flash(request, "error", "Variants are already being made. Wait for them to finish.")
+        return back
+
+    @app.post("/packaging/variants/done")
+    async def dismiss_variants(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_variants_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#packaging" if video_id else "/")
 
     # --- the translation key (optional, Baseten; the Meta key is the fallback) -------------------
     @app.post("/setup/translator-key")

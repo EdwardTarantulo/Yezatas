@@ -1,0 +1,133 @@
+{# The "Packaging" card of the video page. `pk` is the tools and job state, `pv` the newest check and its variants. #}
+{% from "_macros.html" import thumb %}
+{% set cj = pk.check %}
+{% set vj = pk.variants %}
+<section class="card packaging-card" id="packaging" aria-labelledby="h-packaging">
+  <div class="card-title-row">
+    <h2 id="h-packaging">Packaging: title and thumbnail together</h2>
+    <a class="button secondary" href="{{ pv.preview_url }}">Preview in a feed</a>
+  </div>
+  <p class="muted">Viewers meet the title and the thumbnail together. Code measures the thumbnail, {{ pk.vision }} reads it and writes a short critique, and {{ pk.segmenter }} measures how much of the picture the subject takes. Every number comes from code; the models only write words. Yezatas does not upload thumbnails; download one and upload it in YouTube Studio.</p>
+
+  <div class="pk-head">
+    <div class="pk-thumb">{{ thumb(pv.thumb, 'lg') }}</div>
+    <div class="pk-text">
+      <p class="pk-title">{{ pv.title }}</p>
+      <p class="hint">The title{% if change %} of your draft{% endif %} and the thumbnail YouTube shows now.</p>
+    </div>
+  </div>
+
+  {% if cj.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="packaging-msg" role="status" aria-live="polite">{{ cj.message or 'Starting…' }}</span></p>
+  <p class="hint">This takes about a minute. You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if cj.failed %}
+  <div class="flash error" role="alert" id="packaging-failed">{{ cj.failed }}</div>
+  <form class="inline" method="post" action="/packaging/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if cj.done %}
+  <div class="flash {{ cj.done.tone }}" role="status" id="packaging-done">{{ cj.done.text }}</div>
+  <form class="inline" method="post" action="/packaging/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if cj.busy %}<p class="hint" id="packaging-busy">Another video is being checked. Wait for it to finish.</p>{% endif %}
+  {% if not pk.has_tools %}<p class="hint" id="packaging-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  <form class="packaging-form" method="post" action="/videos/{{ video.video_id|urlencode }}/packaging">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="hint">The thumbnail picture, the title and the start of the description go to Meta's Model API ({{ pk.vision }} and {{ pk.segmenter }}, Standard mode: Meta does not use them for training). Nothing is sent to YouTube.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if cj.busy or not pk.has_tools %} disabled{% endif %}>Check packaging</button></div>
+  </form>
+  {% endif %}
+
+  {% if pv.review %}
+  <div id="packaging-result">
+    <h3 class="run-h">Last check{% if pv.when %}: {{ pv.when }}{% endif %}</h3>
+    {% if pv.failed and not cj.done %}<div class="flash error" role="alert" id="packaging-error">{{ pv.failed }}</div>{% endif %}
+    {% if pv.review.status == 'done' %}
+    <p class="muted pk-reviewed">Title that was checked: {{ pv.review.title }}</p>
+    <h4 class="run-h">Measured by code</h4>
+    <dl class="pk-facts" id="packaging-facts">
+      {% for f in pv.facts %}<div class="pk-fact"><dt>{{ f.label }}</dt><dd>{{ f.value }}</dd></div>{% endfor %}
+    </dl>
+    <p class="hint">YouTube draws the video length over the bottom-right corner of a thumbnail, so that corner is best left empty.</p>
+    <h4 class="run-h">Read from the picture</h4>
+    <dl class="pk-facts" id="packaging-reading">
+      {% for f in pv.reading %}<div class="pk-fact"><dt>{{ f.label }}</dt><dd>{{ f.value }}</dd></div>{% endfor %}
+    </dl>
+    {% if pv.points %}
+    <h4 class="run-h">What works and what to improve</h4>
+    <ul class="run-list" id="packaging-points">
+      {% for point in pv.points %}<li>{{ point }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% if pv.ideas %}
+    <h4 class="run-h">Two ideas for a variant</h4>
+    <ol class="run-list" id="packaging-ideas">
+      {% for idea in pv.ideas %}<li>{{ idea.instruction }}
+        {% if idea.overlay %}<span class="muted">Text on the picture: &ldquo;{{ idea.overlay }}&rdquo;</span>{% else %}<span class="muted">Keeps the current text.</span>{% endif %}</li>{% endfor %}
+    </ol>
+    {% endif %}
+    {% if pv.problems %}
+    <ul class="pk-problems muted" id="packaging-problems">
+      {% for problem in pv.problems %}<li>{{ problem }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+    <p class="muted">Cost {{ pv.cost }}{% if pv.models %} &middot; {{ pv.models }}{% endif %}{% if pv.tokens %} &middot; {{ pv.tokens }} tokens{% endif %}</p>
+  </div>
+  {% endif %}
+
+  {% if pv.can_variants or pv.variants or vj.running or vj.failed or vj.done %}
+  <h3 class="run-h" id="variants">Variant ideas</h3>
+  {% if vj.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="variants-msg" role="status" aria-live="polite">{{ vj.message or 'Starting…' }}</span></p>
+  <p class="hint">Each picture takes a minute or so. You can leave this page. The pictures show here.</p>
+  {% else %}
+  {% if vj.failed %}
+  <div class="flash error" role="alert" id="variants-failed">{{ vj.failed }}</div>
+  <form class="inline" method="post" action="/packaging/variants/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if vj.done %}
+  <div class="flash {{ vj.done.tone }}" role="status" id="variants-done">{{ vj.done.text }}</div>
+  <form class="inline" method="post" action="/packaging/variants/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if vj.busy %}<p class="hint" id="variants-busy">Variants are being made for another video. Wait for it to finish.</p>{% endif %}
+  {% if pv.can_variants %}
+  <form class="packaging-form" method="post" action="/videos/{{ video.video_id|urlencode }}/packaging/variants">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="hint">{{ pk.maker }} edits the thumbnail picture once for each idea (about $0.01 a picture), then {{ pk.vision }} reads the text back and {{ pk.segmenter }} measures the subject again. The pictures stay on this computer until you download one.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if vj.busy or not pk.has_tools %} disabled{% endif %}>{{ 'Make 2 more variant ideas' if pv.variants else 'Make 2 variant ideas' }}</button></div>
+  </form>
+  {% endif %}
+  {% endif %}
+
+  {% if pv.variants %}
+  <ul class="pk-variants" id="packaging-variants">
+    {% for v in pv.variants %}
+    <li class="pk-variant" id="variant-{{ v.id }}">
+      <div class="tr-head">
+        <strong>Variant idea</strong>
+        <span class="pill {{ v.tone }}">{{ v.label }}</span>
+        {% if v.text_badge %}<span class="pill {{ v.text_tone }}">{{ v.text_badge }}</span>{% endif %}
+      </div>
+      {% if v.image_url %}
+      <img class="thumb lg pk-variant-image" src="{{ v.image_url }}" alt="Variant idea: {{ v.instruction }}" loading="lazy" width="1280" height="720">
+      <p class="hint pk-ai-note">AI-made image: check that the product still looks like the real one.</p>
+      {% endif %}
+      <p class="pk-instruction">{{ v.instruction }}</p>
+      <p class="muted">{% if v.overlay %}Text asked for: &ldquo;{{ v.overlay }}&rdquo;{% else %}Keeps the current text.{% endif %}{% if v.subject_change %} &middot; {{ v.subject_change }}{% endif %}</p>
+      {% if v.error %}<p class="issue warning">{{ v.error }}</p>{% endif %}
+      {% if v.image_url %}
+      <p class="actions">
+        <a class="button secondary" href="{{ v.download_url }}">Download .jpg</a>
+        <a class="button secondary" href="{{ v.preview_url }}">Preview in a feed</a>
+      </p>
+      {% endif %}
+      <p class="muted">Cost {{ v.cost }}{% if v.model %} &middot; {{ v.model }}{% endif %}</p>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% endif %}
+</section>

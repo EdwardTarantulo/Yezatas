@@ -1,0 +1,87 @@
+{% extends "shell.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Preview in a feed - {{ video.title }} - Yezatas{% endblock %}
+
+{# One video as a card in YouTube's home grid or phone list. `c` is a PreviewCard. #}
+{% macro yt_card(c) %}
+<article class="yt-card{% if c.mine %} mine{% endif %}"{% if c.mine %} id="preview-mine"{% endif %}>
+  <div class="yt-thumb">
+    {% if c.thumb %}<img src="{{ c.thumb }}" alt="" loading="lazy" width="320" height="180">{% endif %}
+    {% if c.badge %}<span class="yt-badge">{{ c.badge }}</span>{% endif %}
+  </div>
+  <div class="yt-meta">
+    <span class="yt-avatar" aria-hidden="true"></span>
+    <div class="yt-info">
+      <h3 class="yt-title">{% if c.mine %}<span class="visually-hidden">Your video: </span>{% endif %}{{ c.title }}</h3>
+      <p class="yt-sub">Your channel</p>
+      <p class="yt-sub">{{ c.views }}{% if c.date %} &middot; {{ c.date }}{% endif %}</p>
+    </div>
+  </div>
+</article>
+{% endmacro %}
+
+{# One video as a search result: the picture on the left, the text on the right. #}
+{% macro yt_row(c) %}
+<article class="yt-row{% if c.mine %} mine{% endif %}"{% if c.mine %} id="preview-search-mine"{% endif %}>
+  <div class="yt-thumb">
+    {% if c.thumb %}<img src="{{ c.thumb }}" alt="" loading="lazy" width="320" height="180">{% endif %}
+    {% if c.badge %}<span class="yt-badge">{{ c.badge }}</span>{% endif %}
+  </div>
+  <div class="yt-info">
+    <h3 class="yt-title">{% if c.mine %}<span class="visually-hidden">Your video: </span>{% endif %}{{ c.title }}</h3>
+    <p class="yt-sub">{{ c.views }}{% if c.date %} &middot; {{ c.date }}{% endif %}</p>
+    <p class="yt-sub">Your channel</p>
+    {% if c.description %}<p class="yt-desc">{{ c.description }}</p>{% endif %}
+  </div>
+</article>
+{% endmacro %}
+
+{% block content %}
+<p class="backlink"><a href="/videos/{{ video.video_id|urlencode }}#packaging">{{ icon('back') }}<span>Back to {{ video.title }}</span></a></p>
+<h1 class="page-title">Preview in a feed</h1>
+<p class="muted intro">The same video among your own most viewed public videos, drawn the way YouTube's light pages look. This page is made on this computer from your catalog; no model is called and nothing is sent anywhere. The dark label in the bottom-right corner of each picture is the video length, which YouTube draws over the thumbnail. Your video has a blue outline.</p>
+
+<section class="card" aria-labelledby="h-pick">
+  <h2 id="h-pick">Which thumbnail to show</h2>
+  <div class="chip-row" id="preview-choices">
+    {% for choice in choices %}
+    <a class="chip{% if choice.active %} active{% endif %}" href="{{ choice.href }}"{% if choice.active %} aria-current="page"{% endif %}>{{ choice.label }}</a>
+    {% endfor %}
+  </div>
+  {% if chosen %}<p class="hint" id="preview-note">Showing a variant idea. It is an AI-made image: check that the product still looks like the real one. Yezatas does not upload thumbnails; download it from the video page and upload it in YouTube Studio.</p>
+  {% elif bad_variant %}<p class="hint" id="preview-note">That variant is not available for this video, so the current thumbnail is shown.</p>
+  {% else %}<p class="hint" id="preview-note">Showing the thumbnail YouTube shows now.{% if choices|length == 1 %} Make variant ideas on the video page to compare them here.{% endif %}</p>{% endif %}
+  {% if draft_title %}<p class="hint">The title is the one in your draft.</p>{% endif %}
+  {% if feed.others == 0 %}<p class="hint" id="preview-alone">Your catalog has no other public videos, so the feeds below only show this one.</p>{% endif %}
+  <p class="actions"><a class="button secondary" href="/videos/{{ video.video_id|urlencode }}#packaging">Back to the video page</a></p>
+</section>
+
+<section class="card" id="preview-desktop" aria-labelledby="h-desktop">
+  <h2 id="h-desktop">Desktop home page</h2>
+  <div class="yt-frame">
+    <div class="yt-scroll">
+      <div class="yt-grid">
+        {% for c in feed.desktop %}{{ yt_card(c) }}{% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card" id="preview-phone" aria-labelledby="h-phone">
+  <h2 id="h-phone">Phone</h2>
+  <div class="yt-frame yt-phone">
+    <div class="yt-list">
+      {% for c in feed.phone %}{{ yt_card(c) }}{% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="card" id="preview-search" aria-labelledby="h-search">
+  <h2 id="h-search">Search results</h2>
+  <div class="yt-frame">
+    <div class="yt-rows">
+      {% for c in feed.search %}{{ yt_row(c) }}{% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock %}

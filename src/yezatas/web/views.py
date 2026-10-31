@@ -18,8 +18,8 @@ from ..diffs import DraftDiff, diff_row
 from ..push import PushItem
 from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, fix_priority,
                    parse_chapters, parse_duration)
-from ..store import (AgentRun, DraftRow, PushRecord, SubtitleTranslationRecord, TranscriptRecord,
-                     TranslationRecord, Video)
+from ..store import (AgentRun, DraftRow, PackagingReview, PushRecord, SubtitleTranslationRecord,
+                     ThumbnailVariant, TranscriptRecord, TranslationRecord, Video)
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
 from ..validate import Issue, has_errors
@@ -1004,3 +1004,236 @@ def build_subtitles_view(video_id: str, transcript: TranscriptRecord | None,
     return SubtitlesView(
         source_label=ASR_LANGUAGES.get(source, lang_name(source)) if source else "Not set",
         targets=targets, results=tuple(results))
+
+
+# --- packaging check ------------------------------------------------------------------------------
+VARIANT_LABELS = {"ok": ("Made", "done"), "flagged": ("Text to check", "warn"),
+                  "failed": ("Failed", "problem")}
+PREVIEW_OTHERS = 7  # the channel's own top videos shown next to the one being judged
+PREVIEW_SEARCH_ROWS = 3
+PREVIEW_PHONE_ROWS = 3
+DESCRIPTION_PREVIEW_CHARS = 150
+
+
+@dataclass(frozen=True)
+class PackagingFact:
+    label: str
+    value: str
+
+
+@dataclass(frozen=True)
+class PackagingIdea:
+    instruction: str
+    overlay: str  # the words to put on the picture; "" keeps the current text
+
+
+@dataclass(frozen=True)
+class VariantView:
+    """One variant idea, ready to show. The URLs are empty for a variant that has no picture."""
+
+    id: int
+    label: str
+    tone: str
+    instruction: str
+    overlay: str
+    image_url: str
+    download_url: str
+    preview_url: str
+    text_badge: str  # "Text matches", 'Text differs: reads "..."' or "Text not checked"
+    text_tone: str
+    subject_change: str  # "Subject share: 12% -> 31%", or ""
+    error: str
+    cost: str
+    model: str
+
+
+@dataclass(frozen=True)
+class PackagingView:
+    """What the Packaging card shows besides the job state."""
+
+    title: str  # the title next to the thumbnail
+    thumb: str
+    review: PackagingReview | None
+    when: str
+    failed: str  # the error sentence of a failed check, "" otherwise
+    facts: tuple[PackagingFact, ...]  # measured by code
+    reading: tuple[PackagingFact, ...]  # read by the model
+    points: tuple[str, ...]
+    ideas: tuple[PackagingIdea, ...]
+    problems: tuple[str, ...]  # what the fact guard dropped
+    cost: str
+    models: str
+    tokens: str
+    can_variants: bool
+    variants: tuple[VariantView, ...]
+    preview_url: str
+
+
+def _whole(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _share_fact(found: Any) -> str:
+    """The share of the frame a segmenter box takes, or why there is no number."""
+    if not isinstance(found, dict):
+        return "not measured"
+    share = _whole(found.get("share_pct"))
+    return f"{share}% of the frame" if found.get("found") and share is not None else "not found"
+
+
+def _packaging_facts(review: PackagingReview) -> tuple[tuple[PackagingFact, ...],
+                                                       tuple[PackagingFact, ...]]:
+    """(what code measured, what the model read), as plain facts."""
+    m = review.measurements if isinstance(review.measurements, dict) else {}
+    r = review.reading if isinstance(review.reading, dict) else {}
+    measured: list[PackagingFact] = []
+    width, height = _whole(m.get("width")), _whole(m.get("height"))
+    if width is not None and height is not None:
+        measured.append(PackagingFact("Size", f"{width} x {height} pixels"))
+    brightness = _whole(m.get("brightness"))
+    if brightness is not None:
+        measured.append(PackagingFact("Brightness", f"{brightness} out of 255 on average"))
+    contrast = _whole(m.get("contrast"))
+    if contrast is not None:
+        measured.append(PackagingFact("Contrast", f"{contrast} (the spread of brightness; 0 is flat)"))
+    measured.append(PackagingFact("Subject share", _share_fact(m.get("subject"))))
+    if "face" in m:
+        measured.append(PackagingFact("Face share", _share_fact(m.get("face"))))
+    else:
+        measured.append(PackagingFact("Face share", "not measured" if r.get("face") is True
+                                      else "no face seen"))
+    if isinstance(m.get("badge_risk"), bool):
+        measured.append(PackagingFact("Text or subject in the duration-badge corner",
+                                      "yes" if m["badge_risk"] else "no"))
+    zone = str(m.get("text_zone") or r.get("text_zone") or "none")
+    measured.append(PackagingFact("Text zone", "no text" if zone == "none" else zone))
+    text = str(r.get("text") or "")
+    subject = str(r.get("subject") or "")
+    read = (PackagingFact("Text on the thumbnail", f"“{text}”" if text else "none"),
+            PackagingFact("Subject", subject or "none found"),
+            PackagingFact("Face", "yes" if r.get("face") is True else "no"))
+    return tuple(measured), read
+
+
+def _variant_view(video_id: str, variant: ThumbnailVariant) -> VariantView:
+    label, tone = VARIANT_LABELS.get(variant.status, (variant.status, ""))
+    made = variant.status != "failed"
+    base = f"/videos/{quote(video_id)}/packaging/variants/{variant.id}.jpg"
+    if variant.text_ok is True:
+        badge, text_tone = "Text matches", "done"
+    elif variant.text_ok is False:
+        read = f"reads “{variant.text_read}”" if variant.text_read else "no text was read"
+        badge, text_tone = f"Text differs: {read}", "warn"
+    else:
+        badge, text_tone = "Text not checked", "unverified"
+    change = ""
+    subject = variant.measurements.get("subject") if isinstance(variant.measurements, dict) else None
+    if isinstance(subject, dict):
+        before = _whole(subject.get("before_share_pct"))
+        after = subject.get("after")
+        share = _whole(after.get("share_pct")) if isinstance(after, dict) and after.get("found") else None
+        was = "not measured" if before is None else f"{before}%"
+        now = "not found" if share is None else f"{share}%"
+        change = f"Subject share: {was} → {now}"
+    return VariantView(
+        id=variant.id, label=label, tone=tone, instruction=variant.instruction,
+        overlay=variant.overlay_text, image_url=base if made else "",
+        download_url=base + "?download=1" if made else "",
+        preview_url=f"/videos/{quote(video_id)}/packaging?variant={variant.id}" if made else "",
+        text_badge=badge if made else "", text_tone=text_tone, subject_change=change if made else "",
+        error=variant.error, cost=format_cost(variant.cost_usd), model=variant.model)
+
+
+def build_packaging_view(video_id: str, title: str, thumb: str, review: PackagingReview | None,
+                         variants: Sequence[ThumbnailVariant],
+                         when: Callable[[str], str] = lambda iso: iso) -> PackagingView:
+    """The Packaging card: the newest check of the video and the variants made from it."""
+    preview_url = f"/videos/{quote(video_id)}/packaging"
+    if review is None:
+        return PackagingView(title, thumb, None, "", "", (), (), (), (), (), "", "", "", False, (),
+                             preview_url)
+    done = review.status == "done"
+    facts, read = _packaging_facts(review) if done else ((), ())
+    critique = review.critique if isinstance(review.critique, dict) else {}
+    points = tuple(str(p) for p in critique.get("points") or () if isinstance(p, str))
+    ideas = tuple(PackagingIdea(str(i.get("instruction") or ""), str(i.get("overlay_text") or ""))
+                  for i in critique.get("ideas") or () if isinstance(i, dict))
+    models = review.models if isinstance(review.models, dict) else {}
+    return PackagingView(
+        title=title, thumb=thumb, review=review, when=when(review.created_at),
+        failed=review.error if not done else "", facts=facts, reading=read,
+        points=points if done else (), ideas=ideas if done else (),
+        problems=tuple(review.problems) if done else (), cost=format_cost(review.cost_usd),
+        models=", ".join(str(v) for v in (models.get("vision"), models.get("segmenter")) if v),
+        tokens=(f"{review.input_tokens:,} in, {review.output_tokens:,} out"
+                if review.input_tokens or review.output_tokens else ""),
+        can_variants=done and bool(review.image_file) and bool(ideas),
+        variants=tuple(_variant_view(video_id, v) for v in variants), preview_url=preview_url)
+
+
+# --- packaging preview (the feed mock-ups) --------------------------------------------------------
+@dataclass(frozen=True)
+class PreviewCard:
+    """One video in a mock feed."""
+
+    video_id: str
+    title: str
+    thumb: str
+    views: str  # "1.5K views"
+    date: str
+    badge: str  # the duration badge, "" when the catalog has no duration
+    mine: bool
+    description: str  # the start of the description, for the search row
+
+
+@dataclass(frozen=True)
+class PreviewChoice:
+    label: str
+    href: str
+    active: bool
+
+
+@dataclass(frozen=True)
+class PreviewView:
+    desktop: tuple[PreviewCard, ...]
+    phone: tuple[PreviewCard, ...]
+    search: tuple[PreviewCard, ...]
+    others: int  # how many of the channel's other videos are shown
+
+
+def format_duration(seconds: int | None) -> str:
+    """'4:07' or '1:02:03'; '' when there is no duration."""
+    if not seconds or seconds < 0:
+        return ""
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def preview_card(video: Video, *, mine: bool = False, title: str | None = None,
+                 thumb: str | None = None) -> PreviewCard:
+    views = "1 view" if video.view_count == 1 else f"{format_count(video.view_count)} views"
+    return PreviewCard(
+        video_id=video.video_id, title=video.title if title is None else title,
+        thumb=thumb if thumb is not None else thumb_url(video), views=views,
+        date=format_date(video.published_at), badge=format_duration(parse_duration(video.duration)),
+        mine=mine, description=" ".join(video.description.split())[:DESCRIPTION_PREVIEW_CHARS])
+
+
+def top_other_videos(video_id: str, catalog: Iterable[Video],
+                     limit: int = PREVIEW_OTHERS) -> list[Video]:
+    """The channel's other public videos with the most views (ties by id, so the order is stable)."""
+    others = [v for v in catalog if v.video_id != video_id and v.privacy_status == "public"]
+    others.sort(key=lambda v: (-v.view_count, v.video_id))
+    return others[:limit]
+
+
+def build_preview(mine: PreviewCard, others: Sequence[Video]) -> PreviewView:
+    """The same video in a desktop grid, a phone list and a search result, among the others."""
+    cards = [preview_card(v) for v in others]
+
+    def among(rows: list[PreviewCard]) -> tuple[PreviewCard, ...]:
+        return tuple(rows[:1] + [mine] + rows[1:])  # second place: it has neighbours on both sides
+
+    return PreviewView(desktop=among(cards[:PREVIEW_OTHERS]), phone=among(cards[:PREVIEW_PHONE_ROWS]),
+                       search=(mine, *cards[:PREVIEW_SEARCH_ROWS]), others=len(cards))
