@@ -80,6 +80,12 @@ as it lands; the git history is the detailed record.
   - **Independent check.** **Muse Glimmer** translates the subtitles back blind, in chunks, compares them with the original and scores them. One failed batch fails the whole language: no partial subtitles.
   - **Download.** Each language downloads as an SRT file. Yezatas does not upload subtitles to YouTube.
   - On a real 4:37 review, Spanish, German and Lithuanian were all verified (5/5) with every time identical to the transcript's. Translating took 14 seconds; Glimmer's check took 3 to 5 minutes per language on the creator's PC.
+- **2026-10-31**: **packaging check**: the title and the thumbnail judged together, as a viewer meets them in a feed:
+  - **Measure.** Code (Pillow) measures the thumbnail's size, brightness and contrast. **Muse Spark 1.3** looks at the picture and reports the text on it word for word, where that text sits, the main subject and whether a face is visible. **SAM 3.1** finds the subject (and a face) and code turns its box into a share of the frame, and checks the bottom-right corner where YouTube draws the video length.
+  - **Critique.** Muse Spark writes a few short points and two ideas for a variant. A point that quotes a number nobody measured is dropped, and so is any suggested overlay text with a word that is not already in the title, the description or the current thumbnail.
+  - **Variant ideas.** **Muse Image** edits the current thumbnail for each idea (keeping the product as it is), code fits it to 1280x720 JPEG, Muse Spark reads the text back and the variant is flagged when it is not the text that was asked for. Each is labelled as an AI-made image and can only be downloaded: Yezatas does not upload thumbnails.
+  - **Feed preview.** One page draws YouTube's desktop home grid, phone list and search results with the video (current thumbnail or a variant) among the channel's own most viewed videos, with the length badge where YouTube puts it. No model is called for it.
+  - On a real 4:37 review: the check took about 30 seconds, two variants about 50 seconds; both variants kept the product and had the requested text. The whole run cost about $0.06.
 
 ## Setup
 
@@ -117,10 +123,10 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 | Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
+| Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. |
+| SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
+| Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download (never uploaded). |
 | Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs. |
-
-Earlier plans also listed SAM 3.1 and Muse Image (a thumbnail coach) and Muse Spark's vision (a thumbnail critique).
-None of these is built, so none is listed above.
 
 ## License
 
