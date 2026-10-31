@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from yezatas.store import (MIGRATIONS, DraftRow, PushRecord, Store, TranscriptRecord,
-                           TranslationRecord, Video)
+from yezatas.store import (MIGRATIONS, DraftRow, PushRecord, Store, SubtitleTranslationRecord,
+                           TranscriptRecord, TranslationRecord, Video)
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -41,7 +41,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 5
+        assert s.schema_version == len(MIGRATIONS) == 6
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -51,7 +51,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 5
+        assert s.schema_version == 6
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -147,10 +147,11 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
         s.add_quota_entry("videos.list", 1, quota_day="2026-10-01", now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 1 database
     conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; "
-                       "DROP TABLE translations; DROP TABLE transcripts; PRAGMA user_version = 1;")
+                       "DROP TABLE translations; DROP TABLE transcripts; DROP TABLE subtitle_translations; "
+                       "PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 5
+        assert s.schema_version == 6
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -171,7 +172,8 @@ def test_v3_drafts_get_the_catalog_language_as_their_base(tmp_path: Path) -> Non
         s.put_draft(make_draft("vid00000002"))
     conn = sqlite3.connect(path)  # turn it back into a version 3 database
     conn.executescript(
-        "DROP TABLE transcripts; DROP TABLE translations; ALTER TABLE drafts DROP COLUMN default_language; "
+        "DROP TABLE subtitle_translations; DROP TABLE transcripts; DROP TABLE translations; "
+        "ALTER TABLE drafts DROP COLUMN default_language; "
         "ALTER TABLE drafts DROP COLUMN localizations_json; "
         "ALTER TABLE drafts DROP COLUMN base_default_language; "
         "ALTER TABLE drafts DROP COLUMN base_localizations_json; PRAGMA user_version = 3;")
@@ -340,3 +342,55 @@ def test_transcripts_round_trip(store: Store) -> None:
     latest = store.latest_transcript("vid00000001")
     assert latest is not None and latest.id == second and latest.problems == ["Piece 2 failed."]
     assert store.get_transcript(999) is None
+
+
+def make_subtitles(language: str, transcript_id: int = 1, status: str = "verified",
+                   text: str = "Hola") -> SubtitleTranslationRecord:
+    return SubtitleTranslationRecord(
+        0, "vid00000001", transcript_id, language, "en",
+        [{"start_ms": 0, "end_ms": 4200, "text": text}, {"start_ms": 4200, "end_ms": 5000, "text": ""}],
+        "spark-open-test", "glimmer-test", status, 5, ["An issue."], ["A problem."],
+        {"segments": [{"n": 1, "text": "Hello"}]}, 100, 50, "")
+
+
+def test_subtitle_translations_round_trip(store: Store) -> None:
+    assert store.list_subtitle_translations("vid00000001") == []
+    new_id = store.add_subtitle_translation(make_subtitles("es", text="Hola 🌵"), now=T0)
+    got = store.get_subtitle_translation(new_id)
+    assert got is not None and got.id == new_id and got.created_at == T0.isoformat()
+    assert got == replace(make_subtitles("es", text="Hola 🌵"), id=new_id, created_at=T0.isoformat())
+    assert store.get_subtitle_translation(999) is None
+
+
+def test_latest_subtitle_translations_per_language_and_transcript(store: Store) -> None:
+    store.add_subtitle_translation(make_subtitles("es", 1, text="uno"), now=T0)
+    store.add_subtitle_translation(make_subtitles("de", 1, text="eins"), now=T0)
+    newest = store.add_subtitle_translation(make_subtitles("es", 1, "flagged", "uno bis"), now=T0)
+    other = store.add_subtitle_translation(make_subtitles("fr", 2, text="un"), now=T0)
+    assert [r.id for r in store.list_subtitle_translations("vid00000001")][:2] == [other, newest]
+    latest = store.latest_subtitle_translations("vid00000001", 1)
+    assert set(latest) == {"es", "de"} and latest["es"].id == newest
+    assert latest["es"].segments[0]["text"] == "uno bis" and latest["es"].status == "flagged"
+    assert set(store.latest_subtitle_translations("vid00000001", 2)) == {"fr"}
+    assert store.latest_subtitle_translations("other", 1) == {}
+
+
+def test_v5_database_upgrades_to_v6_and_keeps_its_data(tmp_path: Path) -> None:
+    path = tmp_path / "v5.sqlite"
+    with Store(path) as s:
+        pid = s.begin_pull("chan0000001", now=T0)
+        s.upsert_video(make_video(), pid, now=T0)
+        s.put_draft(make_draft())
+        s.add_transcript(TranscriptRecord(0, "vid00000001", "en", "asr-test", "clip.mp4", 5000,
+                                          [{"start_ms": 0, "end_ms": 5000, "text": "Hello"}], [], ""),
+                         now=T0)
+    conn = sqlite3.connect(path)  # turn it back into a version 5 database
+    conn.executescript("DROP TABLE subtitle_translations; PRAGMA user_version = 5;")
+    conn.close()
+    with Store(path) as s:
+        assert s.schema_version == 6
+        assert s.get_video("vid00000001") is not None and s.get_draft("vid00000001") is not None
+        transcript = s.latest_transcript("vid00000001")
+        assert transcript is not None and transcript.segments[0]["text"] == "Hello"
+        assert s.list_subtitle_translations("vid00000001") == []
+        assert s.add_subtitle_translation(make_subtitles("es"), now=T0) > 0

@@ -171,6 +171,15 @@ def parse_translation(content: str | None) -> tuple[str, str]:
     return title.strip(), description
 
 
+@dataclass(frozen=True)
+class Completion:
+    """One chat reply: its text (None when the model sent none) and the tokens it cost."""
+
+    content: str | None
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
 class ChatTranslator:
     """OpenAI-compatible chat model: Spark Open on Baseten, or Spark 1.3 on Meta's API."""
 
@@ -186,10 +195,10 @@ class ChatTranslator:
         text = " ".join(text.split())[:200]
         return text.replace(self._key, "***") if self._key else text
 
-    def translate(self, source_language: str, target_language: str, title: str,
-                  description: str) -> Translated:
+    def complete(self, messages: list[dict[str, str]]) -> Completion:
+        """One chat call: the reply's text (None when it has none) and the tokens used. Every
+        failure becomes a `TranslateError` with a plain sentence and no key in it."""
         openai = self._openai
-        messages = translator_messages(source_language, target_language, title, description)
         try:
             response = self._client.chat.completions.create(model=self.model, messages=messages)
         except (openai.AuthenticationError, openai.PermissionDeniedError) as exc:
@@ -209,13 +218,20 @@ class ChatTranslator:
             raise TranslateError("api", f"{text}: {detail}" if detail else f"{text}.") from exc
         if not getattr(response, "choices", None):
             raise TranslateError("api", "The translation service returned no answer.")
-        new_title, new_description = parse_translation(response.choices[0].message.content)
         usage = getattr(response, "usage", None)
-        return Translated(
-            new_title, new_description, self.model,
+        return Completion(
+            response.choices[0].message.content,
             int(getattr(usage, "prompt_tokens", 0) or 0),
             int(getattr(usage, "completion_tokens", 0) or 0),
         )
+
+    def translate(self, source_language: str, target_language: str, title: str,
+                  description: str) -> Translated:
+        completion = self.complete(
+            translator_messages(source_language, target_language, title, description))
+        new_title, new_description = parse_translation(completion.content)
+        return Translated(new_title, new_description, self.model, completion.input_tokens,
+                          completion.output_tokens)
 
 
 # --- the verifier ----------------------------------------------------------------------------------
@@ -327,7 +343,7 @@ class OllamaVerifier:
             return False
         return self.model in names or f"{self.model}:latest" in names
 
-    def _chat(self, messages: list[dict[str, str]], schema: dict[str, Any] | None = None) -> Any:
+    def chat(self, messages: list[dict[str, str]], schema: dict[str, Any] | None = None) -> Any:
         """The reply's text (None when it has none); `schema` asks Ollama for that JSON shape."""
         payload: dict[str, Any] = {
             "model": self.model, "messages": messages, "stream": False, "think": False,
@@ -356,8 +372,8 @@ class OllamaVerifier:
 
     def _back(self, source_language: str, target_language: str, title: str, description: str,
               insist: bool) -> tuple[str, str]:
-        content = self._chat(back_messages(source_language, target_language, title, description,
-                                           insist=insist))
+        content = self.chat(back_messages(source_language, target_language, title, description,
+                                          insist=insist))
         if not isinstance(content, str):
             raise TranslateError("answer", "The checker sent no back-translation.")
         try:
@@ -379,7 +395,7 @@ class OllamaVerifier:
                 raise TranslateError(
                     "answer", "The checker copied the translation instead of translating it "
                               "back, so it could not check it.")
-        verdict = parse_json_object(self._chat(
+        verdict = parse_json_object(self.chat(
             compare_messages(source_language, source_title, source_description, back_title,
                              back_description),
             COMPARE_SCHEMA))

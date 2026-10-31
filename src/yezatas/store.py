@@ -158,9 +158,34 @@ _SCHEMA_V5: tuple[str, ...] = (
     "CREATE INDEX idx_transcripts_video ON transcripts(video_id, id)",
 )
 
+# v6: translated subtitles. Every row holds all of a transcript's segments with the transcript's own
+# times; only the text is translated.
+_SCHEMA_V6: tuple[str, ...] = (
+    """CREATE TABLE subtitle_translations (
+        id INTEGER PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        transcript_id INTEGER NOT NULL,
+        language TEXT NOT NULL,
+        source_language TEXT NOT NULL,
+        segments_json TEXT NOT NULL DEFAULT '[]',
+        translator TEXT NOT NULL,
+        verifier TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        score INTEGER,
+        issues_json TEXT NOT NULL DEFAULT '[]',
+        problems_json TEXT NOT NULL DEFAULT '[]',
+        back_translation_json TEXT NOT NULL DEFAULT '{}',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_subtitle_translations_video "
+    "ON subtitle_translations(video_id, transcript_id, language, id)",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
-    _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5
+    _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -313,6 +338,30 @@ class TranscriptRecord:
     duration_ms: int  # length of the audio
     segments: list[dict[str, Any]]  # [{"start_ms", "end_ms", "text"}], in order
     problems: list[str]  # pieces that could not be transcribed, as short sentences
+    created_at: str
+
+
+@dataclass(frozen=True)
+class SubtitleTranslationRecord:
+    """A transcript's subtitles translated into one language, with their checks. `segments` has ALL
+    the transcript's segments in order; the times are copied from the transcript, only the text is
+    translated (an empty segment stays empty)."""
+
+    id: int  # 0 before it is stored
+    video_id: str
+    transcript_id: int  # the transcript these subtitles were made from
+    language: str  # YouTube language code of the subtitles, e.g. "es"
+    source_language: str  # the transcript's language
+    segments: list[dict[str, Any]]  # [{"start_ms", "end_ms", "text"}], in order
+    translator: str  # model id that translated
+    verifier: str  # model id that checked it ("" when it could not be checked)
+    status: str  # "verified" | "flagged" | "unverified" | "failed"
+    score: int | None  # the verifier's 1-5 score (lowest over its chunks)
+    issues: list[str]  # the verifier's issues
+    problems: list[str]  # the code checks' problems
+    back_translation: dict[str, Any]  # {"segments": [...]} or {"note": "..."} or {}
+    input_tokens: int
+    output_tokens: int
     created_at: str
 
 
@@ -839,4 +888,66 @@ class Store:
         latest: dict[str, TranslationRecord] = {}
         for record in self.list_translations(video_id):
             latest.setdefault(record.language, record)
+        return latest
+
+    # --- subtitle translations -------------------------------------------
+    @staticmethod
+    def _row_to_subtitle_translation(row: sqlite3.Row) -> SubtitleTranslationRecord:
+        return SubtitleTranslationRecord(
+            id=row["id"],
+            video_id=row["video_id"],
+            transcript_id=row["transcript_id"],
+            language=row["language"],
+            source_language=row["source_language"],
+            segments=json.loads(row["segments_json"]),
+            translator=row["translator"],
+            verifier=row["verifier"],
+            status=row["status"],
+            score=row["score"],
+            issues=json.loads(row["issues_json"]),
+            problems=json.loads(row["problems_json"]),
+            back_translation=json.loads(row["back_translation_json"]),
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output_tokens"],
+            created_at=row["created_at"],
+        )
+
+    def add_subtitle_translation(self, record: SubtitleTranslationRecord,
+                                 now: datetime | None = None) -> int:
+        """Store translated subtitles (`id` and `created_at` are ignored); returns the new id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO subtitle_translations (video_id, transcript_id, language, "
+                "source_language, segments_json, translator, verifier, status, score, "
+                "issues_json, problems_json, back_translation_json, input_tokens, "
+                "output_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record.video_id, record.transcript_id, record.language, record.source_language,
+                 _dumps(record.segments), record.translator, record.verifier, record.status,
+                 record.score, _dumps(record.issues), _dumps(record.problems),
+                 _dumps(record.back_translation), record.input_tokens, record.output_tokens,
+                 _iso(now)),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def get_subtitle_translation(self, record_id: int) -> SubtitleTranslationRecord | None:
+        row = self._conn.execute(
+            "SELECT * FROM subtitle_translations WHERE id = ?", (record_id,)
+        ).fetchone()
+        return self._row_to_subtitle_translation(row) if row else None
+
+    def list_subtitle_translations(self, video_id: str) -> list[SubtitleTranslationRecord]:
+        """Every subtitle translation of a video, newest first."""
+        rows = self._conn.execute(
+            "SELECT * FROM subtitle_translations WHERE video_id = ? ORDER BY id DESC", (video_id,)
+        ).fetchall()
+        return [self._row_to_subtitle_translation(r) for r in rows]
+
+    def latest_subtitle_translations(
+        self, video_id: str, transcript_id: int
+    ) -> dict[str, SubtitleTranslationRecord]:
+        """The newest subtitle translation per language, made from that transcript only."""
+        latest: dict[str, SubtitleTranslationRecord] = {}
+        for record in self.list_subtitle_translations(video_id):
+            if record.transcript_id == transcript_id:
+                latest.setdefault(record.language, record)
         return latest
