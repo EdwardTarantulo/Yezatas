@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from .. import edits
 from ..agent import estimate_cost
@@ -18,7 +18,8 @@ from ..diffs import DraftDiff, diff_row
 from ..push import PushItem
 from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, fix_priority,
                    parse_chapters, parse_duration)
-from ..store import AgentRun, DraftRow, PushRecord, TranscriptRecord, TranslationRecord, Video
+from ..store import (AgentRun, DraftRow, PushRecord, SubtitleTranslationRecord, TranscriptRecord,
+                     TranslationRecord, Video)
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
 from ..validate import Issue, has_errors
@@ -935,3 +936,71 @@ def build_transcript_view(video: Video, row: DraftRow | None, record: Transcript
         text="\n".join(lines), line_count=len(lines),
         blocker=chapters_blocker(video, row, record),
     )
+
+
+# --- translated subtitles -------------------------------------------------------------------------
+@dataclass(frozen=True)
+class SubtitleResult:
+    """The newest subtitles in one language, ready to show."""
+
+    record: SubtitleTranslationRecord
+    name: str
+    label: str
+    tone: str
+    score: str  # "4/5", or "" when the checker did not score it
+    problems: tuple[str, ...]  # found by the code checks
+    issues: tuple[str, ...]  # found by the checker
+    note: str  # why the checker could not check it ("" when it could)
+    back: tuple[tuple[int, str], ...]  # the blind back-translation: (segment number, text)
+    models: str  # "spark-x, checked by glimmer-y"
+    tokens: str  # "1,200 in, 3,400 out", or "" when none were counted
+    url: str  # where to download the .srt ("" for a failed language)
+
+
+@dataclass(frozen=True)
+class SubtitlesView:
+    """What the "Subtitles in other languages" block shows besides the job state."""
+
+    source_label: str  # the transcript's language, by name
+    targets: tuple[TargetOption, ...]
+    results: tuple[SubtitleResult, ...]
+
+
+def build_subtitles_view(video_id: str, transcript: TranscriptRecord | None,
+                         records: Mapping[str, SubtitleTranslationRecord]) -> SubtitlesView:
+    """The language choice and the stored results for the newest transcript, in LANGUAGES order.
+
+    The boxes start ticked as the default languages when nothing was translated yet, and as the
+    languages that have a result otherwise.
+    """
+    source = transcript.language if transcript is not None else ""
+    options = [(code, name) for code, name in LANGUAGES.items()
+               if not (source and same_language(code, source))]
+    ticked = ({code for code in records} if records
+              else {code for code in DEFAULT_TARGETS if code in dict(options)})
+    targets = tuple(TargetOption(code, name, code in ticked, "") for code, name in options)
+    results = []
+    for code in LANGUAGES:
+        record = records.get(code)
+        if record is None:
+            continue
+        label, tone = TRANSLATION_STATUS_LABELS.get(record.status, (record.status, ""))
+        back = record.back_translation if isinstance(record.back_translation, dict) else {}
+        pieces = back.get("segments")
+        results.append(SubtitleResult(
+            record=record, name=lang_name(code), label=label, tone=tone,
+            score=f"{record.score}/5" if record.score is not None else "",
+            problems=tuple(record.problems), issues=tuple(record.issues),
+            note=str(back.get("note") or ""),
+            back=tuple((int(p["n"]), str(p["text"])) for p in pieces
+                       if isinstance(p, dict) and "n" in p and "text" in p)
+            if isinstance(pieces, list) else (),
+            models=record.translator + (f", checked by {record.verifier}" if record.verifier else ""),
+            tokens=(f"{record.input_tokens:,} in, {record.output_tokens:,} out"
+                    if record.input_tokens or record.output_tokens else ""),
+            url="" if record.status == "failed" else (
+                f"/videos/{quote(video_id)}/subtitles/{quote(code)}.srt"),
+        ))
+    return SubtitlesView(
+        source_label=ASR_LANGUAGES.get(source, lang_name(source)) if source else "Not set",
+        targets=targets, results=tuple(results))

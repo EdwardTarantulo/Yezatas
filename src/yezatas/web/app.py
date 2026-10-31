@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
-from .. import agent, auth, edits, push
+from .. import agent, auth, edits, push, subtitle_translate
 from .. import chapters as chapters_mod
 from .. import transcribe as transcribe_mod
 from .. import translate
@@ -44,10 +44,10 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (Entry, RunView, SuggestBatch, SuggestItem, build_listing, build_transcript_view,
-                    build_translate_view, change_cards, chapters_blocker, dashboard_model,
-                    format_cost, format_count, format_date, group_checks, history_rows, lang_name,
-                    make_entries, plan_lines, push_results, run_view, stops_batch, thumb_url)
+from .views import (Entry, RunView, SuggestBatch, SuggestItem, build_listing, build_subtitles_view,
+                    build_transcript_view, build_translate_view, change_cards, chapters_blocker,
+                    dashboard_model, format_cost, format_count, format_date, group_checks, history_rows,
+                    lang_name, make_entries, plan_lines, push_results, run_view, stops_batch, thumb_url)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -81,6 +81,11 @@ CHAPTERS_TIMEOUT_SECONDS = 10 * 60.0
 CHAPTERS_TIMEOUT_MESSAGE = (
     "Making the chapters took more than 10 minutes, so Yezatas stopped waiting. The Agent log "
     "shows what finished."
+)
+SUBTITLES_TIMEOUT_SECONDS = 60 * 60.0
+SUBTITLES_TIMEOUT_MESSAGE = (
+    "The subtitles took more than 60 minutes, so Yezatas stopped waiting. Languages that "
+    "finished are kept below."
 )
 MAX_PATH_CHARS = 1000
 MAX_KEYWORDS = 20
@@ -164,6 +169,14 @@ def map_translate_error(exc: BaseException) -> tuple[str, str]:
     if type(exc) is ValueError:  # translate_video's own plain sentences
         return "translate", str(exc)
     return "translate", f"The translation stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def map_subtitles_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, translate.TranslateError):
+        return exc.kind, str(exc)
+    if type(exc) is ValueError:  # translate_subtitles' own plain sentences
+        return "subtitles", str(exc)
+    return "subtitles", f"The subtitles stopped unexpectedly ({exc.__class__.__name__})."
 
 
 def map_transcribe_error(exc: BaseException) -> tuple[str, str]:
@@ -323,6 +336,10 @@ class WebState:
                                  TRANSLATE_TIMEOUT_MESSAGE, clock)
         self._translate_seen: JobSnapshot | None = None  # the finished job the creator dismissed
         self._translate_video = ""
+        self.subtitles_job = Job(map_subtitles_error, SUBTITLES_TIMEOUT_SECONDS,
+                                 SUBTITLES_TIMEOUT_MESSAGE, clock)
+        self._subtitles_seen: JobSnapshot | None = None  # the finished job the creator dismissed
+        self._subtitles_video = ""
         self.transcribe_job = Job(map_transcribe_error, TRANSCRIBE_TIMEOUT_SECONDS,
                                   TRANSCRIBE_TIMEOUT_MESSAGE, clock)
         self._transcribe_seen: JobSnapshot | None = None  # the finished job the creator dismissed
@@ -574,6 +591,44 @@ class WebState:
         if not snap.running:
             with self._lock:
                 self._translate_seen = snap
+
+    # --- translated subtitles -----------------------------------------------------------------
+    def start_subtitles(self, video_id: str, targets: Sequence[str], sid: str) -> bool:
+        """Translate one video's transcript into these languages, in the one subtitles job."""
+        wanted = tuple(targets)
+
+        def work(report: Report) -> "subtitle_translate.SubtitleTranslateResult":
+            return self._run_subtitles(video_id, wanted, sid, report)
+
+        if not self.subtitles_job.start(work):
+            return False
+        with self._lock:
+            self._subtitles_video = video_id
+        return True
+
+    def _run_subtitles(self, video_id: str, targets: tuple[str, ...], sid: str, report: Report
+                       ) -> "subtitle_translate.SubtitleTranslateResult":
+        translator, verifier = self._translate_tools(self.config)
+        if translator is None:
+            raise translate.TranslateError(
+                "auth", "There is no translation key. Add one in Setup. Nothing was sent.")
+        with Store(self.config.catalog_db) as store:
+            return subtitle_translate.translate_subtitles(
+                store, translator, verifier, video_id, list(targets), report=report)  # type: ignore[arg-type]
+
+    def subtitles_state(self) -> tuple[JobSnapshot, str]:
+        """(job snapshot, the video id it works on). A finished job the creator dismissed is idle."""
+        snap = self.subtitles_job.snapshot()
+        with self._lock:
+            if snap is self._subtitles_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._subtitles_video
+
+    def dismiss_subtitles_result(self) -> None:
+        snap = self.subtitles_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._subtitles_seen = snap
 
     # --- transcripts and chapters -------------------------------------------------------------
     def start_transcribe(self, video_id: str, media: Path, language: str,
@@ -887,6 +942,25 @@ def create_app(
                 "has_key": bool(agent.key_source(config)),
                 "transcribe": transcribing, "chapters": making}
 
+    def subtitles_panel(video_id: str, tr: dict[str, Any]) -> dict[str, Any]:
+        """What the subtitles job and the tools are doing, for one video page. `tr` is the
+        translation panel, which already asked for the translator and the checker."""
+        snap, job_video = state.subtitles_state()
+        panel = job_panel(snap, job_video, video_id)
+        if snap.status == "done" and job_video == video_id and isinstance(
+                snap.result, subtitle_translate.SubtitleTranslateResult):
+            result = snap.result
+            failed = all(r.status == "failed" for r in result.records)
+            panel["done"] = {
+                "tone": "error" if failed else "ok",
+                "text": f"Subtitles finished: {result.message}."
+                        + ("" if failed else " Read the results below, then download the .srt "
+                                             "files you want."),
+            }
+        panel.update({k: tr[k] for k in ("has_translator", "model", "provider", "verifier_model",
+                                         "verifier_ready")})
+        return panel
+
     def video_not_found(request: Request) -> Response:
         return render(request, "error.html", {
             "layout": "shell.html", "active": "content",
@@ -941,8 +1015,12 @@ def create_app(
         ts = transcript_panel(video_id)
         with Store(config.catalog_db) as store:
             record = store.latest_transcript(video_id)
+            subtitle_records = (store.latest_subtitle_translations(video_id, record.id)
+                                if record is not None else {})
         tt = build_transcript_view(video, row, record,
                                    _local_time(record.created_at) if record else "")
+        sv = build_subtitles_view(video_id, record, subtitle_records)
+        sb = subtitles_panel(video_id, tr)
         text = ((row.title, row.description, row.tags) if row is not None
                 else (video.title, video.description, tuple(video.tags)))
         return render(request, "video.html", {
@@ -957,9 +1035,11 @@ def create_app(
             "published": format_date(video.published_at),
             "sg": panel, "latest_run": latest,
             "tr": tr, "tv": build_translate_view(video, row, records), "ts": ts, "tt": tt,
+            "sv": sv, "sb": sb,
             "poll": (panel["running"] or panel["busy"] or tr["running"] or tr["busy"]
                      or ts["transcribe"]["running"] or ts["transcribe"]["busy"]
-                     or ts["chapters"]["running"] or ts["chapters"]["busy"]),
+                     or ts["chapters"]["running"] or ts["chapters"]["busy"]
+                     or sb["running"] or sb["busy"]),
         })
 
     @app.get("/setup")
@@ -987,6 +1067,7 @@ def create_app(
             "push": _job_json(state.push_job.snapshot()),
             "suggest": _job_json(state.suggest_job.snapshot()),
             "translate": _job_json(state.translate_job.snapshot()),
+            "subtitles": _job_json(state.subtitles_job.snapshot()),
             "transcribe": _job_json(state.transcribe_job.snapshot()),
             "chapters": _job_json(state.chapters_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
@@ -1629,6 +1710,72 @@ def create_app(
         state.dismiss_chapters_result()
         video_id = str(form.get("video_id") or "")
         return see_other(f"/videos/{quote(video_id)}#transcript" if video_id else "/")
+
+    @app.post("/videos/{video_id}/subtitles")
+    async def translate_video_subtitles(request: Request, video_id: str) -> Response:
+        form = await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#subtitles")
+
+        def lookup() -> tuple[bool, str]:
+            """(the video exists, the language of its newest transcript or "")."""
+            with Store(config.catalog_db) as store:
+                if store.get_video(video_id) is None:
+                    return False, ""
+                transcript = store.latest_transcript(video_id)
+                return True, (transcript.language or "") if transcript is not None else ""
+
+        found, source = await run_in_threadpool(lookup)
+        if not found:
+            return video_not_found(request)
+        picked = {str(v) for v in form.getlist("targets")}
+        if not source:
+            flash(request, "error", "This video has no transcript with a language yet. Transcribe "
+                  "it first. Nothing was sent.")
+        elif not picked:
+            flash(request, "error", "Pick at least one language for the subtitles. Nothing was "
+                  "sent.")
+        elif not picked <= set(translate.LANGUAGES):
+            flash(request, "error", "One of the chosen languages is not available. Nothing was "
+                  "sent.")
+        elif any(translate.same_language(code, source) for code in picked):
+            flash(request, "error", "Subtitles cannot be translated into the language of the "
+                  f"transcript ({subtitle_translate.language_name(source)}). Untick it and try "
+                  "again. Nothing was sent.")
+        else:
+            translator, _ = await run_in_threadpool(tools_or_none)
+            if translator is None:
+                flash(request, "error", "There is no translation key yet. Add a Baseten key or a "
+                      "Meta API key. Nothing was sent.", "translate")
+            elif not state.start_subtitles(
+                    video_id, [c for c in translate.LANGUAGES if c in picked],
+                    request.state.session_id):
+                flash(request, "error", "Subtitles are already being translated. Wait for them "
+                      "to finish.")
+        return back
+
+    @app.post("/subtitles/done")
+    async def dismiss_subtitles(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_subtitles_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#subtitles" if video_id else "/")
+
+    @app.get("/videos/{video_id}/subtitles/{language}.srt")
+    def subtitles_srt(request: Request, video_id: str, language: str) -> Response:
+        missing = Response("There are no subtitles in that language for this video.",
+                           status_code=404, media_type="text/plain")
+        if language not in translate.LANGUAGES:
+            return missing
+        with Store(config.catalog_db) as store:
+            transcript = store.latest_transcript(video_id)
+            record = (store.latest_subtitle_translations(video_id, transcript.id).get(language)
+                      if transcript is not None else None)
+        if record is None or record.status == "failed":
+            return missing
+        return Response(
+            subtitle_translate.srt_for(record), media_type="application/x-subrip; charset=utf-8",
+            headers={"Content-Disposition":
+                     f'attachment; filename="{video_id}.{language}.srt"'})
 
     @app.get("/videos/{video_id}/transcript.srt")
     def transcript_srt(request: Request, video_id: str) -> Response:

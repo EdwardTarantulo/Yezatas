@@ -96,6 +96,70 @@
     </div>
     <p class="hint">The model only chooses which part of the transcript starts each chapter; Yezatas takes the time from the transcript. The chapters go into the description draft for you to review. Yezatas does not upload the subtitles: add the file in YouTube Studio yourself.</p>
     {% endif %}
+
+    <h3 class="run-h" id="subtitles">Subtitles in other languages</h3>
+    <p class="muted">{{ sb.model }} translates the text of each transcript segment and nothing else: every time is copied from the transcript, so the subtitles stay in step with the speech. Code checks the numbers, links and other fixed details, then {{ sb.verifier_model }} on this computer translates each result back without seeing your text and compares. A flagged language needs a careful read before you use it. Yezatas does not upload subtitles to YouTube: download the .srt file and add it in YouTube Studio yourself.</p>
+    {% if sb.running %}
+    <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+      <span id="subtitles-msg" role="status" aria-live="polite">{{ sb.message or 'Starting…' }}</span></p>
+    <p class="hint">This can take several minutes for each language: the translation, then the check on this computer. You can leave this page. The result shows here.</p>
+    {% else %}
+    {% if sb.failed %}
+    <div class="flash error" role="alert" id="subtitles-failed">{{ sb.failed }}</div>
+    <form class="inline" method="post" action="/subtitles/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+    {% endif %}
+    {% if sb.done %}
+    <div class="flash {{ sb.done.tone }}" role="status" id="subtitles-done">{{ sb.done.text }}</div>
+    <form class="inline" method="post" action="/subtitles/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+    {% endif %}
+    {% if sb.busy %}<p class="hint" id="subtitles-busy">Subtitles are being translated for another video. Wait for it to finish.</p>{% endif %}
+    {% if not sb.has_translator %}<p class="hint" id="subtitles-no-key">There is no translation key yet. <a href="/setup#step-translate">Add one in Setup</a>.</p>{% endif %}
+    {% if not sb.verifier_ready %}<p class="hint" id="subtitles-no-checker">The checker ({{ sb.verifier_model }}) is not running on this computer, so the subtitles will be marked "Unverified". To check them, start Ollama with that model: <a href="/setup#step-translate">see Setup</a>.</p>{% endif %}
+    <form class="translate-form" id="subtitles-form" method="post" action="/videos/{{ video.video_id|urlencode }}/subtitles">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <fieldset class="lang-grid">
+        <legend>Translate the subtitles ({{ sv.source_label }}) into</legend>
+        {% for t in sv.targets %}
+        <label class="check-label lang"><input type="checkbox" name="targets" value="{{ t.code }}"{% if t.ticked %} checked{% endif %}> <span>{{ t.name }}</span></label>
+        {% endfor %}
+      </fieldset>
+      <p class="hint">The text of the transcript goes to {{ sb.model }}{% if sb.provider == 'baseten' %} on Baseten{% elif sb.provider == 'meta' %} through Meta's Model API (Standard mode: Meta does not use it for training){% endif %}. Translating a language again replaces its earlier result below.</p>
+      <div class="actions"><button type="submit" class="button primary"{% if sb.busy or tj.running or not sb.has_translator %} disabled{% endif %}>Translate subtitles</button></div>
+    </form>
+    {% endif %}
+
+    {% if sv.results %}
+    <div id="subtitle-results">
+      <h4 class="run-h">Results</h4>
+      <ul class="tr-list">
+        {% for t in sv.results %}
+        {% set r = t.record %}
+        <li class="tr-item" id="sub-{{ r.language }}">
+          <div class="tr-head">
+            <strong>{{ t.name }}</strong>
+            <span class="pill {{ t.tone }}">{{ t.label }}</span>
+            {% if t.score %}<span class="muted">Score {{ t.score }}</span>{% endif %}
+            {% if t.url %}<a class="button secondary" href="{{ t.url }}">Download .srt</a>{% endif %}
+          </div>
+          {% if t.note %}<p class="hint tr-note">The checker could not check this one: {{ t.note }}</p>{% endif %}
+          {% if t.problems or t.issues %}
+          <ul class="issues">
+            {% for p in t.problems %}<li class="issue error"><strong>{{ 'Failed' if r.status == 'failed' else 'Problem' }}:</strong> {{ p }}</li>{% endfor %}
+            {% for i in t.issues %}<li class="issue warning"><strong>Checker:</strong> {{ i }}</li>{% endfor %}
+          </ul>
+          {% endif %}
+          {% if t.back %}
+          <details class="tr-text"><summary>Back-translation (made blind, without seeing your text)</summary>
+            <pre>{% for n, text in t.back %}{{ n }}: {{ text }}
+{% endfor %}</pre></details>
+          {% endif %}
+          <p class="muted">{{ t.models }}{% if t.tokens %} &middot; {{ t.tokens }} tokens{% endif %}</p>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="hint">The numbers in the back-translation are the segment numbers of the transcript.</p>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 </section>
