@@ -225,9 +225,32 @@ _SCHEMA_V7: tuple[str, ...] = (
     "CREATE INDEX idx_thumbnail_variants_review ON thumbnail_variants(review_id, id)",
 )
 
+# v8: own-channel outlier reports (one Muse Spark explanation of what the best videos share). The
+# scores themselves are not stored: they are recomputed from the catalog.
+_SCHEMA_V8: tuple[str, ...] = (
+    """CREATE TABLE outlier_reports (
+        id INTEGER PRIMARY KEY,
+        pull_id INTEGER,
+        as_of TEXT NOT NULL,
+        params_json TEXT NOT NULL DEFAULT '{}',
+        labels_json TEXT NOT NULL DEFAULT '{}',
+        insight_json TEXT NOT NULL DEFAULT '{}',
+        problems_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL,
+        error TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL,
+        created_at TEXT NOT NULL
+    )""",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
-    _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7
+    _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
+    _SCHEMA_V8,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -449,6 +472,29 @@ class ThumbnailVariant:
     status: str  # "ok" | "flagged" | "failed"
     error: str
     model: str
+    cost_usd: float | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class OutlierReport:
+    """One outlier explanation. Numbers in `labels` come from code; the model only wrote `insight`
+    (patterns, per_video, ideas), after the guards. Labels (O1.., T1..) map to videos in `labels`:
+    {label: {"video_id", "ratio", "views", "peer_median"}}. `pull_id` is the pull the views came from."""
+
+    id: int  # 0 before it is stored
+    pull_id: int | None
+    as_of: str  # the time of the views
+    params: dict[str, Any]
+    labels: dict[str, Any]
+    insight: dict[str, Any]
+    problems: list[str]
+    status: str  # "done" | "too_few" | "error"
+    error: str
+    model: str
+    input_tokens: int
+    cached_tokens: int
+    output_tokens: int
     cost_usd: float | None
     created_at: str
 
@@ -1136,3 +1182,44 @@ class Store:
         row = self._conn.execute(
             "SELECT * FROM thumbnail_variants WHERE id = ?", (variant_id,)).fetchone()
         return self._row_to_thumbnail_variant(row) if row else None
+
+    # --- outlier reports --------------------------------------------------
+    @staticmethod
+    def _row_to_outlier_report(row: sqlite3.Row) -> OutlierReport:
+        return OutlierReport(
+            id=row["id"],
+            pull_id=row["pull_id"],
+            as_of=row["as_of"],
+            params=json.loads(row["params_json"]),
+            labels=json.loads(row["labels_json"]),
+            insight=json.loads(row["insight_json"]),
+            problems=json.loads(row["problems_json"]),
+            status=row["status"],
+            error=row["error"],
+            model=row["model"],
+            input_tokens=row["input_tokens"],
+            cached_tokens=row["cached_tokens"],
+            output_tokens=row["output_tokens"],
+            cost_usd=row["cost_usd"],
+            created_at=row["created_at"],
+        )
+
+    def save_outlier_report(self, record: OutlierReport, now: datetime | None = None) -> int:
+        """Store an outlier report (`id` and `created_at` are ignored); returns the new id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO outlier_reports (pull_id, as_of, params_json, labels_json, insight_json, "
+                "problems_json, status, error, model, input_tokens, cached_tokens, output_tokens, "
+                "cost_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record.pull_id, record.as_of, _dumps(record.params), _dumps(record.labels),
+                 _dumps(record.insight), _dumps(record.problems), record.status, record.error,
+                 record.model, record.input_tokens, record.cached_tokens, record.output_tokens,
+                 record.cost_usd, _iso(now)),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def latest_outlier_report(self) -> OutlierReport | None:
+        """The newest outlier report, or None."""
+        row = self._conn.execute(
+            "SELECT * FROM outlier_reports ORDER BY id DESC LIMIT 1").fetchone()
+        return self._row_to_outlier_report(row) if row else None

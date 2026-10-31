@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from yezatas.store import (MIGRATIONS, DraftRow, PackagingReview, PushRecord, Store,
+from yezatas.store import (MIGRATIONS, DraftRow, OutlierReport, PackagingReview, PushRecord, Store,
                            SubtitleTranslationRecord, ThumbnailVariant,
                            TranscriptRecord, TranslationRecord, Video)
 
@@ -42,7 +42,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 7
+        assert s.schema_version == len(MIGRATIONS) == 8
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -52,7 +52,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 7
+        assert s.schema_version == 8
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -149,11 +149,11 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
     conn = sqlite3.connect(path)  # turn it back into a version 1 database
     conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; "
                        "DROP TABLE translations; DROP TABLE transcripts; DROP TABLE subtitle_translations; "
-                       "DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; "
+                       "DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
                        "PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 7
+        assert s.schema_version == 8
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -174,7 +174,7 @@ def test_v3_drafts_get_the_catalog_language_as_their_base(tmp_path: Path) -> Non
         s.put_draft(make_draft("vid00000002"))
     conn = sqlite3.connect(path)  # turn it back into a version 3 database
     conn.executescript(
-        "DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; "
+        "DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
         "DROP TABLE subtitle_translations; DROP TABLE transcripts; DROP TABLE translations; "
         "ALTER TABLE drafts DROP COLUMN default_language; "
         "ALTER TABLE drafts DROP COLUMN localizations_json; "
@@ -388,11 +388,11 @@ def test_v5_database_upgrades_to_v6_and_keeps_its_data(tmp_path: Path) -> None:
                                           [{"start_ms": 0, "end_ms": 5000, "text": "Hello"}], [], ""),
                          now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 5 database
-    conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; "
+    conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
                        "DROP TABLE subtitle_translations; PRAGMA user_version = 5;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 7
+        assert s.schema_version == 8
         assert s.get_video("vid00000001") is not None and s.get_draft("vid00000001") is not None
         transcript = s.latest_transcript("vid00000001")
         assert transcript is not None and transcript.segments[0]["text"] == "Hello"
@@ -458,13 +458,59 @@ def test_v6_database_upgrades_to_v7_and_keeps_its_data(tmp_path: Path) -> None:
         s.upsert_video(make_video(), pid, now=T0)
         s.add_subtitle_translation(make_subtitles("es"), now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 6 database
-    conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; "
+    conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
                        "PRAGMA user_version = 6;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 7
+        assert s.schema_version == 8
         assert s.get_video("vid00000001") is not None
         assert len(s.list_subtitle_translations("vid00000001")) == 1
         assert s.latest_packaging_review("vid00000001") is None
         review = s.add_packaging_review(make_review(), now=T0)
         assert s.add_thumbnail_variant(make_variant(review), now=T0) > 0
+
+
+def make_outlier_report(**kw: object) -> OutlierReport:
+    base: dict[str, object] = dict(
+        id=0, pull_id=3, as_of="2026-10-20T10:00:00+00:00", params={"peers": 20},
+        labels={"O1": {"video_id": "vid00000001", "ratio": 12.5, "views": 1250, "peer_median": 100.0}},
+        insight={"patterns": [{"text": "Short titles.", "evidence": ["O1", "O2"], "kind": "title"}],
+                 "per_video": [], "ideas": ["Try a question."]},
+        problems=["A problem."], status="done", error="", model="muse-spark-1.3",
+        input_tokens=100, cached_tokens=10, output_tokens=50, cost_usd=0.01, created_at="")
+    base.update(kw)
+    return OutlierReport(**base)  # type: ignore[arg-type]
+
+
+def test_outlier_reports_round_trip_and_latest(store: Store) -> None:
+    assert store.latest_outlier_report() is None
+    first = store.save_outlier_report(make_outlier_report(), now=T0)
+    second = store.save_outlier_report(
+        make_outlier_report(pull_id=None, status="too_few", cost_usd=None, labels={}, insight={}),
+        now=T0 + timedelta(minutes=1))
+    assert second > first
+    got = store.latest_outlier_report()
+    assert got == make_outlier_report(pull_id=None, status="too_few", cost_usd=None, labels={},
+                                      insight={}, id=second, created_at=(T0 + timedelta(minutes=1)).isoformat())
+
+
+def test_outlier_report_keeps_every_field(store: Store) -> None:
+    report_id = store.save_outlier_report(make_outlier_report(), now=T0)
+    assert store.latest_outlier_report() == make_outlier_report(id=report_id, created_at=T0.isoformat())
+
+
+def test_v7_database_upgrades_to_v8_and_keeps_its_data(tmp_path: Path) -> None:
+    path = tmp_path / "v7.sqlite"
+    with Store(path) as s:
+        pid = s.begin_pull("chan0000001", now=T0)
+        s.upsert_video(make_video(), pid, now=T0)
+        s.add_packaging_review(make_review(), now=T0)
+    conn = sqlite3.connect(path)  # turn it back into a version 7 database
+    conn.executescript("DROP TABLE outlier_reports; PRAGMA user_version = 7;")
+    conn.close()
+    with Store(path) as s:
+        assert s.schema_version == 8
+        assert s.get_video("vid00000001") is not None
+        assert s.latest_packaging_review("vid00000001") is not None
+        assert s.latest_outlier_report() is None
+        assert s.save_outlier_report(make_outlier_report(), now=T0) > 0
