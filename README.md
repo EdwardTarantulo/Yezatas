@@ -86,6 +86,11 @@ as it lands; the git history is the detailed record.
   - **Variant ideas.** **Muse Image** edits the current thumbnail for each idea (keeping the product as it is), code fits it to 1280x720 JPEG, Muse Spark reads the text back and the variant is flagged when it is not the text that was asked for. Each is labelled as an AI-made image and can only be downloaded: Yezatas does not upload thumbnails.
   - **Feed preview.** One page draws YouTube's desktop home grid, phone list and search results with the video (current thumbnail or a variant) among the channel's own most viewed videos, with the length badge where YouTube puts it. No model is called for it.
   - On a real 4:37 review: the check took about 30 seconds, two variants about 50 seconds; both variants kept the product and had the requested text. The whole run cost about $0.06.
+- **2026-10-31**: **own-channel outliers**: which videos beat the channel's own norm for their age, and why:
+  - **Score.** Code compares each public video's views with the median views of the 20 public videos published nearest to it, so a 2012 video is judged against 2012. Videos under 28 days old, private ones and live streams are left out. 10× or more is an outlier; 0.1× or less is below the norm. No YouTube call: it is worked out from the pulled catalog.
+  - **Explain.** **Muse Spark 1.3** sees up to 8 outliers and 8 typical videos (titles, lengths, tags, the start of the description and the thumbnails), only by labels like O1 and T1, and says what the winners share, one line per outlier and up to 3 ideas. A pattern must cite at least 2 outliers, and any line quoting a number it was not given is dropped.
+  - **Where.** An Outliers page, a line on each video page ("4.2× the channel norm for its age") and a count on the dashboard.
+  - On the real channel (381 scored videos): 66 outliers, the top one 1,191× its peers. One explanation took about 40 seconds and cost $0.026; its 3 patterns (task-style "How to" titles, a two-banner thumbnail style, quick-repair topics) each cited 4 to 6 outliers.
 
 ## Setup
 
@@ -119,11 +124,11 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 
 | Model | Where it runs | What Yezatas uses it for |
 |---|---|---|
-| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. |
+| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. |
 | Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
-| Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. |
+| Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
 | SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
 | Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download (never uploaded). |
 | Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs. |
