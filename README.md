@@ -72,6 +72,8 @@ as it lands; the git history is the detailed record.
   - **Chapters.** **Muse Spark 1.3** chooses chapter starts only by transcript segment number; code looks up the time, so the model never writes one. Code repairs the answer (unknown, repeated or too close chapters are dropped). A description that already has timestamps is never touched, and the chapters only become a draft.
     - On a real 4:37 review (its timestamps removed from a copy), 8 of the 10 chapters it chose fell within 4 seconds of one of the creator's own hand-made chapters; the other 2 were 6 to 8 seconds off.
   - **Subtitles.** The transcript downloads as an SRT file. The suggestion agent can now read the transcript, but it still may not write timestamps itself.
+- **2026-10-31**: **dark theme**: a dark set of the same colour tokens, following the system setting, with a toggle
+  in the top bar that the browser remembers. Text in both themes meets WCAG AA contrast, checked by a test.
 
 ## Setup
 

@@ -1,6 +1,8 @@
-/* Yezatas UI: a light theme in the style of a creator dashboard. Every colour is a token on :root,
-   so a dark mode can later be one more block of token overrides. No hard-coded colours below. */
+/* Yezatas UI: light and dark themes in the style of a creator dashboard. Every colour is a token on :root;
+   the dark theme is one block of overrides. No hard-coded colours below. theme.js sets data-theme on <html>
+   (the creator's choice, else the system setting). */
 :root {
+  color-scheme: light;
   --bg: #ffffff;
   --surface: #ffffff;
   --line: #e5e5e5;
@@ -16,7 +18,7 @@
   --good: #2ba640;
   --good-bg: #e6f4ea;
   --good-text: #1e7a30;
-  --warn: #b06000;
+  --warn: #a05800;
   --warn-bg: #fef7e0;
   --warn-line: #e0a526;
   --bad: #cc0000;
@@ -47,7 +49,45 @@
   --g-warn-text: #7a4b00;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f0f0f;
+  --surface: #1a1a1a;
+  --line: #3a3a3a;
+  --hover: #272727;
+  --text: #f1f1f1;
+  --muted: #aaaaaa;
+  --link: #3ea6ff;
+  --brand: #12927a;
+  --brand-text: #ffffff;
+  --primary-bg: #f1f1f1;
+  --primary-text: #0f0f0f;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --good: #4cc764;
+  --good-bg: #15301d;
+  --good-text: #81d99a;
+  --warn: #f5b552;
+  --warn-bg: #382a0f;
+  --warn-line: #b8822a;
+  --bad: #ff8a80;
+  --bad-bg: #3d1816;
+  --bad-line: #c0584f;
+  --info-bg: #172a45;
+  --info-text: #8ab4f8;
+  --code-bg: #242424;
+  --thumb-bg: #2e2e2e;
+  --diff-add-bg: #13301c;
+  --diff-add-mark: #22603a;
+  --diff-add-text: #8fe0a8;
+  --diff-del-bg: #3a1615;
+  --diff-del-mark: #742a25;
+  --diff-del-text: #ffaaa3;
+  --diff-gap-bg: #181818;
+  /* the --g-* tokens stay light: they draw pictures of Google's light console pages */
+}
+
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -106,7 +146,8 @@ code {
   padding: 0 16px; font: inherit; font-size: 15px; color: var(--text);
 }
 .search-btn { width: 52px; border: 0; border-left: 1px solid var(--line); background: var(--hover); color: var(--text); display: grid; place-items: center; cursor: pointer; }
-.top-link { justify-self: end; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: var(--muted); }
+.top-actions { justify-self: end; display: flex; align-items: center; gap: 4px; }
+.top-link { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
 .top-link:hover { background: var(--hover); }
 
 .layout { display: flex; align-items: flex-start; }

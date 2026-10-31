@@ -10,7 +10,10 @@
     <input id="q" type="search" name="q" value="{{ q|default('') }}" placeholder="Search across your channel" maxlength="200" autocomplete="off">
     <button type="submit" class="search-btn" aria-label="Search">{{ icon('search') }}</button>
   </form>
-  <a class="top-link" href="/setup" aria-label="Setup" title="Setup">{{ icon('setup') }}</a>
+  <div class="top-actions">
+    <button type="button" class="top-link" data-theme-toggle aria-pressed="false" aria-label="Dark theme" title="Dark theme" hidden>{{ icon('theme') }}</button>
+    <a class="top-link" href="/setup" aria-label="Setup" title="Setup">{{ icon('setup') }}</a>
+  </div>
 </header>
 <div class="layout">
   <nav class="sidebar" aria-label="Main">

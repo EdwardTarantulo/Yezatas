@@ -1,7 +1,21 @@
 // Polls /api/status while a sign-in, a catalog pull, a push, a suggestion, a translation, a transcript or chapters are running, then reloads the page
-// when a job finishes. Also stops double submits and shows character counters. No external code.
+// when a job finishes. Also stops double submits, shows character counters and wires the theme toggle. No external code.
 (function () {
   "use strict";
+
+  // Theme toggle in the top bar (theme.js already set the theme). Hidden without JS; pressed means dark.
+  var themeButton = document.querySelector("[data-theme-toggle]");
+  if (themeButton && window.yezatasTheme) {
+    var showTheme = function () {
+      themeButton.setAttribute("aria-pressed", window.yezatasTheme.current() === "dark" ? "true" : "false");
+    };
+    themeButton.addEventListener("click", function () {
+      window.yezatasTheme.set(window.yezatasTheme.current() === "dark" ? "light" : "dark");
+    });
+    document.addEventListener("yezatas-theme", showTheme);
+    showTheme();
+    themeButton.hidden = false;
+  }
 
   document.querySelectorAll("form").forEach(function (form) {
     form.addEventListener("submit", function () {
