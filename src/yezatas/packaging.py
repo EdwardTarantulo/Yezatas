@@ -781,8 +781,15 @@ class VariantsResult:
     variants: tuple[ThumbnailVariant, ...] = ()  # stored, with ids, in idea order
 
 
-def _same_text(a: str, b: str) -> bool:
-    return words_of(a) == words_of(b)
+def text_matches(read: str, requested: str, allowed: set[str]) -> bool:
+    """True when the requested text is on the picture word for word, and every other word read there
+    is one of the creator's own (`allowed`: a brand printed on the product, say)."""
+    got, want = words_of(read), words_of(requested)
+    for start in range(len(got) - len(want) + 1):
+        if got[start:start + len(want)] == want:
+            rest = got[:start] + got[start + len(want):]
+            return all(w in allowed for w in rest)
+    return False
 
 
 def variant_prompt(instruction: str, overlay_text: str) -> str:
@@ -823,6 +830,11 @@ def make_variants(
         return VariantsResult("failed", "The saved thumbnail is missing. Run the check again.")
 
     say = report or (lambda line: None)
+    video = store.get_video(review.video_id)
+    draft = store.get_draft(review.video_id)
+    description = draft.description if draft else (video.description if video else "")
+    allowed = set(words_of(review.title) + words_of(description)
+                  + words_of(str(review.reading.get("text") or "")))
     subject = str(review.reading.get("subject") or "")
     before = review.measurements.get("subject")
     before_share = before.get("share_pct") if isinstance(before, dict) else None
@@ -849,7 +861,7 @@ def make_variants(
                 read = _read_picture(vision, tally, jpeg, "image/jpeg")
                 record["text_read"] = read["text"]
                 if requested:
-                    record["text_ok"] = _same_text(read["text"], requested)
+                    record["text_ok"] = text_matches(read["text"], requested, allowed)
                     if not record["text_ok"]:
                         record["status"] = "flagged"
             except ModelError as exc:

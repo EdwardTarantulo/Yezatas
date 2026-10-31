@@ -733,6 +733,23 @@ def test_variant_with_other_text_is_flagged(store: Store, images: Path) -> None:
     assert result.status == "done" and "1 with text to check" in result.message
 
 
+def test_variant_text_may_have_the_creators_own_words_around_it(store: Store, images: Path) -> None:
+    # a brand printed on the product is read too; it is fine when the title or description has it
+    review_id = make_review(store, images)
+    maker = FakeMaker([made_picture(), made_picture()])
+    vision = FakeModelClient([read_back("Cactus roots REPOT IT"), read_back("BUY NOW cactus guide")])
+    first, second = make_variants(store, maker, vision, FakeSegmenter(), review_id,
+                                  images_dir=images).variants
+    assert (first.status, first.text_ok) == ("ok", True)
+    assert (second.status, second.text_ok) == ("flagged", False)  # "buy now" is nobody's words
+
+
+def test_text_matches_needs_the_whole_text_in_order() -> None:
+    assert packaging.text_matches("Acme REPLACE YOUR IRON", "replace your iron", {"acme"})
+    assert not packaging.text_matches("YOUR REPLACE IRON", "replace your iron", set())
+    assert not packaging.text_matches("REPLACE YOUR", "replace your iron", set())
+
+
 def test_variant_that_keeps_the_text_is_checked_against_the_original_text(store: Store, images: Path) -> None:
     review_id = make_review(store, images, ideas=[("Dim", ""), ("Bright", "")])
     maker = FakeMaker([made_picture(), made_picture()])
