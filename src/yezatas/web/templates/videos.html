@@ -10,6 +10,7 @@
   </div>
   <div class="chip-row" role="group" aria-label="SEO score">
     {% for chip in listing.band_chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }}</a>{% endfor %}
+    <a class="chip{% if listing.outlier_chip.active %} active{% endif %}" id="chip-outliers" href="{{ listing.outlier_chip.href }}"{% if listing.outlier_chip.active %} aria-current="true"{% endif %} title="Videos with at least this many times the views of the videos published around them">{{ listing.outlier_chip.label }}</a>
   </div>
   <div class="chip-row" role="group" aria-label="Sort by">
     <span class="chip-label">Sort by</span>
@@ -40,6 +41,7 @@
       <th class="col-vis" scope="col">Visibility</th>
       <th class="col-date" scope="col">Date</th>
       <th class="col-num" scope="col">Views</th>
+      <th class="col-ratio" scope="col">vs norm</th>
       <th class="col-score" scope="col">SEO score</th>
     </tr>
   </thead>
@@ -59,6 +61,7 @@
       <td class="col-vis">{{ e.visibility }}</td>
       <td class="col-date">{{ e.date_text }}</td>
       <td class="col-num">{{ e.views_text }}</td>
+      <td class="col-ratio">{% if e.is_outlier %}<span class="pill done" title="{{ e.ratio_title }}">{{ e.ratio_text }}</span>{% else %}<span{% if e.ratio_title %} title="{{ e.ratio_title }}"{% endif %}>{{ e.ratio_text }}</span>{% endif %}</td>
       <td class="col-score">{{ score_badge(e.card.score, e.band) }}</td>
     </tr>
     {% endfor %}

@@ -48,6 +48,7 @@ SORTS: tuple[tuple[str, str], ...] = (
     ("score", "Lowest score"),
     ("views", "Most views"),
     ("newest", "Newest"),
+    ("norm", "vs norm"),
 )
 SORT_KEYS = tuple(s[0] for s in SORTS)
 VISIBILITIES: tuple[tuple[str, str], ...] = (
@@ -107,6 +108,16 @@ def bar_class(count: int, total: int) -> str:
     return f"w-{min(100, max(5, round(100 * count / total / 5) * 5))}"
 
 
+# why a video has no "vs norm" ratio, by OutlierScore.status
+RATIO_WHY = {
+    "too_new": f"Too new to compare: videos need {MIN_AGE_DAYS} days of views first",
+    "not_public": "Only public videos are compared",
+    "no_duration": "Live streams are not compared",
+    "few_peers": "Not enough other public videos from around the same time to compare with",
+    "no_views": "The videos around it have no views, so there is no norm to compare with",
+}
+
+
 # --- entries ----------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Entry:
@@ -114,6 +125,29 @@ class Entry:
 
     video: Video
     card: Scorecard
+    score: OutlierScore | None = None  # how its views compare with its peers; set for the content table
+
+    @property
+    def is_outlier(self) -> bool:
+        s = self.score
+        return s is not None and s.status == "scored" and s.ratio is not None and s.ratio >= OUTLIER_THRESHOLD
+
+    @property
+    def ratio_text(self) -> str:
+        """The views against the norm, as outliers.ratio_label writes it ("—" when there is none)."""
+        s = self.score
+        return ratio_label(s.ratio if s is not None and s.status == "scored" else None)
+
+    @property
+    def ratio_title(self) -> str:
+        """The tooltip of the vs norm cell: why there is no ratio, or what the ratio means."""
+        s = self.score
+        if s is None:
+            return ""
+        if s.status == "scored" and s.ratio is not None:
+            return (f"Views divided by the median views of the {len(s.peer_ids)} public videos "
+                    "published nearest to this one")
+        return RATIO_WHY.get(s.status if s.status != "scored" else "no_views", "")
 
     @property
     def band(self) -> str:
@@ -210,7 +244,7 @@ def _page_number(raw: str | None) -> int:
 
 
 def listing_href(q: str = "", sort: str = "fix", visibility: str = "all", band: str = "",
-                 check: str = "", page: int = 1) -> str:
+                 check: str = "", page: int = 1, outliers: bool = False) -> str:
     """A /videos URL that carries only the non-default parameters."""
     params: list[tuple[str, str]] = []
     if q:
@@ -223,6 +257,8 @@ def listing_href(q: str = "", sort: str = "fix", visibility: str = "all", band: 
         params.append(("band", band))
     if check:
         params.append(("check", check))
+    if outliers:
+        params.append(("outliers", "1"))
     if page > 1:
         params.append(("page", str(page)))
     return "/videos" + (f"?{urlencode(params)}" if params else "")
@@ -250,6 +286,8 @@ class Listing:
     visibility_chips: list[Chip] = field(default_factory=list)
     band_chips: list[Chip] = field(default_factory=list)
     sort_chips: list[Chip] = field(default_factory=list)
+    outliers: bool = False
+    outlier_chip: Chip | None = None
     prev_href: str = ""
     next_href: str = ""
     clear_check_href: str = ""
@@ -285,18 +323,31 @@ def _sort(entries: list[Entry], sort: str) -> list[Entry]:
     if sort == "newest":
         return sorted(entries, key=lambda e: (e.video.published_at or "", e.video.video_id),
                       reverse=True)
+    if sort == "norm":  # highest ratio first; videos without a ratio last
+        def norm_key(e: Entry) -> tuple[int, float, str]:
+            s = e.score
+            ratio = s.ratio if s is not None and s.status == "scored" else None
+            return (1, 0.0, e.video.video_id) if ratio is None else (0, -ratio, e.video.video_id)
+
+        return sorted(entries, key=norm_key)
     return sorted(entries, key=lambda e: (-e.priority, -e.card.missing, e.video.video_id))
 
 
-def build_listing(entries: Sequence[Entry], params: Mapping[str, str]) -> Listing:
-    """Filter, sort and paginate. Unknown values fall back to the defaults; never raises."""
+def build_listing(entries: Sequence[Entry], params: Mapping[str, str],
+                  scores: Mapping[str, OutlierScore] | None = None) -> Listing:
+    """Filter, sort and paginate. Unknown values fall back to the defaults; never raises.
+
+    `scores` (video id -> OutlierScore) feeds the vs norm column, its sort and the Outliers filter."""
     q = (params.get("q") or "").strip()[:MAX_QUERY_CHARS]
     sort = _pick(params.get("sort"), SORT_KEYS, "fix")
     visibility = _pick(params.get("visibility"), VISIBILITY_KEYS, "all")
     band = _pick(params.get("band"), BAND_KEYS, "")
     check = (params.get("check") or "").strip()[:100]
+    only_outliers = (params.get("outliers") or "").strip() == "1"
 
     rows = list(entries)
+    if scores:
+        rows = [replace(e, score=scores.get(e.video.video_id)) for e in rows]
     if q:
         needle = q.casefold()
         rows = [e for e in rows if _matches(e, needle)]
@@ -304,6 +355,8 @@ def build_listing(entries: Sequence[Entry], params: Mapping[str, str]) -> Listin
         rows = [e for e in rows if e.video.privacy_status == visibility]
     if band:
         rows = [e for e in rows if e.band == band]
+    if only_outliers:
+        rows = [e for e in rows if e.is_outlier]
     check_title = ""
     if check:
         for e in entries:
@@ -323,7 +376,7 @@ def build_listing(entries: Sequence[Entry], params: Mapping[str, str]) -> Listin
 
     def href(**changes: object) -> str:
         args: dict[str, object] = {"q": q, "sort": sort, "visibility": visibility, "band": band,
-                                   "check": check, "page": 1}
+                                   "check": check, "outliers": only_outliers, "page": 1}
         args.update(changes)
         return listing_href(**args)  # type: ignore[arg-type]
 
@@ -335,10 +388,13 @@ def build_listing(entries: Sequence[Entry], params: Mapping[str, str]) -> Listin
         band_chips=[Chip("Any score", href(band=""), band == "")]
         + [Chip(f"{label} ({rng})", href(band=key), key == band) for key, label, rng in BANDS],
         sort_chips=[Chip(label, href(sort=key), key == sort) for key, label in SORTS],
+        outliers=only_outliers,
+        outlier_chip=Chip(f"Outliers ({ratio_label(OUTLIER_THRESHOLD)}+)",
+                          href(outliers=not only_outliers), only_outliers),
         prev_href=href(page=page - 1) if page > 1 else "",
         next_href=href(page=page + 1) if page < pages else "",
         clear_check_href=href(check=""),
-        filtered=bool(q or check or band or visibility != "all"),
+        filtered=bool(q or check or band or only_outliers or visibility != "all"),
     )
     return listing
 
@@ -1142,8 +1198,10 @@ def _variant_view(video_id: str, variant: ThumbnailVariant) -> VariantView:
         after = subject.get("after")
         share = _whole(after.get("share_pct")) if isinstance(after, dict) and after.get("found") else None
         was = "not measured" if before is None else f"{before}%"
-        now = "not found" if share is None else f"{share}%"
-        change = f"Subject share: {was} → {now}"
+        if share is None:
+            change = f"Subject share: {was} before; not found in the variant"
+        else:
+            change = f"Subject share: {was} → {share}%"
     return VariantView(
         id=variant.id, label=label, tone=tone, instruction=variant.instruction,
         overlay=variant.overlay_text, image_url=base if made else "",

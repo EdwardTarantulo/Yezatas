@@ -208,6 +208,11 @@ def map_packaging_error(exc: BaseException) -> tuple[str, str]:
     return "packaging", f"The packaging check stopped unexpectedly ({exc.__class__.__name__})."
 
 
+def has_meta_key(config: Config) -> bool:
+    """Whether a Meta API key is set (environment or saved). Reads the key only; builds no client."""
+    return bool(agent.load_api_key(config))
+
+
 def map_outliers_error(exc: BaseException) -> tuple[str, str]:
     if isinstance(exc, agent.ModelError):
         return exc.kind, str(exc)
@@ -355,6 +360,7 @@ class WebState:
         chapters_fn: ChaptersFn | None = None,
         packaging_tools: PackagingToolsFactory = packaging_mod.packaging_tools_from_config,
         packaging_fetch: Callable[[str], bytes] = packaging_mod.fetch_thumbnail,
+        packaging_key: Callable[[Config], bool] | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -368,6 +374,9 @@ class WebState:
         self._transcribe = transcribe_fn or make_default_transcribe(config)
         self._chapters = chapters_fn or make_default_chapters(config)
         self.packaging_tools = packaging_tools
+        # Whether a Meta key exists, asked on page loads without building any client. None: an
+        # injected packaging_tools factory (tests) answers instead.
+        self.packaging_key = packaging_key
         self._packaging_fetch = packaging_fetch
         self.images_dir = config.home / "thumbnails"  # review pictures and variants, by file name
         self.signin_job = Job(
@@ -891,6 +900,7 @@ def create_app(
     chapters: ChaptersFn | None = None,
     packaging_tools: PackagingToolsFactory | None = None,
     packaging_fetch: Callable[[str], bytes] | None = None,
+    packaging_key: Callable[[Config], bool] | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -902,7 +912,8 @@ def create_app(
                      suggest or make_default_suggest(config),
                      tools, transcribe, chapters,
                      packaging_tools or packaging_mod.packaging_tools_from_config,
-                     packaging_fetch or packaging_mod.fetch_thumbnail)
+                     packaging_fetch or packaging_mod.fetch_thumbnail,
+                     packaging_key or (None if packaging_tools else has_meta_key))
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -1135,6 +1146,12 @@ def create_app(
         except Exception:  # noqa: BLE001
             return None
 
+    def has_packaging_key() -> bool:
+        """Page loads only need to know that a key exists: no SAM, image or vision client is built."""
+        if state.packaging_key is not None:
+            return bool(state.packaging_key(config))
+        return packaging_tools_or_none() is not None  # a factory injected by a test decides
+
     def packaging_panel(video_id: str) -> dict[str, Any]:
         """What the packaging and variants jobs are doing, for one video page (worker thread)."""
         snap, job_video = state.packaging_state()
@@ -1149,7 +1166,7 @@ def create_app(
                 snap.result, packaging_mod.VariantsResult):
             making["done"] = {"tone": "ok" if snap.result.status == "done" else "error",
                               "text": snap.result.message}
-        return {"has_tools": packaging_tools_or_none() is not None,
+        return {"has_tools": has_packaging_key(),
                 "vision": config.model, "segmenter": packaging_mod.SAM_MODEL,
                 "maker": packaging_mod.IMAGE_MODEL, "check": checking, "variants": making}
 
@@ -1182,7 +1199,8 @@ def create_app(
         data = catalog_data()
         if data is None:
             return back_to_setup()
-        listing = build_listing(data["entries"], dict(request.query_params))
+        scores = {s.video_id: s for s in outlier_scores(data)}
+        listing = build_listing(data["entries"], dict(request.query_params), scores)
         return render(request, "videos.html", {"active": "content", "listing": listing,
                                                "q": listing.q, "draft_ids": draft_ids()})
 
@@ -1328,7 +1346,7 @@ def create_app(
         snap = state.outliers_state()
         return render(request, "outliers.html", {
             "active": "outliers", "ov": view, "as_of": _local_time(as_of.isoformat()),
-            "has_key": packaging_tools_or_none() is not None, "model": config.model,
+            "has_key": has_packaging_key(), "model": config.model,
             "running": snap.running, "message": snap.message,
             "failed": snap.message if snap.status == "failed" else "",
             "poll": snap.running,
