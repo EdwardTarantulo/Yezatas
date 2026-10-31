@@ -89,8 +89,9 @@ as it lands; the git history is the detailed record.
 - **2026-10-31**: **own-channel outliers**: which videos beat the channel's own norm for their age, and why:
   - **Score.** Code compares each public video's views with the median views of the 20 public videos published nearest to it, so a 2012 video is judged against 2012. Videos under 28 days old, private ones and live streams are left out. 10× or more is an outlier; 0.1× or less is below the norm. No YouTube call: it is worked out from the pulled catalog.
   - **Explain.** **Muse Spark 1.3** sees up to 8 outliers and 8 typical videos (titles, lengths, tags, the start of the description and the thumbnails), only by labels like O1 and T1, and says what the winners share, one line per outlier and up to 3 ideas. A pattern must cite at least 2 outliers, and any line quoting a number it was not given is dropped.
-  - **Where.** An Outliers page, a line on each video page ("4.2× the channel norm for its age") and a count on the dashboard.
+  - **Where.** An Outliers page, a line on each video page ("4.2× the channel norm for its age"), a count on the dashboard, and a "vs norm" column, sort and filter on the Content table.
   - On the real channel (381 scored videos): 66 outliers, the top one 1,191× its peers. One explanation took about 40 seconds and cost $0.026; its 3 patterns (task-style "How to" titles, a two-banner thumbnail style, quick-repair topics) each cited 4 to 6 outliers.
+- **2026-10-31**: **demo run-through on the real channel**: the chapter check now names the chapters YouTube would not show (each must be at least 10 seconds) instead of a general rule. On the demo video it found two 9-second chapters, which can stop YouTube from showing any chapters at all.
 
 ## Setup
 
