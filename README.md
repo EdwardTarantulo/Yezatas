@@ -101,15 +101,18 @@ with troubleshooting, is [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md).
 
 ## Meta models used
 
-| Model | Role |
-|---|---|
-| Muse Spark 1.3 | Suggestion agent (tool calls, structured JSON), vision critique, chapter titles |
-| Muse Spark Open | Bulk translation of titles, descriptions and subtitles |
-| Muse Glimmer | Independent reviewer: blind back-translation and scoring of every translation |
-| Muse Voice Transcribe | Timed transcripts for chapters and subtitles |
-| SAM 3.1 | Thumbnail subject segmentation (supporting the thumbnail coach) |
-| Muse Image | Thumbnail variant ideas |
-| Muse Code | Coding agent: built the edit validator and the draft diff model during the hackathon |
+Only models that Yezatas really calls, or that really wrote part of it, are listed.
+
+| Model | Where it runs | What Yezatas uses it for |
+|---|---|---|
+| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. |
+| Muse Spark Open | Baseten | Translating titles and descriptions. |
+| Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation: a blind back-translation, then a comparison with the original and a score. |
+| Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
+| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs. |
+
+Earlier plans also listed SAM 3.1 and Muse Image (a thumbnail coach), Muse Spark's vision (a thumbnail critique) and
+subtitle translation. None of these is built, so none is listed above.
 
 ## License
 
