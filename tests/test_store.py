@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from yezatas.store import (MIGRATIONS, DraftRow, PushRecord, Store, SubtitleTranslationRecord,
+from yezatas.store import (MIGRATIONS, DraftRow, PackagingReview, PushRecord, Store,
+                           SubtitleTranslationRecord, ThumbnailVariant,
                            TranscriptRecord, TranslationRecord, Video)
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
@@ -41,7 +42,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 6
+        assert s.schema_version == len(MIGRATIONS) == 7
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -51,7 +52,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 6
+        assert s.schema_version == 7
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -148,10 +149,11 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
     conn = sqlite3.connect(path)  # turn it back into a version 1 database
     conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; "
                        "DROP TABLE translations; DROP TABLE transcripts; DROP TABLE subtitle_translations; "
+                       "DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; "
                        "PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 6
+        assert s.schema_version == 7
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -172,6 +174,7 @@ def test_v3_drafts_get_the_catalog_language_as_their_base(tmp_path: Path) -> Non
         s.put_draft(make_draft("vid00000002"))
     conn = sqlite3.connect(path)  # turn it back into a version 3 database
     conn.executescript(
+        "DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; "
         "DROP TABLE subtitle_translations; DROP TABLE transcripts; DROP TABLE translations; "
         "ALTER TABLE drafts DROP COLUMN default_language; "
         "ALTER TABLE drafts DROP COLUMN localizations_json; "
@@ -385,12 +388,83 @@ def test_v5_database_upgrades_to_v6_and_keeps_its_data(tmp_path: Path) -> None:
                                           [{"start_ms": 0, "end_ms": 5000, "text": "Hello"}], [], ""),
                          now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 5 database
-    conn.executescript("DROP TABLE subtitle_translations; PRAGMA user_version = 5;")
+    conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; "
+                       "DROP TABLE subtitle_translations; PRAGMA user_version = 5;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 6
+        assert s.schema_version == 7
         assert s.get_video("vid00000001") is not None and s.get_draft("vid00000001") is not None
         transcript = s.latest_transcript("vid00000001")
         assert transcript is not None and transcript.segments[0]["text"] == "Hello"
         assert s.list_subtitle_translations("vid00000001") == []
         assert s.add_subtitle_translation(make_subtitles("es"), now=T0) > 0
+
+
+def make_review(video_id: str = "vid00000001", status: str = "done", **kw: object) -> PackagingReview:
+    base: dict[str, object] = dict(
+        id=0, video_id=video_id, title="How to repot a cactus", thumbnail_url="https://i.ytimg.com/x.jpg",
+        image_file="thumb_1.jpg", measurements={"width": 1280, "brightness": 90},
+        reading={"text": "REPOT IT 🌵", "subject": "cactus"},
+        critique={"points": ["Bigger text."], "ideas": [{"instruction": "Zoom in", "overlay_text": "REPOT"}]},
+        problems=["A problem."], status=status, error="", models={"vision": "m", "segmenter": "s"},
+        input_tokens=100, cached_tokens=10, output_tokens=50, cost_usd=0.01, created_at="")
+    base.update(kw)
+    return PackagingReview(**base)  # type: ignore[arg-type]
+
+
+def make_variant(review_id: int, text_ok: bool | None = True, **kw: object) -> ThumbnailVariant:
+    base: dict[str, object] = dict(
+        id=0, review_id=review_id, video_id="vid00000001", instruction="Zoom in", overlay_text="REPOT",
+        image_file="variant_1.jpg", text_read="REPOT", text_ok=text_ok, measurements={"share": 40},
+        status="ok", error="", model="muse-image-1.0", cost_usd=0.0135, created_at="")
+    base.update(kw)
+    return ThumbnailVariant(**base)  # type: ignore[arg-type]
+
+
+def test_packaging_reviews_round_trip_and_latest(store: Store) -> None:
+    assert store.latest_packaging_review("vid00000001") is None
+    first = store.add_packaging_review(make_review(), now=T0)
+    second = store.add_packaging_review(make_review(status="failed", error="Nope.", cost_usd=None),
+                                        now=T0 + timedelta(hours=1))
+    store.add_packaging_review(make_review("vid00000002"), now=T0)
+    got = store.get_packaging_review(first)
+    assert got == make_review(id=first, created_at=T0.isoformat())
+    assert got is not None and got.reading["text"] == "REPOT IT 🌵"
+    latest = store.latest_packaging_review("vid00000001")
+    assert latest is not None and latest.id == second and latest.status == "failed"
+    assert latest.cost_usd is None and latest.error == "Nope."
+    assert store.get_packaging_review(999) is None
+
+
+def test_thumbnail_variants_round_trip(store: Store) -> None:
+    review = store.add_packaging_review(make_review(), now=T0)
+    a = store.add_thumbnail_variant(make_variant(review), now=T0)
+    b = store.add_thumbnail_variant(make_variant(review, text_ok=False, status="flagged"), now=T0)
+    c = store.add_thumbnail_variant(make_variant(review, text_ok=None, image_file="", status="failed",
+                                                 error="Bad.", cost_usd=None), now=T0)
+    store.add_thumbnail_variant(make_variant(review + 1), now=T0)
+    assert [v.id for v in store.list_thumbnail_variants(review)] == [a, b, c]
+    assert store.get_thumbnail_variant(a) == make_variant(review, created_at=T0.isoformat(), id=a)
+    got_b, got_c = store.get_thumbnail_variant(b), store.get_thumbnail_variant(c)
+    assert got_b is not None and got_b.text_ok is False
+    assert got_c is not None and got_c.text_ok is None and got_c.cost_usd is None
+    assert store.get_thumbnail_variant(999) is None
+
+
+def test_v6_database_upgrades_to_v7_and_keeps_its_data(tmp_path: Path) -> None:
+    path = tmp_path / "v6.sqlite"
+    with Store(path) as s:
+        pid = s.begin_pull("chan0000001", now=T0)
+        s.upsert_video(make_video(), pid, now=T0)
+        s.add_subtitle_translation(make_subtitles("es"), now=T0)
+    conn = sqlite3.connect(path)  # turn it back into a version 6 database
+    conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; "
+                       "PRAGMA user_version = 6;")
+    conn.close()
+    with Store(path) as s:
+        assert s.schema_version == 7
+        assert s.get_video("vid00000001") is not None
+        assert len(s.list_subtitle_translations("vid00000001")) == 1
+        assert s.latest_packaging_review("vid00000001") is None
+        review = s.add_packaging_review(make_review(), now=T0)
+        assert s.add_thumbnail_variant(make_variant(review), now=T0) > 0

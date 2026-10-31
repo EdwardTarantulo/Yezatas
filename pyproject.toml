@@ -19,6 +19,7 @@ dependencies = [
     "jinja2",
     "python-multipart",
     "openai",
+    "pillow",
 ]
 
 [project.optional-dependencies]
