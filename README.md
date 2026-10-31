@@ -74,6 +74,12 @@ as it lands; the git history is the detailed record.
   - **Subtitles.** The transcript downloads as an SRT file. The suggestion agent can now read the transcript, but it still may not write timestamps itself.
 - **2026-10-31**: **dark theme**: a dark set of the same colour tokens, following the system setting, with a toggle
   in the top bar that the browser remembers. Text in both themes meets WCAG AA contrast, checked by a test.
+- **2026-10-31**: **subtitles in other languages**, checked like the titles:
+  - **Translate.** **Muse Spark Open** gets the transcript's segments as numbered lines and translates the text only. Code copies every start and end time from the transcript, so the model never sees or writes a time.
+  - **Code checks.** Every segment must come back once, every number in a segment must survive (1,000, 1.000 and 1 000 count as the same), and links, @handles, hashtags and emails must be kept.
+  - **Independent check.** **Muse Glimmer** translates the subtitles back blind, in chunks, compares them with the original and scores them. One failed batch fails the whole language: no partial subtitles.
+  - **Download.** Each language downloads as an SRT file. Yezatas does not upload subtitles to YouTube.
+  - On a real 4:37 review, Spanish, German and Lithuanian were all verified (5/5) with every time identical to the transcript's. Translating took 14 seconds; Glimmer's check took 3 to 5 minutes per language on the creator's PC.
 
 ## Setup
 
@@ -108,13 +114,13 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 | Model | Where it runs | What Yezatas uses it for |
 |---|---|---|
 | Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. |
-| Muse Spark Open | Baseten | Translating titles and descriptions. |
-| Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation: a blind back-translation, then a comparison with the original and a score. |
+| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
+| Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs. |
 
-Earlier plans also listed SAM 3.1 and Muse Image (a thumbnail coach), Muse Spark's vision (a thumbnail critique) and
-subtitle translation. None of these is built, so none is listed above.
+Earlier plans also listed SAM 3.1 and Muse Image (a thumbnail coach) and Muse Spark's vision (a thumbnail critique).
+None of these is built, so none is listed above.
 
 ## License
 
