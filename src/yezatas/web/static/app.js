@@ -1,4 +1,4 @@
-// Polls /api/status while a sign-in, a catalog pull, a push, a suggestion or a translation is running, then reloads the page
+// Polls /api/status while a sign-in, a catalog pull, a push, a suggestion, a translation, a transcript or chapters are running, then reloads the page
 // when a job finishes. Also stops double submits and shows character counters. No external code.
 (function () {
   "use strict";
@@ -81,7 +81,7 @@
     fetch("/api/status", { credentials: "same-origin", headers: { "X-CSRF-Token": csrf } })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("status " + r.status)); })
       .then(function (s) {
-        var jobs = ["signin", "pull", "write", "push", "suggest", "translate"];
+        var jobs = ["signin", "pull", "write", "push", "suggest", "translate", "transcribe", "chapters"];
         var running = jobs.some(function (name) { return s[name] && s[name].status === "running"; });
         if (running) {
           seenRunning = true;

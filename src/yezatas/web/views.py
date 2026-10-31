@@ -16,8 +16,10 @@ from .. import edits
 from ..agent import estimate_cost
 from ..diffs import DraftDiff, diff_row
 from ..push import PushItem
-from ..seo import CATEGORIES, CheckResult, Scorecard, fix_priority
-from ..store import AgentRun, DraftRow, PushRecord, TranslationRecord, Video
+from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, fix_priority,
+                   parse_chapters, parse_duration)
+from ..store import AgentRun, DraftRow, PushRecord, TranscriptRecord, TranslationRecord, Video
+from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
 from ..validate import Issue, has_errors
 
@@ -862,4 +864,74 @@ def build_translate_view(video: Video, row: DraftRow | None,
         sources=sources, language_known=bool(selected), targets=tuple(targets),
         results=tuple(results), addable_count=sum(1 for r in results if r.addable),
         in_draft=tuple(listed),
+    )
+
+
+# --- transcripts and chapters ---------------------------------------------------------------------
+@dataclass(frozen=True)
+class TranscriptView:
+    """What the "Transcript and chapters" card shows besides the job state."""
+
+    video_language_label: str  # the video's own language ("Not set" when it has none)
+    language_known: bool  # that language is one transcription supports, so it is preselected
+    language_set: bool  # the video has a language at all
+    languages: tuple[SourceOption, ...]
+    price: str  # "$0.18"
+    model: str
+    record: TranscriptRecord | None
+    spoken: str  # the language the transcript was made in, by name
+    when: str
+    length: str
+    cost: str
+    text: str  # the m:ss lines
+    line_count: int
+    blocker: str  # why "Make chapters" is off ("" when it is on)
+
+
+def _base_code(code: str | None) -> str:
+    return (code or "").replace("_", "-").split("-", 1)[0].lower()
+
+
+def chapters_blocker(video: Video, row: DraftRow | None, record: TranscriptRecord | None) -> str:
+    """Why chapters cannot be made now, in a sentence, or "" when they can."""
+    if record is None:
+        return "Transcribe the video first."
+    seconds = parse_duration(video.duration)
+    if seconds is None:
+        seconds = record.duration_ms // 1000
+    if seconds < CHAPTERS_MIN_DURATION:
+        return (f"Chapters only help on videos of {CHAPTERS_MIN_DURATION // 60} minutes or more; "
+                "this one is shorter.")
+    text = row.description if row is not None else video.description
+    if parse_chapters(text):
+        return ("The description already has timestamps. Yezatas never rewrites your own "
+                "chapters; remove them first if you want new ones.")
+    if not any(str(s.get("text") or "").strip() for s in record.segments):
+        return "The transcript has no text to make chapters from."
+    return ""
+
+
+def build_transcript_view(video: Video, row: DraftRow | None, record: TranscriptRecord | None,
+                          when: str = "") -> TranscriptView:
+    """The language choice, the latest transcript as `m:ss text` lines and the chapters check."""
+    code = _base_code(video.default_audio_language) or _base_code(video.default_language)
+    selected = code if code in ASR_LANGUAGES else ""
+    languages = tuple(SourceOption(c, n, c == selected) for c, n in ASR_LANGUAGES.items())
+    lines = []
+    if record is not None:
+        for segment in record.segments:
+            text = " ".join(str(segment.get("text") or "").split())
+            if text:
+                lines.append(f"{clock(int(segment['start_ms']))} {text}")
+    return TranscriptView(
+        video_language_label=lang_name(video.default_audio_language or video.default_language),
+        language_known=bool(selected), language_set=bool(code), languages=languages,
+        price=f"${ASR_PRICE_PER_HOUR:.2f}", model=record.model if record is not None else ASR_MODEL,
+        record=record,
+        spoken=ASR_LANGUAGES.get(record.language, record.language) if record is not None else "",
+        when=when, length=clock(record.duration_ms) if record is not None else "",
+        cost=(format_cost(record.duration_ms / 3_600_000 * ASR_PRICE_PER_HOUR)
+              if record is not None else ""),
+        text="\n".join(lines), line_count=len(lines),
+        blocker=chapters_blocker(video, row, record),
     )

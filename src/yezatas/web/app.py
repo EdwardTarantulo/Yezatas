@@ -26,12 +26,16 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
-from .. import agent, auth, edits, push, translate
+from .. import agent, auth, edits, push
+from .. import chapters as chapters_mod
+from .. import transcribe as transcribe_mod
+from .. import translate
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
 from ..quota import QuotaGuard
 from ..seo import score_catalog
 from ..store import Store
+from ..subtitles import to_srt
 from ..youtube import GoogleYouTubeReader, GoogleYouTubeWriter, YouTubeReader, YouTubeWriter
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
                          parse_client_file, read_saved_client, save_client_file)
@@ -40,9 +44,10 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (Entry, RunView, SuggestBatch, SuggestItem, build_listing, build_translate_view,
-                    change_cards, dashboard_model, format_count, format_date, group_checks, history_rows,
-                    lang_name, make_entries, plan_lines, push_results, run_view, stops_batch, thumb_url)
+from .views import (Entry, RunView, SuggestBatch, SuggestItem, build_listing, build_transcript_view,
+                    build_translate_view, change_cards, chapters_blocker, dashboard_model,
+                    format_cost, format_count, format_date, group_checks, history_rows, lang_name,
+                    make_entries, plan_lines, push_results, run_view, stops_batch, thumb_url)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -67,6 +72,19 @@ TRANSLATE_TIMEOUT_MESSAGE = (
     "The translation took more than 30 minutes, so Yezatas stopped waiting. Translations that "
     "finished are kept below."
 )
+TRANSCRIBE_TIMEOUT_SECONDS = 60 * 60.0
+TRANSCRIBE_TIMEOUT_MESSAGE = (
+    "The transcription took more than 60 minutes, so Yezatas stopped waiting. Try again, or use a "
+    "shorter file."
+)
+CHAPTERS_TIMEOUT_SECONDS = 10 * 60.0
+CHAPTERS_TIMEOUT_MESSAGE = (
+    "Making the chapters took more than 10 minutes, so Yezatas stopped waiting. The Agent log "
+    "shows what finished."
+)
+MAX_PATH_CHARS = 1000
+MAX_KEYWORDS = 20
+MAX_KEYWORD_CHARS = 40
 FIX_NEXT_COUNTS = (1, 3, 5, 10)
 MAX_KEY_CHARS = 500
 
@@ -77,6 +95,9 @@ WriterFactory = Callable[[Any], YouTubeWriter]
 CredentialsLoader = Callable[[Config], Any]
 SuggestFn = Callable[[Store, str, Report], "agent.SuggestResult"]
 TranslateTools = Callable[[Config], "tuple[translate.Translator | None, translate.Verifier]"]
+# (store, video id, media path, language, report); `keywords=` is added only when the creator typed some.
+TranscribeFn = Callable[..., "transcribe_mod.TranscribeResult"]
+ChaptersFn = Callable[[Store, str, Report], "chapters_mod.ChaptersResult"]
 
 
 def default_translate_tools(config: Config) -> "tuple[translate.Translator | None, translate.Verifier]":
@@ -145,6 +166,86 @@ def map_translate_error(exc: BaseException) -> tuple[str, str]:
     return "translate", f"The translation stopped unexpectedly ({exc.__class__.__name__})."
 
 
+def map_transcribe_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, transcribe_mod.TranscribeError):
+        return exc.kind, str(exc)
+    if type(exc) is ValueError:  # transcribe_video's own plain sentences
+        return "transcribe", str(exc)
+    return "transcribe", f"The transcription stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def map_chapters_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, (agent.AgentError, agent.ModelError)):
+        return getattr(exc, "kind", "chapters"), str(exc)
+    if type(exc) is ValueError:
+        return "chapters", str(exc)
+    return "chapters", f"Making the chapters stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def make_default_transcribe(config: Config) -> TranscribeFn:
+    """The real transcribe function: Muse Voice Transcribe through Meta's Model API."""
+
+    def run(store: Store, video_id: str, media_path: str, language: str, report: Report,
+            keywords: Sequence[str] = ()) -> "transcribe_mod.TranscribeResult":
+        key = agent.load_api_key(config)
+        if not key:
+            raise transcribe_mod.TranscribeError(
+                "auth", "No Meta API key is set. Add one in Setup. Nothing was sent.")
+        client = transcribe_mod.MetaAsrClient(key)
+        return transcribe_mod.transcribe_video(store, client, video_id, media_path, language,
+                                               keywords=keywords, report=report)
+
+    return run
+
+
+def make_default_chapters(config: Config) -> ChaptersFn:
+    """The real chapters function: Muse Spark picks transcript segments, code makes the times."""
+
+    def run(store: Store, video_id: str, report: Report) -> "chapters_mod.ChaptersResult":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.AgentError("No Meta API key is set. Add one in Setup.")
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        return chapters_mod.suggest_chapters(store, client, video_id, report=report)
+
+    return run
+
+
+def hide_path(exc: BaseException, media: Path) -> BaseException:
+    """The same error with the file's folder taken out of its sentence (only the name stays)."""
+    text = str(exc)
+    shown = text
+    for variant in (str(media), media.as_posix(), str(media).replace("\\", "\\\\")):
+        shown = shown.replace(variant, media.name)
+    for variant in (str(media.parent), media.parent.as_posix()):
+        if len(variant) > 1:
+            shown = shown.replace(variant, "...")
+    if shown == text:
+        return exc
+    if isinstance(exc, transcribe_mod.TranscribeError):
+        return transcribe_mod.TranscribeError(exc.kind, shown)
+    if type(exc) is ValueError:
+        return ValueError(shown)
+    return exc
+
+
+def parse_keywords(raw: str) -> tuple[list[str], str]:
+    """(names to recognise, "") from a comma separated line, or ([], the problem in a sentence)."""
+    words: list[str] = []
+    for part in raw.replace("\n", ",").split(","):
+        word = " ".join(part.split())
+        if word and word.casefold() not in {w.casefold() for w in words}:
+            words.append(word)
+    if len(words) > MAX_KEYWORDS:
+        return [], f"Give at most {MAX_KEYWORDS} names to recognise. Nothing was sent."
+    if any(len(w) > MAX_KEYWORD_CHARS for w in words):
+        return [], (f"Each name to recognise can be at most {MAX_KEYWORD_CHARS} characters. "
+                    "Nothing was sent.")
+    return words, ""
+
+
 def make_default_suggest(config: Config) -> SuggestFn:
     """The real suggest function: Muse Spark through Meta's Model API, one client per run.
 
@@ -192,6 +293,8 @@ class WebState:
         writer_factory: WriterFactory,
         suggest: SuggestFn,
         translate_tools: TranslateTools = default_translate_tools,
+        transcribe_fn: TranscribeFn | None = None,
+        chapters_fn: ChaptersFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -202,6 +305,8 @@ class WebState:
         self._writer_factory = writer_factory
         self._suggest = suggest
         self._translate_tools = translate_tools
+        self._transcribe = transcribe_fn or make_default_transcribe(config)
+        self._chapters = chapters_fn or make_default_chapters(config)
         self.signin_job = Job(
             map_sign_in_error, sign_in_timeout, SIGN_IN_TIMEOUT_MESSAGE, clock
         )
@@ -218,6 +323,14 @@ class WebState:
                                  TRANSLATE_TIMEOUT_MESSAGE, clock)
         self._translate_seen: JobSnapshot | None = None  # the finished job the creator dismissed
         self._translate_video = ""
+        self.transcribe_job = Job(map_transcribe_error, TRANSCRIBE_TIMEOUT_SECONDS,
+                                  TRANSCRIBE_TIMEOUT_MESSAGE, clock)
+        self._transcribe_seen: JobSnapshot | None = None  # the finished job the creator dismissed
+        self._transcribe_video = ""
+        self.chapters_job = Job(map_chapters_error, CHAPTERS_TIMEOUT_SECONDS,
+                                CHAPTERS_TIMEOUT_MESSAGE, clock)
+        self._chapters_seen: JobSnapshot | None = None
+        self._chapters_video = ""
         self._lock = threading.Lock()
         self._check_lock = threading.Lock()
         self._check: CheckState | None = None
@@ -462,6 +575,75 @@ class WebState:
             with self._lock:
                 self._translate_seen = snap
 
+    # --- transcripts and chapters -------------------------------------------------------------
+    def start_transcribe(self, video_id: str, media: Path, language: str,
+                         keywords: Sequence[str]) -> bool:
+        """Transcribe the video file at `media` (kept in memory only), in the one transcribe job."""
+        words = tuple(keywords)
+
+        def work(report: Report) -> "transcribe_mod.TranscribeResult":
+            return self._run_transcribe(video_id, media, language, words, report)
+
+        if not self.transcribe_job.start(work):
+            return False
+        with self._lock:
+            self._transcribe_video = video_id
+        return True
+
+    def _run_transcribe(self, video_id: str, media: Path, language: str,
+                        keywords: tuple[str, ...], report: Report
+                        ) -> "transcribe_mod.TranscribeResult":
+        with Store(self.config.catalog_db) as store:
+            try:
+                if keywords:
+                    return self._transcribe(store, video_id, str(media), language, report,
+                                            keywords=keywords)
+                return self._transcribe(store, video_id, str(media), language, report)
+            except Exception as exc:  # noqa: BLE001 - pages show the file name, never its folder
+                hidden = hide_path(exc, media)
+                if hidden is exc:
+                    raise
+                raise hidden from None
+
+    def transcribe_state(self) -> tuple[JobSnapshot, str]:
+        """(job snapshot, the video id it works on). A finished job the creator dismissed is idle."""
+        snap = self.transcribe_job.snapshot()
+        with self._lock:
+            if snap is self._transcribe_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._transcribe_video
+
+    def dismiss_transcribe_result(self) -> None:
+        snap = self.transcribe_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._transcribe_seen = snap
+
+    def start_chapters(self, video_id: str) -> bool:
+        """Make chapters for one video from its transcript, in the one chapters job."""
+        def work(report: Report) -> "chapters_mod.ChaptersResult":
+            with Store(self.config.catalog_db) as store:
+                return self._chapters(store, video_id, report)
+
+        if not self.chapters_job.start(work):
+            return False
+        with self._lock:
+            self._chapters_video = video_id
+        return True
+
+    def chapters_state(self) -> tuple[JobSnapshot, str]:
+        snap = self.chapters_job.snapshot()
+        with self._lock:
+            if snap is self._chapters_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._chapters_video
+
+    def dismiss_chapters_result(self) -> None:
+        snap = self.chapters_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._chapters_seen = snap
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -492,6 +674,8 @@ def create_app(
     writer_factory: WriterFactory = GoogleYouTubeWriter,
     suggest: SuggestFn | None = None,
     translate_tools: TranslateTools | None = None,
+    transcribe: TranscribeFn | None = None,
+    chapters: ChaptersFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -501,7 +685,7 @@ def create_app(
     state = WebState(config, sign_in, reader_factory, credentials_loader, clock, sign_in_timeout,
                      write_sign_in, write_credentials_loader, writer_factory,
                      suggest or make_default_suggest(config),
-                     tools)
+                     tools, transcribe, chapters)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -669,6 +853,40 @@ def create_app(
             "verifier_ready": True if running else verifier_ready(verifier),
         }
 
+    def job_panel(snap: JobSnapshot, job_video: str, video_id: str) -> dict[str, Any]:
+        mine = job_video == video_id
+        running = snap.running and mine
+        return {
+            "running": running, "busy": snap.running and not mine,
+            "message": snap.message if running else "",
+            "failed": snap.message if snap.status == "failed" and mine else "",
+            "done": None,
+        }
+
+    def transcript_panel(video_id: str) -> dict[str, Any]:
+        """What the transcribe and chapters jobs are doing, for one video page."""
+        snap, job_video = state.transcribe_state()
+        transcribing = job_panel(snap, job_video, video_id)
+        if snap.status == "done" and job_video == video_id and isinstance(
+                snap.result, transcribe_mod.TranscribeResult):
+            transcribing["done"] = {
+                "tone": "ok", "chapters": [], "drafted": False,
+                "text": f"{snap.result.message} The cost was about {format_cost(snap.result.cost)}.",
+            }
+        snap, job_video = state.chapters_state()
+        making = job_panel(snap, job_video, video_id)
+        if snap.status == "done" and job_video == video_id and isinstance(
+                snap.result, chapters_mod.ChaptersResult):
+            result = snap.result
+            making["done"] = {
+                "tone": {"drafted": "ok", "no_change": "info"}.get(result.status, "error"),
+                "text": result.message, "drafted": result.status == "drafted",
+                "chapters": chapters_mod.chapter_lines(result.chapters),
+            }
+        return {"ffmpeg": transcribe_mod.find_ffmpeg() is not None,
+                "has_key": bool(agent.key_source(config)),
+                "transcribe": transcribing, "chapters": making}
+
     def video_not_found(request: Request) -> Response:
         return render(request, "error.html", {
             "layout": "shell.html", "active": "content",
@@ -720,6 +938,11 @@ def create_app(
                            _local_time, interrupted=not panel["running"])
                   if runs else None)
         tr = translate_panel(video_id)
+        ts = transcript_panel(video_id)
+        with Store(config.catalog_db) as store:
+            record = store.latest_transcript(video_id)
+        tt = build_transcript_view(video, row, record,
+                                   _local_time(record.created_at) if record else "")
         text = ((row.title, row.description, row.tags) if row is not None
                 else (video.title, video.description, tuple(video.tags)))
         return render(request, "video.html", {
@@ -733,8 +956,10 @@ def create_app(
             "comments": format_count(video.comment_count),
             "published": format_date(video.published_at),
             "sg": panel, "latest_run": latest,
-            "tr": tr, "tv": build_translate_view(video, row, records),
-            "poll": panel["running"] or panel["busy"] or tr["running"] or tr["busy"],
+            "tr": tr, "tv": build_translate_view(video, row, records), "ts": ts, "tt": tt,
+            "poll": (panel["running"] or panel["busy"] or tr["running"] or tr["busy"]
+                     or ts["transcribe"]["running"] or ts["transcribe"]["busy"]
+                     or ts["chapters"]["running"] or ts["chapters"]["busy"]),
         })
 
     @app.get("/setup")
@@ -748,6 +973,7 @@ def create_app(
             "translator_model": config.translator_model,
             "verifier_model": config.verifier_model, "verifier_url": config.verifier_url,
             "verifier_ready": verifier_ready(verifier, fresh=True),
+            "ffmpeg": transcribe_mod.find_ffmpeg() is not None,
         })
         return render(request, "setup.html", {**data, "active": "setup"})
 
@@ -761,6 +987,8 @@ def create_app(
             "push": _job_json(state.push_job.snapshot()),
             "suggest": _job_json(state.suggest_job.snapshot()),
             "translate": _job_json(state.translate_job.snapshot()),
+            "transcribe": _job_json(state.transcribe_job.snapshot()),
+            "chapters": _job_json(state.chapters_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
 
@@ -1331,6 +1559,87 @@ def create_app(
         kind, message = await run_in_threadpool(work)
         flash(request, kind, message)
         return see_other(f"/videos/{quote(video_id)}#translations")
+
+    # --- transcripts, chapters and subtitles --------------------------------------------------
+    @app.post("/videos/{video_id}/transcribe")
+    async def transcribe_video_file(request: Request, video_id: str) -> Response:
+        form = await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#transcript")
+
+        def exists() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.get_video(video_id) is not None
+
+        if not await run_in_threadpool(exists):
+            return video_not_found(request)
+        raw_path = str(form.get("path") or "")
+        language = str(form.get("language") or "")
+        words, problem = parse_keywords(str(form.get("keywords") or ""))
+        media: Path | None = None
+        if len(raw_path) > MAX_PATH_CHARS:
+            problem = "That path is too long to be a file path. Nothing was sent."
+        elif not problem:
+            try:
+                media = await run_in_threadpool(transcribe_mod.check_media_path, raw_path)
+            except transcribe_mod.TranscribeError as exc:
+                problem = f"{exc} Nothing was sent."
+        if problem:
+            flash(request, "error", problem)
+        elif language not in transcribe_mod.ASR_LANGUAGES:
+            flash(request, "error", "Choose the language that is spoken in the video. Lithuanian "
+                  "and some other languages are not supported. Nothing was sent.")
+        elif await run_in_threadpool(transcribe_mod.find_ffmpeg) is None:
+            flash(request, "error", transcribe_mod.NO_FFMPEG_MESSAGE)
+        elif media is not None and not state.start_transcribe(video_id, media, language, words):
+            flash(request, "error", "A transcription is already running. Wait for it to finish.")
+        return back
+
+    @app.post("/transcribe/done")
+    async def dismiss_transcribe(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_transcribe_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#transcript" if video_id else "/")
+
+    @app.post("/videos/{video_id}/chapters")
+    async def make_video_chapters(request: Request, video_id: str) -> Response:
+        await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#transcript")
+
+        def check() -> str | None:
+            with Store(config.catalog_db) as store:
+                video = store.get_video(video_id)
+                if video is None:
+                    return None
+                return chapters_blocker(video, store.get_draft(video_id),
+                                        store.latest_transcript(video_id))
+
+        blocked = await run_in_threadpool(check)
+        if blocked is None:
+            return video_not_found(request)
+        if blocked:
+            flash(request, "error", blocked)
+        elif not state.start_chapters(video_id):
+            flash(request, "error", "Chapters are already being made. Wait for them to finish.")
+        return back
+
+    @app.post("/chapters/done")
+    async def dismiss_chapters(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_chapters_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#transcript" if video_id else "/")
+
+    @app.get("/videos/{video_id}/transcript.srt")
+    def transcript_srt(request: Request, video_id: str) -> Response:
+        with Store(config.catalog_db) as store:
+            record = store.latest_transcript(video_id)
+        if record is None:
+            return Response("There is no transcript for this video.", status_code=404,
+                            media_type="text/plain")
+        return Response(
+            to_srt(record.segments), media_type="application/x-subrip",
+            headers={"Content-Disposition": f'attachment; filename="{video_id}.srt"'})
 
     # --- the translation key (optional, Baseten; the Meta key is the fallback) -------------------
     @app.post("/setup/translator-key")

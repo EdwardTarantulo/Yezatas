@@ -233,7 +233,8 @@ TOOLS: list[dict[str, Any]] = [
           "How the channel usually writes: its most used tags, how many videos have chapters, and "
           "the description lines that repeat across many videos (the creator's closing lines)."),
     _tool("get_transcript",
-          "The video's transcript, if there is one."),
+          "The video's transcript (each line is a time and the words spoken then), if there is "
+          "one."),
 ]
 
 SYSTEM_PROMPT = """\
@@ -252,9 +253,10 @@ louder, longer or more clickbait than it is.
 
 Rules you must never break
 - Never invent facts. Do not add links unless find_related_videos or the current text gave them. \
-Do not add timestamps or chapters: there is no transcript, so you cannot know what happens when. \
-Do not add new @handles, email addresses, prices, specifications, dates or claims that the \
-current text does not support.
+Never write timestamps or chapters yourself, even when get_transcript returns a transcript: the \
+Make chapters button adds them with real times. A transcript only tells you what the video \
+really says. Do not add new @handles, email addresses, prices, specifications, dates or claims \
+that the current text does not support.
 - Keep every existing link, chapter line, sponsor or affiliate line and the creator's closing \
 lines exactly as they are, unless a check says to change them.
 - Stay within YouTube's limits: the title at most 100 characters (aim for 30 to 60); the \
@@ -280,6 +282,12 @@ NO_TRANSCRIPT = {
               "not make claims about what the video shows beyond the current text.",
 }
 
+TRANSCRIPT_CHAR_LIMIT = 20_000
+TRANSCRIPT_NOTE = (
+    "You may use this transcript to describe what the video really says. Do not add chapters or "
+    "timestamps to the text: the Make chapters button does that, with real times."
+)
+
 _SEARCH_WORD = re.compile(r"[^\W\d_]{3,}")
 
 
@@ -303,7 +311,7 @@ class _Toolbox:
             "get_scorecard": self._scorecard,
             "find_related_videos": self._related,
             "get_channel_profile": self._profile,
-            "get_transcript": lambda args: dict(NO_TRANSCRIPT),
+            "get_transcript": self._transcript,
         }
 
     def run(self, name: str, raw_arguments: str) -> tuple[Any, str]:
@@ -329,6 +337,32 @@ class _Toolbox:
         except _ToolError as exc:
             result = {"error": str(exc)}
         return logged, json.dumps(result, ensure_ascii=False)
+
+    def _transcript(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The latest transcript as `m:ss text` lines (about 20,000 characters at most)."""
+        from .transcribe import clock  # imported here: transcribe imports this module
+
+        record = self._store.latest_transcript(self._video.video_id)
+        if record is None:
+            return dict(NO_TRANSCRIPT)
+        lines: list[str] = []
+        used = 0
+        truncated = False
+        for segment in record.segments:
+            text = " ".join(str(segment.get("text") or "").split())
+            if not text:
+                continue
+            line = f"{clock(int(segment['start_ms']))} {text}"
+            if used + len(line) > TRANSCRIPT_CHAR_LIMIT:
+                truncated = True
+                break
+            lines.append(line)
+            used += len(line)
+        data: dict[str, Any] = {"available": True, "language": record.language,
+                                "segments": lines, "note": TRANSCRIPT_NOTE}
+        if truncated:
+            data["truncated"] = True
+        return data
 
     def _public_videos(self) -> list[Video]:
         return [v for v in self._store.list_videos() if v.privacy_status == "public"]

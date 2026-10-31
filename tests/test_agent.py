@@ -396,6 +396,48 @@ def test_transcript_tool_says_there_is_none(store: Store) -> None:
     assert data["available"] is False and "transcript" in data["reason"]
 
 
+def add_transcript(store: Store, texts: list[str], video_id: str = V1, language: str = "en") -> None:
+    from yezatas.store import TranscriptRecord
+
+    segments = [{"start_ms": i * 65_000, "end_ms": (i + 1) * 65_000, "text": t}
+                for i, t in enumerate(texts)]
+    store.add_transcript(TranscriptRecord(0, video_id, language, "voice-test", "clip.mp4",
+                                          len(texts) * 65_000, segments, [], ""), NOW)
+
+
+def test_transcript_tool_returns_timed_lines_and_a_note(store: Store) -> None:
+    add_transcript(store, ["Welcome to the channel.", "", "Today we repot a cactus."])
+    data = json.loads(toolbox(store).run("get_transcript", "")[1])
+    assert data["available"] is True and data["language"] == "en"
+    assert data["segments"] == ["0:00 Welcome to the channel.", "2:10 Today we repot a cactus."]
+    assert "truncated" not in data
+    assert "must not" in data["note"] or "Do not add chapters" in data["note"]
+
+
+def test_transcript_tool_uses_the_latest_transcript_of_this_video(store: Store) -> None:
+    add_transcript(store, ["Old words."])
+    add_transcript(store, ["New words."])
+    add_transcript(store, ["Other video."], video_id=V2)
+    data = json.loads(toolbox(store).run("get_transcript", "")[1])
+    assert data["segments"] == ["0:00 New words."]
+    assert json.loads(toolbox(store, V3).run("get_transcript", "")[1])["available"] is False
+
+
+def test_transcript_tool_cuts_a_long_transcript_and_says_so(store: Store) -> None:
+    add_transcript(store, [f"Segment {i} " + "word " * 60 for i in range(200)])
+    data = json.loads(toolbox(store).run("get_transcript", "")[1])
+    assert data["truncated"] is True
+    assert 0 < len(data["segments"]) < 200
+    assert sum(len(line) for line in data["segments"]) <= agent.TRANSCRIPT_CHAR_LIMIT
+    assert data["segments"][0].startswith("0:00 Segment 0")
+
+
+def test_the_prompt_still_forbids_adding_chapters_and_points_to_the_button() -> None:
+    assert "Never write timestamps or chapters yourself" in SYSTEM_PROMPT
+    assert "Make chapters" in SYSTEM_PROMPT
+    assert "there is no transcript" not in SYSTEM_PROMPT
+
+
 def test_scorecard_tool_lists_failed_checks_by_loss(store: Store) -> None:
     checks = json.loads(toolbox(store).run("get_scorecard", "{}")[1])["checks"]
     assert set(checks[0]) == {"id", "title", "points", "max_points", "passed", "detail", "fix"}

@@ -191,3 +191,20 @@ def make_push_ui(tmp_path: Path, count: int = 3, write_access: bool = True,
         pull_catalog(writer, store, QuotaGuard(store, ui.config.daily_quota_budget))
     writer.calls.clear()
     return ui, writer
+
+
+# --- a seeded transcript (made-up words) for the transcript card ---------------------------------
+def seed_transcript(config: Config, video_id: str, *, segments: int = 6, language: str = "en",
+                    problems: list[str] | None = None, duration_ms: int | None = None,
+                    source_name: str = "clip.mp4", texts: list[str] | None = None) -> int:
+    """Store a transcript of `segments` pieces, each 50 seconds long, and return its id."""
+    from yezatas.store import TranscriptRecord
+
+    parts = [{"start_ms": i * 50_000, "end_ms": (i + 1) * 50_000,
+              "text": texts[i] if texts is not None else f"Piece {i} talks about topic {i}."}
+             for i in range(segments)]
+    record = TranscriptRecord(0, video_id, language, "voice-test", source_name,
+                              duration_ms if duration_ms is not None else segments * 50_000,
+                              parts, problems or [], "")
+    with Store(config.catalog_db) as store:
+        return store.add_transcript(record)

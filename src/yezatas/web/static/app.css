@@ -592,3 +592,12 @@ button.gbtn { cursor: pointer; }
 .loc-title { margin: 4px 0; font-weight: 500; overflow-wrap: anywhere; }
 .loc-kept { margin: 6px 0 0; }
 .backup-languages { margin: 4px 0; }
+
+/* --- transcripts and chapters --- */
+.transcript-card .field { margin: 14px 0; }
+.transcript-card input[type=text], .transcript-card select { width: 100%; max-width: 560px; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.transcript-card input[type=text]:focus { border-color: var(--link); outline: 0; box-shadow: 0 0 0 1px var(--link); }
+.transcript-card .hint { margin: 6px 0; }
+.tx-text { margin: 8px 0; }
+.tx-lines { max-height: 320px; overflow: auto; margin: 8px 0 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.chapter-list { margin: 8px 0; padding-left: 20px; }

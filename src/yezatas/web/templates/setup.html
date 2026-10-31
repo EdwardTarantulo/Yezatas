@@ -450,6 +450,15 @@
   <p class="hint">To use the checker, install Ollama, add the model <code>{{ verifier_model }}</code> and start Ollama. Yezatas only talks to it on this computer. Without it, translations are still made but marked "Unverified".</p>
 </section>
 
+<section class="card" id="step-transcripts">
+  <header class="card-head">
+    <h2>Transcripts (optional)</h2>
+    {% if ffmpeg %}<span class="pill done">ffmpeg found</span>{% else %}<span class="pill warn">ffmpeg not found</span>{% endif %}
+  </header>
+  <p id="ffmpeg-status">{% if ffmpeg %}ffmpeg was found on this computer.{% else %}ffmpeg was not found on this computer. Install it and restart Yezatas.{% endif %}
+    Transcripts, chapters and subtitles need it to read the sound of a video file. They also use the Meta API key from the AI suggestions step.</p>
+</section>
+
 {% include "_footer.html" %}
 </div>
 {% endblock %}

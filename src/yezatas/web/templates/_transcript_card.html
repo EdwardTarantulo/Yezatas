@@ -1,0 +1,101 @@
+{# The "Transcript and chapters" card of the video page. `ts` is the tools and job state, `tt` the language choice and the transcript. #}
+{% set tj = ts.transcribe %}
+{% set cj = ts.chapters %}
+<section class="card transcript-card" id="transcript" aria-labelledby="h-transcript">
+  <div class="card-title-row">
+    <h2 id="h-transcript">Transcript and chapters</h2>
+    {% if change %}<a class="button secondary" href="/changes#d-{{ video.video_id|urlencode }}">Review changes</a>{% endif %}
+  </div>
+  <p class="muted">Point Yezatas at the video file on this computer. ffmpeg takes the sound out of it, {{ tt.model }} on Meta's Model API turns the speech into text (only the sound is sent, never the picture), and every time in the transcript is a place in the real audio. Chapters are chosen from the transcript and only become part of the draft. Nothing goes to YouTube until you approve and push it.</p>
+
+  {% if tj.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="transcribe-msg" role="status" aria-live="polite">{{ tj.message or 'Starting…' }}</span></p>
+  <p class="hint">A long video can take several minutes. You can leave this page. The job keeps running while Yezatas is open, and the transcript shows here.</p>
+  {% else %}
+  {% if tj.failed %}
+  <div class="flash error" role="alert" id="transcribe-failed">{{ tj.failed }}</div>
+  <form class="inline" method="post" action="/transcribe/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if tj.done %}
+  <div class="flash {{ tj.done.tone }}" role="status" id="transcribe-done">{{ tj.done.text }}</div>
+  <form class="inline" method="post" action="/transcribe/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if tj.busy %}<p class="hint" id="transcribe-busy">Another video is being transcribed. Wait for it to finish.</p>{% endif %}
+  {% if not ts.ffmpeg %}
+  <p class="hint" id="transcribe-no-ffmpeg"><strong>ffmpeg was not found on this computer.</strong> Yezatas needs it to read the sound of a video file. Install ffmpeg (it is free), make sure the command <code>ffmpeg</code> works in a terminal, then restart Yezatas.</p>
+  {% else %}
+  {% if not ts.has_key %}<p class="hint" id="transcribe-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  <form class="transcribe-form" method="post" action="/videos/{{ video.video_id|urlencode }}/transcribe">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field">
+      <label for="ts-path">Path of the video file on this computer</label>
+      <input id="ts-path" type="text" name="path" required maxlength="1000" autocomplete="off" spellcheck="false">
+      <p class="hint">Yezatas reads the file from this computer. Copy it from your file manager (on Windows: select the file, then Copy as path). Only the file name is kept and shown. Allowed: mp4, mov, mkv, webm, avi, m4v, mp3, wav, m4a, flac, aac.</p>
+    </div>
+    <div class="field">
+      <label for="ts-language">Language spoken in the video</label>
+      <select id="ts-language" name="language"{% if not tt.language_known %} required{% endif %}>
+        {% if not tt.language_known %}<option value="" selected>Choose the spoken language</option>{% endif %}
+        {% for o in tt.languages %}<option value="{{ o.code }}"{% if o.selected %} selected{% endif %}>{{ o.name }}</option>{% endfor %}
+      </select>
+      {% if tt.language_set and not tt.language_known %}<p class="hint" id="ts-language-hint">The language of this video ({{ tt.video_language_label }}) is not one transcription supports. Lithuanian and some other languages are not available. If the video is spoken in one of these, choose it.</p>
+      {% elif not tt.language_set %}<p class="hint" id="ts-language-hint">This video has no language set, and Yezatas does not guess it. Choose the spoken language.</p>{% endif %}
+    </div>
+    <div class="field">
+      <label for="ts-keywords">Names to recognise (optional)</label>
+      <input id="ts-keywords" type="text" name="keywords" maxlength="1000" autocomplete="off" spellcheck="false">
+      <p class="hint">Separate them with commas: product names, people or places that are easy to mishear. At most 20, each up to 40 characters.</p>
+    </div>
+    <p class="hint" id="ts-price">Price: about {{ tt.price }} per hour of audio.</p>
+    <div class="actions"><button type="submit" class="button primary">{{ 'Transcribe again' if tt.record else 'Transcribe' }}</button></div>
+  </form>
+  {% endif %}
+  {% endif %}
+
+  {% if tt.record %}
+  {% set r = tt.record %}
+  <div class="tx" id="transcript-info">
+    <h3 class="run-h">Latest transcript</h3>
+    <p class="muted">From <strong>{{ r.source_name }}</strong> &middot; {{ tt.spoken }} &middot; {{ tt.model }} &middot; {{ tt.length }} of audio &middot; {{ tt.when }} &middot; cost about {{ tt.cost }}</p>
+    {% if r.problems %}
+    <ul class="issues" id="transcript-problems">
+      {% for p in r.problems %}<li class="issue warning">{{ p }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    <details class="tx-text" id="transcript-text"><summary>Read the transcript ({{ tt.line_count }} lines)</summary><pre class="tx-lines">{{ tt.text }}</pre></details>
+
+    <h3 class="run-h">Chapters and subtitles</h3>
+    {% if cj.running %}
+    <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+      <span id="chapters-msg" role="status" aria-live="polite">{{ cj.message or 'Starting…' }}</span></p>
+    <p class="hint">You can leave this page. The result shows here.</p>
+    {% else %}
+    {% if cj.failed %}
+    <div class="flash error" role="alert" id="chapters-failed">{{ cj.failed }}</div>
+    <form class="inline" method="post" action="/chapters/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+    {% endif %}
+    {% if cj.done %}
+    <div class="flash {{ cj.done.tone }}" role="status" id="chapters-done">{{ cj.done.text }}
+      {% if cj.done.drafted %}<a href="/changes#d-{{ video.video_id|urlencode }}">Review the draft on the Changes page</a>{% endif %}</div>
+    {% if cj.done.chapters %}
+    <ul class="chapter-list" id="chapters-list">
+      {% for line in cj.done.chapters %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    <form class="inline" method="post" action="/chapters/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+    {% endif %}
+    {% if cj.busy %}<p class="hint" id="chapters-busy">Chapters are being made for another video. Wait for it to finish.</p>{% endif %}
+    {% if tt.blocker %}<p class="hint" id="chapters-blocked">{{ tt.blocker }}</p>{% endif %}
+    <div class="actions">
+      <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/chapters">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit" class="button primary"{% if tt.blocker or cj.busy or tj.running %} disabled{% endif %}{% if tt.blocker %} aria-describedby="chapters-blocked"{% endif %}>Make chapters</button>
+      </form>
+      <a class="button secondary" id="download-srt" href="/videos/{{ video.video_id|urlencode }}/transcript.srt">Download subtitles (.srt)</a>
+    </div>
+    <p class="hint">The model only chooses which part of the transcript starts each chapter; Yezatas takes the time from the transcript. The chapters go into the description draft for you to review. Yezatas does not upload the subtitles: add the file in YouTube Studio yourself.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
