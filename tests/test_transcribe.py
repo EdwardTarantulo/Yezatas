@@ -17,7 +17,8 @@ from yezatas import transcribe
 from yezatas.store import Store, Video
 from yezatas.transcribe import (
     ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, MetaAsrClient, Piece, TranscribeError,
-    check_media_path, clock, detect_silences, extract_audio, find_ffmpeg, plan_pieces,
+    check_media_path, clock, detect_silences, extract_audio, find_ffmpeg, loudness_profile,
+    plan_pieces, quietest_cut,
     transcribe_video, wav_slice,
 )
 
@@ -272,6 +273,53 @@ def test_plan_pieces_properties_and_determinism() -> None:
 def test_plan_pieces_rejects_bad_limits() -> None:
     with pytest.raises(ValueError):
         plan_pieces(10_000, [], min_ms=5000, target_ms=1000, max_ms=2000)
+
+
+def test_loudness_profile_argv_and_parsing(tmp_path: Path) -> None:
+    out = ("frame:0    pts:0       pts_time:0\nlavfi.astats.Overall.RMS_level=-inf\n"
+           "frame:1    pts:800     pts_time:0.05\nlavfi.astats.Overall.RMS_level=-21.5\n"
+           "frame:2    pts:1600    pts_time:0.1\nlavfi.astats.Overall.RMS_level=nan\n")
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str], **kwargs: Any) -> Any:
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+
+    assert loudness_profile("ffmpeg", tmp_path / "a.wav", runner) == [-120.0, -21.5, -120.0]
+    assert "asetnsamples=n=800:p=0" in calls[0][calls[0].index("-af") + 1]
+    with pytest.raises(TranscribeError) as err:
+        loudness_profile("ffmpeg", tmp_path / "a.wav",
+                         lambda argv, **kw: SimpleNamespace(returncode=1, stdout="", stderr="bad"))
+    assert err.value.kind == "ffmpeg"
+
+
+def test_quietest_cut_finds_the_dip_and_prefers_the_target() -> None:
+    levels = [-20.0] * 600  # 30 s of speech at -20 dB, 50 ms frames
+    for frame in (100, 101, 102):  # a dip at 5.05 s
+        levels[frame] = -40.0
+    for frame in (239, 240, 241):  # an equally deep dip at 12 s
+        levels[frame] = -40.0
+    choose = quietest_cut(levels)
+    assert choose(4000, 26000, 12000) == 12000  # same depth: the one at the target wins
+    assert choose(4000, 10000, 12000) == 5050  # the only dip in reach
+    flat = quietest_cut([-20.0] * 600)
+    assert flat(4000, 26000, 12000) == 12000  # no dip: the target itself
+    assert quietest_cut([])(4000, 26000, 12000) == 12000
+
+
+def test_plan_pieces_uses_the_quietest_moment_without_silences() -> None:
+    picks: list[tuple[int, int, int]] = []
+
+    def quietest(low: int, high: int, target: int) -> int:
+        picks.append((low, high, target))
+        return target + 1500
+
+    pieces = plan_pieces(60000, [], quietest=quietest)
+    assert [p.start_ms for p in pieces] == [0, 13500, 27000, 40500, 54000]
+    assert picks[0] == (4000, 30000, 12000)
+    assert pieces[-1].end_ms == 60000
+    # a chooser answering outside the allowed range is clamped into it
+    assert plan_pieces(60000, [], quietest=lambda low, high, t: 10**9)[0].end_ms == 30000
 
 
 # --- wav_slice ------------------------------------------------------------------------------------------------------

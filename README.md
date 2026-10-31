@@ -66,6 +66,12 @@ as it lands; the git history is the detailed record.
     - Now a copied back-translation is caught, retried once, and otherwise marked unverified with the reason.
   - **Review.** Results are verified, flagged, unverified or failed. Only the ones the creator ticks go into the draft.
   - **Push.** It sends the video language and the complete translation list (YouTube replaces it whole). Studio changes are detected, and the old translations are backed up. Studio's regional codes (like `de-DE`) are reused instead of duplicated.
+- **2026-10-31**: **transcripts, chapters and subtitles** from the creator's own video file:
+  - **Transcribe.** The creator gives the path of the video file on their computer (no downloader). ffmpeg extracts the sound, the audio is cut at pauses into pieces of 4 to 30 seconds, and **Muse Voice Transcribe** transcribes them in parallel. Every time in the transcript is a real cut point in the audio.
+    - In the first real test, a music bed under the voice hid every silence, so all cuts fell at 30 s. Now, with no silence in reach, the cut goes at the quietest moment near 12 s (ffmpeg measures loudness every 50 ms).
+  - **Chapters.** **Muse Spark 1.3** chooses chapter starts only by transcript segment number; code looks up the time, so the model never writes one. Code repairs the answer (unknown, repeated or too close chapters are dropped). A description that already has timestamps is never touched, and the chapters only become a draft.
+    - On a real 4:37 review (its timestamps removed from a copy), 8 of the 10 chapters it chose fell within 4 seconds of one of the creator's own hand-made chapters; the other 2 were 6 to 8 seconds off.
+  - **Subtitles.** The transcript downloads as an SRT file. The suggestion agent can now read the transcript, but it still may not write timestamps itself.
 
 ## Setup
 

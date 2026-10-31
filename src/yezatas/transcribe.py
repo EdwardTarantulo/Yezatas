@@ -44,6 +44,10 @@ VIDEO_SUFFIXES: tuple[str, ...] = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4
 SAMPLE_RATE = 16000
 FFMPEG_TIMEOUT = 3600  # seconds; a stuck ffmpeg must not hang the job for ever
 RETRY_PAUSE = 2.0  # seconds before the one retry of a piece
+FRAME_MS = 50  # loudness is measured in frames this long
+QUIET_SPAN = 3  # frames averaged when looking for the quietest moment (150 ms)
+QUIET_PULL_DB = 0.5  # dB per second away from the target length that a quieter moment must win by
+SILENT_DB = -120.0  # what a frame of digital silence ("-inf") counts as
 NO_FFMPEG_MESSAGE = "ffmpeg was not found. Install ffmpeg and restart Yezatas."
 AUTH_MESSAGE = "The transcription API key was refused. Check it in Setup."
 
@@ -164,14 +168,66 @@ def _seconds_after(line: str, label: str) -> int | None:
         return None
 
 
+def loudness_profile(ffmpeg: str, wav: Path,
+                     runner: Callable[..., Any] = subprocess.run) -> list[float]:
+    """The loudness of every `FRAME_MS` frame of the audio, in dB (RMS), from ffmpeg's astats.
+
+    Used to cut where speech pauses when a music bed under the voice hides real silence.
+    """
+    samples = SAMPLE_RATE * FRAME_MS // 1000
+    argv = [ffmpeg, "-nostdin", "-i", str(wav), "-af",
+            f"asetnsamples=n={samples}:p=0,astats=metadata=1:reset=1:measure_perchannel=none,"
+            "ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file=-",
+            "-f", "null", "-"]
+    done = _run(runner, argv)
+    if done.returncode != 0:
+        raise TranscribeError(
+            "ffmpeg", f"ffmpeg could not measure the loudness of the audio: "
+                      f"{_last_line(done.stderr)}")
+    levels: list[float] = []
+    for line in str(done.stdout or "").splitlines():
+        if "RMS_level=" in line:
+            value = line.split("RMS_level=", 1)[1].strip()
+            try:
+                level = float(value)
+            except ValueError:
+                level = SILENT_DB
+            levels.append(SILENT_DB if level != level else max(level, SILENT_DB))  # nan, -inf
+    return levels
+
+
+def quietest_cut(levels: Sequence[float]) -> Callable[[int, int, int], int]:
+    """A cut chooser for `plan_pieces`: the quietest moment between low and high (ms).
+
+    Loudness is averaged over `QUIET_SPAN` frames; a moment further from `target` must be
+    quieter by `QUIET_PULL_DB` per second to win. Deterministic: ties go to the earlier moment.
+    """
+    def choose(low: int, high: int, target: int) -> int:
+        first, last = -(-low // FRAME_MS), high // FRAME_MS
+        best, best_score = max(low, min(high, target)), None
+        for frame in range(first, last + 1):
+            window = levels[max(0, frame - QUIET_SPAN // 2):frame + QUIET_SPAN // 2 + 1]
+            if not window:
+                continue
+            at = frame * FRAME_MS
+            score = sum(window) / len(window) + QUIET_PULL_DB * abs(at - target) / 1000
+            if best_score is None or score < best_score:
+                best, best_score = at, score
+        return best
+
+    return choose
+
+
 # --- cutting the audio -------------------------------------------------------------------------------
 def plan_pieces(duration_ms: int, silences: Sequence[tuple[int, int]], *, min_ms: int = 4000,
-                target_ms: int = 12000, max_ms: int = 30000) -> list[Piece]:
+                target_ms: int = 12000, max_ms: int = 30000,
+                quietest: Callable[[int, int, int], int] | None = None) -> list[Piece]:
     """Where to cut `duration_ms` of audio: at the middle of pauses, pieces about `target_ms` long.
 
     Deterministic. Pieces cover 0..duration_ms in order with no gap or overlap. A piece is never
-    shorter than `min_ms` (unless the whole audio is) and never longer than `max_ms`: with no
-    pause in reach the cut is a hard one at `max_ms`.
+    shorter than `min_ms` (unless the whole audio is) and never longer than `max_ms`. With no
+    pause in reach, `quietest(low, high, target)` picks the cut (see `quietest_cut`); without it
+    the cut is a hard one at `max_ms`.
     """
     if not 0 < min_ms <= target_ms <= max_ms:
         raise ValueError("Piece lengths must satisfy 0 < min <= target <= max.")
@@ -189,6 +245,8 @@ def plan_pieces(duration_ms: int, silences: Sequence[tuple[int, int]], *, min_ms
         near = [m for m in middles if low <= m <= high]
         if near:
             cut = min(near, key=lambda m: (abs(m - (start + target_ms)), m))
+        elif quietest is not None:
+            cut = min(high, max(low, quietest(low, high, start + target_ms)))
         elif remaining <= max_ms:
             break  # no pause in reach and it fits in one piece
         else:
@@ -385,7 +443,10 @@ def transcribe_video(
             duration_ms = wav_duration_ms(wav)
             if duration_ms <= 0:
                 raise TranscribeError("ffmpeg", "This file has no sound to transcribe.")
-            pieces = plan_pieces(duration_ms, detect_silences(program, wav, runner))
+            silences = detect_silences(program, wav, runner)
+            levels = loudness_profile(program, wav, runner)
+            pieces = plan_pieces(duration_ms, silences,
+                                 quietest=quietest_cut(levels) if levels else None)
             say(f"Transcribing {len(pieces)} pieces" if len(pieces) != 1
                 else "Transcribing 1 piece")
             texts = _transcribe_pieces(client, wav, pieces, language, keywords, workers, say)
