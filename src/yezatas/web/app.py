@@ -28,6 +28,7 @@ from starlette.templating import Jinja2Templates
 
 from .. import agent, auth, edits, push, subtitle_translate
 from .. import chapters as chapters_mod
+from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
 from .. import transcribe as transcribe_mod
 from .. import translate
@@ -35,7 +36,7 @@ from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
 from ..quota import QuotaGuard
 from ..seo import score_catalog
-from ..store import Store, ThumbnailVariant
+from ..store import OutlierReport, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import GoogleYouTubeReader, GoogleYouTubeWriter, YouTubeReader, YouTubeWriter
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
@@ -46,11 +47,11 @@ from .security import CSRF_FIELD, Sessions, install_security, load_session_key, 
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
 from .views import (Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem, build_listing,
-                    build_packaging_view, build_preview, build_subtitles_view, build_transcript_view,
+                    build_outlier_view, build_packaging_view, build_preview, build_subtitles_view, build_transcript_view,
                     build_translate_view, change_cards, chapters_blocker, dashboard_model, format_cost,
                     format_count, format_date, group_checks, history_rows, lang_name, make_entries,
-                    plan_lines, preview_card, push_results, run_view, stops_batch, thumb_url,
-                    top_other_videos)
+                    outlier_count, outlier_line, plan_lines, preview_card, pull_moment, push_results,
+                    run_view, stops_batch, thumb_url, top_other_videos)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -98,6 +99,10 @@ VARIANTS_TIMEOUT_SECONDS = 10 * 60.0
 VARIANTS_TIMEOUT_MESSAGE = (
     "Making the variants took more than 10 minutes, so Yezatas stopped waiting. Variants that "
     "finished are kept on this page."
+)
+OUTLIERS_TIMEOUT_SECONDS = 10 * 60.0
+OUTLIERS_TIMEOUT_MESSAGE = (
+    "Explaining the outliers took more than 10 minutes, so Yezatas stopped waiting. Try again."
 )
 NO_PACKAGING_KEY = "There is no Meta API key. Add one in Setup. Nothing was sent."
 MAX_ID_DIGITS = 12  # a variant id in a URL; longer is never a real one
@@ -201,6 +206,14 @@ def map_packaging_error(exc: BaseException) -> tuple[str, str]:
     if isinstance(exc, packaging_mod.PackagingError):
         return "packaging", str(exc)
     return "packaging", f"The packaging check stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def map_outliers_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if type(exc) is ValueError:  # the plain sentences of start_outliers' own checks
+        return "outliers", str(exc)
+    return "outliers", f"Explaining the outliers stopped unexpectedly ({exc.__class__.__name__})."
 
 
 def map_variants_error(exc: BaseException) -> tuple[str, str]:
@@ -389,6 +402,9 @@ class WebState:
                                  PACKAGING_TIMEOUT_MESSAGE, clock)
         self._packaging_seen: JobSnapshot | None = None
         self._packaging_video = ""
+        self.outliers_job = Job(map_outliers_error, OUTLIERS_TIMEOUT_SECONDS,
+                                OUTLIERS_TIMEOUT_MESSAGE, clock)
+        self._outliers_seen: JobSnapshot | None = None
         self.variants_job = Job(map_variants_error, VARIANTS_TIMEOUT_SECONDS,
                                 VARIANTS_TIMEOUT_MESSAGE, clock)
         self._variants_seen: JobSnapshot | None = None
@@ -812,6 +828,35 @@ class WebState:
             with self._lock:
                 self._variants_seen = snap
 
+    # --- outliers: what the best videos share ---------------------------------------------------
+    def start_outliers(self) -> bool:
+        """Ask Muse Spark what the outliers share, in the one outliers job."""
+        return self.outliers_job.start(self._run_outliers)
+
+    def _run_outliers(self, report: Report) -> OutlierReport:
+        tools = self.packaging_tools(self.config)
+        if tools is None:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        report("Asking Muse Spark what the outliers share…")
+        with Store(self.config.catalog_db) as store:
+            pull = store.latest_pull()
+            if pull is None:
+                raise ValueError("There is no pulled catalog yet. Pull it in Setup first.")
+            return outliers_mod.explain_outliers(
+                store, tools.vision, as_of=pull_moment(pull), fetch=self._packaging_fetch)
+
+    def outliers_state(self) -> JobSnapshot:
+        """The job snapshot. A finished job the creator dismissed is idle."""
+        snap = self.outliers_job.snapshot()
+        with self._lock:
+            return JobSnapshot("idle") if snap is self._outliers_seen else snap
+
+    def dismiss_outliers_result(self) -> None:
+        snap = self.outliers_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._outliers_seen = snap
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -942,12 +987,17 @@ def create_app(
             videos = store.list_videos()
             guard = QuotaGuard(store, config.daily_quota_budget)
             used, remaining = guard.used(), guard.remaining()
+            pull = store.latest_pull()
         entries = make_entries(videos, score_catalog(videos))
         return {
-            "entries": entries,
+            "entries": entries, "as_of": pull_moment(pull) if pull is not None else None,
             "latest_pull": {"videos": latest[0], "when": _local_time(latest[1])},
             "quota": {"used": used, "remaining": remaining, "budget": config.daily_quota_budget},
         }
+
+    def outlier_scores(data: dict[str, Any]) -> list[outliers_mod.OutlierScore]:
+        """Every video scored against its peers, with the views as of the latest pull."""
+        return outliers_mod.score_videos([e.video for e in data["entries"]], data["as_of"])
 
     def draft_ids() -> frozenset[str]:
         with Store(config.catalog_db) as store:
@@ -1121,6 +1171,8 @@ def create_app(
         model = dashboard_model(data["entries"])
         return render(request, "dashboard.html", {
             "active": "dashboard", "latest_pull": data["latest_pull"], "quota": data["quota"],
+            "outlier_count": outlier_count(outlier_scores(data)),
+            "outlier_high": outliers_mod.ratio_label(outliers_mod.OUTLIER_THRESHOLD),
             "sg": suggest_panel(), "poll": state.suggest_job.snapshot().running,
             **model,
         })
@@ -1169,7 +1221,9 @@ def create_app(
             made = store.list_thumbnail_variants(review.id) if review is not None else []
         text = ((row.title, row.description, row.tags) if row is not None
                 else (video.title, video.description, tuple(video.tags)))
+        score = next((s for s in outlier_scores(data) if s.video_id == video_id), None)
         return render(request, "video.html", {
+            "outlier_line": outlier_line(score),
             "change": card,
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
             "title_limit": TITLE_LIMIT, "description_limit": DESCRIPTION_BYTE_LIMIT,
@@ -1259,6 +1313,27 @@ def create_app(
                 f'attachment; filename="{video_id}-variant-{variant.id}.jpg"')
         return FileResponse(path, media_type="image/jpeg", headers=headers)
 
+    @app.get("/outliers")
+    def outliers_page(request: Request) -> Response:
+        """The creator's own videos against their channel's norm for their age. No model is called."""
+        with Store(config.catalog_db) as store:
+            pull = store.latest_pull()
+            videos = store.list_videos() if pull is not None else []
+            report = store.latest_outlier_report() if pull is not None else None
+        if pull is None:
+            return back_to_setup()
+        as_of = pull_moment(pull)
+        view = build_outlier_view(videos, outliers_mod.score_videos(videos, as_of), report,
+                                  int(pull["id"]), _local_time)
+        snap = state.outliers_state()
+        return render(request, "outliers.html", {
+            "active": "outliers", "ov": view, "as_of": _local_time(as_of.isoformat()),
+            "has_key": packaging_tools_or_none() is not None, "model": config.model,
+            "running": snap.running, "message": snap.message,
+            "failed": snap.message if snap.status == "failed" else "",
+            "poll": snap.running,
+        })
+
     @app.get("/setup")
     def setup(request: Request) -> Response:
         data = page_data()
@@ -1288,6 +1363,7 @@ def create_app(
             "transcribe": _job_json(state.transcribe_job.snapshot()),
             "chapters": _job_json(state.chapters_job.snapshot()),
             "packaging": _job_json(state.packaging_job.snapshot()),
+            "outliers": _job_json(state.outliers_job.snapshot()),
             "variants": _job_json(state.variants_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
@@ -2031,6 +2107,29 @@ def create_app(
         state.dismiss_packaging_result()
         video_id = str(form.get("video_id") or "")
         return see_other(f"/videos/{quote(video_id)}#packaging" if video_id else "/")
+
+    # --- outliers: what the best videos share ------------------------------------------------------
+    @app.post("/outliers/explain")
+    async def explain_video_outliers(request: Request) -> Response:
+        await read_form(request)
+
+        def has_pull() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.latest_pull() is not None
+
+        if not await run_in_threadpool(has_pull):
+            return back_to_setup()
+        if await run_in_threadpool(packaging_tools_or_none) is None:
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif not state.start_outliers():
+            flash(request, "error", "An explanation is already running. Wait for it to finish.")
+        return see_other("/outliers#why")
+
+    @app.post("/outliers/done")
+    async def dismiss_outliers(request: Request) -> Response:
+        await read_form(request)
+        state.dismiss_outliers_result()
+        return see_other("/outliers#why")
 
     @app.post("/videos/{video_id}/packaging/variants")
     async def make_video_variants(request: Request, video_id: str) -> Response:

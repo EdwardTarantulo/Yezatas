@@ -703,3 +703,24 @@ button.gbtn { cursor: pointer; }
   .yt-row .yt-desc { display: none; }
   .yt-rows { padding: 12px; }
 }
+
+/* --- outliers --- */
+.ol-table .col-num { width: 96px; }
+.ol-table .col-median { width: 104px; text-align: right; }
+.ol-table .col-ratio { width: 84px; text-align: right; }
+.ol-why { margin-top: 2px; font-size: 13px; overflow-wrap: anywhere; }
+.ol-below summary { cursor: pointer; }
+.ol-summary { display: inline; font-size: 16px; font-weight: 600; }
+.ol-below[open] summary { margin-bottom: 8px; }
+.ol-patterns { list-style: none; margin: 0 0 8px; padding: 0; }
+.ol-pattern { margin: 0 0 12px; padding-top: 8px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.ol-pattern:first-child { border-top: 0; padding-top: 0; }
+.ol-pattern > p { margin: 0 0 6px; }
+.ol-chips { list-style: none; margin: 0; padding: 0; }
+.ol-chips li { margin: 0; min-width: 0; max-width: 100%; }
+.ol-chips .chip { height: auto; min-height: 32px; padding: 4px 12px; max-width: 100%; overflow-wrap: anywhere; }
+.ol-label { font-weight: 700; }
+@media (max-width: 760px) {
+  .ol-table .col-median { display: none; }
+  .ol-table .col-num, .ol-table .col-ratio { width: 70px; }
+}

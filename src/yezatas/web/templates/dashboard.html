@@ -87,6 +87,7 @@
     <p class="big-number"><span class="avg">{{ totals.all }}</span><span class="out-of"> video{{ '' if totals.all == 1 else 's' }}</span></p>
     <p class="muted">{{ totals.public }} public &middot; {{ totals.unlisted }} unlisted &middot; {{ totals.private }} private</p>
     <p>{{ latest_pull.videos }} videos were pulled on {{ latest_pull.when }}.</p>
+    <p id="dash-outliers"><a href="/outliers">{{ outlier_count }} outlier{{ '' if outlier_count == 1 else 's' }}</a> <span class="muted">({{ outlier_high }} or more above your channel's norm)</span></p>
     <p>Quota today: {{ quota.used }} used, {{ quota.remaining }} left of {{ quota.budget }}.</p>
     <p><a class="button secondary" href="/setup#step-pull">Pull again</a></p>
   </section>

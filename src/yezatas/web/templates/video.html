@@ -9,6 +9,7 @@
   <div class="vhead-info">
     <h1 class="video-title">{{ video.title }}</h1>
     <p class="muted vstats">{{ views }} views &middot; {{ likes }} likes &middot; {{ comments }} comments</p>
+    {% if outlier_line %}<p class="muted" id="video-outlier">{% if outlier_line.link %}<a href="{{ outlier_line.link }}">{{ outlier_line.text }}</a>{% else %}{{ outlier_line.text }}{% endif %}</p>{% endif %}
     <p class="muted">{% if published %}Published {{ published }} &middot; {% endif %}{{ entry.visibility or 'Unknown visibility' }}</p>
     <p class="vactions">
       <a class="button primary" href="https://studio.youtube.com/video/{{ video.video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">Edit in YouTube Studio</a>

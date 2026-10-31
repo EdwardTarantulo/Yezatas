@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 from urllib.parse import quote, urlencode
 
 from .. import edits
 from ..agent import estimate_cost
 from ..diffs import DraftDiff, diff_row
+from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_TYPICAL, MIN_AGE_DAYS,
+                        OUTLIER_THRESHOLD, PEERS, OutlierScore, below_norm, outliers, ratio_label)
 from ..push import PushItem
 from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, fix_priority,
                    parse_chapters, parse_duration)
-from ..store import (AgentRun, DraftRow, PackagingReview, PushRecord, SubtitleTranslationRecord,
-                     ThumbnailVariant, TranscriptRecord, TranslationRecord, Video)
+from ..store import (AgentRun, DraftRow, OutlierReport, PackagingReview, PushRecord,
+                     SubtitleTranslationRecord, ThumbnailVariant, TranscriptRecord, TranslationRecord,
+                     Video)
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
 from ..validate import Issue, has_errors
@@ -1237,3 +1240,155 @@ def build_preview(mine: PreviewCard, others: Sequence[Video]) -> PreviewView:
 
     return PreviewView(desktop=among(cards[:PREVIEW_OTHERS]), phone=among(cards[:PREVIEW_PHONE_ROWS]),
                        search=(mine, *cards[:PREVIEW_SEARCH_ROWS]), others=len(cards))
+
+
+# --- outliers --------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class OutlierRow:
+    """One video of the outlier or below-the-norm table. Numbers are formatted by code."""
+
+    video_id: str
+    title: str
+    thumb: str
+    published: str
+    views: str  # "12,345"
+    median: str  # the peers' median views, rounded
+    ratio: str  # outliers.ratio_label, "4.2×"
+    why: str  # the model's line about this video; "" when there is none or it is out of date
+
+
+@dataclass(frozen=True)
+class OutlierChip:
+    """A label in a pattern's evidence: the video it stands for, linked when it is still in the catalog."""
+
+    label: str
+    title: str
+    href: str
+
+
+@dataclass(frozen=True)
+class OutlierPattern:
+    text: str
+    kind: str
+    chips: tuple[OutlierChip, ...]
+
+
+@dataclass(frozen=True)
+class OutlierReportView:
+    """The newest explanation, ready to show."""
+
+    status: str  # "done" | "too_few" | "error"
+    when: str
+    old: bool  # made from an older pull than the one the table is built from
+    error: str
+    patterns: tuple[OutlierPattern, ...]
+    ideas: tuple[str, ...]
+    problems: tuple[str, ...]
+    cost: str
+    model: str
+    tokens: str
+
+
+@dataclass(frozen=True)
+class OutlierView:
+    """The Outliers page besides the job state."""
+
+    left_out: int  # videos that could not be scored (too new, not public, live streams, ...)
+    outliers: tuple[OutlierRow, ...]
+    below: tuple[OutlierRow, ...]
+    report: OutlierReportView | None
+    limits: Mapping[str, Any]  # the constants the page text quotes, so the text never drifts from the code
+
+
+def pull_moment(row: Any) -> datetime:
+    """The time of the views: when the pull finished (it started, if that is missing). Never "now"."""
+    for key in ("finished_at", "started_at"):
+        text = str(row[key] or "")
+        if text:
+            return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    raise ValueError("The pull has no time.")
+
+
+def _outlier_row(video: Video, score: OutlierScore, why: str = "") -> OutlierRow:
+    return OutlierRow(
+        video_id=video.video_id, title=video.title, thumb=thumb_url(video),
+        published=format_date(video.published_at), views=f"{score.views:,}",
+        median=f"{round(score.peer_median or 0):,}", ratio=ratio_label(score.ratio), why=why)
+
+
+def outlier_line(score: OutlierScore | None) -> dict[str, str] | None:
+    """The one line of the video page: how the video compares with its norm. None when it has no ratio."""
+    if score is None:
+        return None
+    if score.status == "too_new":
+        return {"text": f"Too new to compare (under {MIN_AGE_DAYS} days)", "link": ""}
+    if score.status != "scored" or score.ratio is None:
+        return None
+    return {"text": f"{ratio_label(score.ratio)} the channel norm for its age (median "
+                    f"{round(score.peer_median or 0):,} views of {len(score.peer_ids)} videos "
+                    "published around it)", "link": "/outliers"}
+
+
+def outlier_count(scores: Sequence[OutlierScore]) -> int:
+    return len(outliers(scores))
+
+
+def _outlier_report_view(report: OutlierReport, titles: Mapping[str, str], old: bool,
+                         when: Callable[[str], str]) -> OutlierReportView:
+    labels = report.labels if isinstance(report.labels, dict) else {}
+    insight = report.insight if isinstance(report.insight, dict) else {}
+
+    def chip(label: str) -> OutlierChip:
+        found = labels.get(label)
+        video_id = found.get("video_id") if isinstance(found, dict) else None
+        if not isinstance(video_id, str) or video_id not in titles:
+            return OutlierChip(label, "", "")
+        return OutlierChip(label, titles[video_id], f"/videos/{quote(video_id)}")
+
+    patterns: list[OutlierPattern] = []
+    for item in _dicts(insight.get("patterns")):
+        evidence = item.get("evidence")
+        patterns.append(OutlierPattern(
+            text=str(item.get("text") or ""), kind=str(item.get("kind") or "other"),
+            chips=tuple(chip(x) for x in evidence if isinstance(x, str))
+            if isinstance(evidence, list) else ()))
+    ideas = insight.get("ideas")
+    shown = report.status == "done"
+    return OutlierReportView(
+        status=report.status, when=when(report.created_at), old=old, error=report.error,
+        patterns=tuple(patterns) if shown else (),
+        ideas=tuple(str(i) for i in ideas if isinstance(i, str)) if shown and isinstance(ideas, list) else (),
+        problems=tuple(report.problems), cost=format_cost(report.cost_usd), model=report.model,
+        tokens=(f"{report.input_tokens:,} in, {report.output_tokens:,} out"
+                if report.input_tokens or report.output_tokens else ""))
+
+
+def build_outlier_view(videos: Sequence[Video], scores: Sequence[OutlierScore],
+                       report: OutlierReport | None, current_pull_id: int | None,
+                       when: Callable[[str], str] = lambda iso: iso) -> OutlierView:
+    """The Outliers page: the table of outliers and of videos below the norm, and the newest explanation.
+
+    The model's per-video lines only show when the report was made from the current pull; an older
+    report is still shown, with a note, because its patterns may still be useful.
+    """
+    by_id = {v.video_id: v for v in videos}
+    old = report is not None and report.pull_id != current_pull_id
+    whys: dict[str, str] = {}
+    if report is not None and report.status == "done" and not old:
+        labels = report.labels if isinstance(report.labels, dict) else {}
+        insight = report.insight if isinstance(report.insight, dict) else {}
+        for item in _dicts(insight.get("per_video")):
+            found = labels.get(str(item.get("label")))
+            video_id = found.get("video_id") if isinstance(found, dict) else None
+            if isinstance(video_id, str) and item.get("why"):
+                whys[video_id] = str(item["why"])
+    return OutlierView(
+        left_out=sum(1 for s in scores if s.status != "scored"),
+        outliers=tuple(_outlier_row(by_id[s.video_id], s, whys.get(s.video_id, ""))
+                       for s in outliers(scores)),
+        below=tuple(_outlier_row(by_id[s.video_id], s) for s in below_norm(scores)),
+        report=(_outlier_report_view(report, {k: v.title for k, v in by_id.items()}, old, when)
+                if report is not None else None),
+        limits={"peers": PEERS, "min_age": MIN_AGE_DAYS, "high": ratio_label(OUTLIER_THRESHOLD),
+                "low": ratio_label(BELOW_THRESHOLD), "explained": MAX_EXPLAINED,
+                "typical": MAX_TYPICAL, "chars": DESCRIPTION_CHARS})

@@ -5,6 +5,7 @@
 {% macro icon(name) %}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
 {%- if name == 'dashboard' -%}<rect x="3.5" y="3.5" width="7" height="9" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="5" rx="1.5"/><rect x="13.5" y="11.5" width="7" height="9" rx="1.5"/><rect x="3.5" y="15.5" width="7" height="5" rx="1.5"/>
 {%- elif name == 'content' -%}<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 14h8M8 17h5"/>
+{%- elif name == 'outliers' -%}<path d="M4 20h16M7 20v-5M12 20V9M17 20v-8"/><path d="M9.5 5.5l2.5-2.5 2.5 2.5"/>
 {%- elif name == 'setup' -%}<path d="M4 7h9M17 7h3M4 17h3M11 17h9M4 12h3M11 12h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/><circle cx="9" cy="12" r="0.1"/>
 {%- elif name == 'search' -%}<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/>
 {%- elif name == 'check' -%}<circle cx="12" cy="12" r="9"/><path d="M7.5 12.5l3 3 6-6.5"/>

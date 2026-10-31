@@ -1,0 +1,126 @@
+{% extends "shell.html" %}
+{% from "_macros.html" import thumb %}
+{% block title %}Outliers - Yezatas{% endblock %}
+
+{# One table of videos with their numbers. `rows` are OutlierRow; the "why" line shows under the title when there is one. #}
+{% macro rows_table(rows, caption) %}
+<table class="vtable ol-table">
+  <caption class="visually-hidden">{{ caption }}</caption>
+  <thead>
+    <tr>
+      <th class="col-video" scope="col">Video</th>
+      <th class="col-date" scope="col">Published</th>
+      <th class="col-num" scope="col">Views</th>
+      <th class="col-median" scope="col">Peer median</th>
+      <th class="col-ratio" scope="col">vs norm</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="col-video">
+        <div class="vcell">
+          <a class="vthumb" href="/videos/{{ r.video_id|urlencode }}" tabindex="-1" aria-hidden="true">{{ thumb(r.thumb, 'sm') }}</a>
+          <div class="vtext">
+            <a class="vtitle" href="/videos/{{ r.video_id|urlencode }}">{{ r.title }}</a>
+            {% if r.why %}<span class="ol-why">{{ r.why }}</span>{% endif %}
+          </div>
+        </div>
+      </td>
+      <td class="col-date">{{ r.published }}</td>
+      <td class="col-num">{{ r.views }}</td>
+      <td class="col-median">{{ r.median }}</td>
+      <td class="col-ratio"><strong>{{ r.ratio }}</strong></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% block content %}
+{% set lim = ov.limits %}
+<h1 class="page-title">Outliers: videos that beat your channel's norm for their age</h1>
+
+<p class="muted" id="outliers-about">Each video is compared with the median views of the {{ lim.peers }} public videos published nearest to it. Views as of your last pull on {{ as_of }}. Videos younger than {{ lim.min_age }} days, private or unlisted videos and live streams are left out: <span id="outliers-left-out">{{ ov.left_out }} left out</span>.</p>
+
+<section class="card" id="outliers-list" aria-labelledby="h-outliers">
+  <h2 id="h-outliers">Outliers ({{ lim.high }} or more) <span class="muted">{{ ov.outliers|length }} video{{ '' if ov.outliers|length == 1 else 's' }}</span></h2>
+  {% if ov.outliers %}
+  {{ rows_table(ov.outliers, 'Videos far above the norm for their age') }}
+  {% else %}
+  <p class="empty-note" id="no-outliers">No video is {{ lim.high }} or more above its norm.</p>
+  {% endif %}
+</section>
+
+<details class="card ol-below" id="outliers-below">
+  <summary><h2 class="ol-summary">Below the norm ({{ lim.low }} or less) <span class="muted">{{ ov.below|length }} video{{ '' if ov.below|length == 1 else 's' }}</span></h2></summary>
+  {% if ov.below %}
+  {{ rows_table(ov.below, 'Videos far below the norm for their age') }}
+  {% else %}
+  <p class="empty-note" id="no-below">No video is {{ lim.low }} or less of its norm.</p>
+  {% endif %}
+</details>
+
+{% set rp = ov.report %}
+<section class="card" id="why" aria-labelledby="h-why">
+  <h2 id="h-why">Why these worked</h2>
+  <p class="muted">{{ model }} reads the titles, lengths, topics and thumbnails of your biggest outliers next to typical videos and says what the winners share. Every number comes from code; the model only writes words, and a line that quotes a number it was not given is dropped.</p>
+
+  {% if running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="outliers-msg" role="status" aria-live="polite">{{ message or 'Starting…' }}</span></p>
+  <p class="hint">This takes about a minute. You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if failed %}
+  <div class="flash error" role="alert" id="outliers-failed">{{ failed }}</div>
+  <form class="inline" method="post" action="/outliers/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if not has_key %}<p class="hint" id="outliers-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  <form class="packaging-form" method="post" action="/outliers/explain">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="hint">The titles, tags, lengths, the first {{ lim.chars }} characters of the descriptions and the thumbnails of up to {{ lim.explained }} outliers and {{ lim.typical }} typical videos go to Meta's Model API ({{ model }}, Standard mode: Meta does not use them for training). Nothing is sent to YouTube.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if not has_key %} disabled{% endif %}>Explain with Muse Spark</button></div>
+  </form>
+  {% endif %}
+
+  {% if rp %}
+  <div id="outliers-report">
+    <h3 class="run-h">Last explanation{% if rp.when %}: {{ rp.when }}{% endif %}</h3>
+    {% if rp.old %}<p class="flash" id="outliers-old">This explanation was made from an older pull, so it may not match the table above.</p>{% endif %}
+    {% if rp.status == 'error' %}
+    <div class="flash error" role="alert" id="outliers-error">{{ rp.error }}</div>
+    {% elif rp.status == 'too_few' %}
+    <p class="muted" id="outliers-too-few">There are fewer than 2 outliers, so there was nothing to compare. Nothing was sent to the model.</p>
+    {% else %}
+    <h4 class="run-h">What the outliers share</h4>
+    {% if rp.patterns %}
+    <ul class="ol-patterns" id="outliers-patterns">
+      {% for p in rp.patterns %}
+      <li class="ol-pattern">
+        <p>{{ p.text }} <span class="pill unverified">{{ p.kind }}</span></p>
+        <ul class="chip-row ol-chips">
+          {% for c in p.chips %}<li>{% if c.href %}<a class="chip" href="{{ c.href }}"><span class="ol-label">{{ c.label }}</span>&nbsp;{{ c.title }}</a>{% else %}<span class="chip"><span class="ol-label">{{ c.label }}</span></span>{% endif %}</li>{% endfor %}
+        </ul>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">The model gave no usable patterns.</p>
+    {% endif %}
+    {% if rp.ideas %}
+    <h4 class="run-h">Ideas for your next titles and thumbnails</h4>
+    <ol class="run-list" id="outliers-ideas">
+      {% for idea in rp.ideas %}<li>{{ idea }}</li>{% endfor %}
+    </ol>
+    {% endif %}
+    {% if rp.problems %}
+    <ul class="pk-problems muted" id="outliers-problems">
+      {% for problem in rp.problems %}<li>{{ problem }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+    <p class="muted">Cost {{ rp.cost }}{% if rp.model %} &middot; {{ rp.model }}{% endif %}{% if rp.tokens %} &middot; {{ rp.tokens }} tokens{% endif %}</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
