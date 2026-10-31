@@ -143,8 +143,25 @@ _SCHEMA_V4: tuple[str, ...] = (
     "CREATE INDEX idx_translations_video ON translations(video_id, language, id)",
 )
 
+_SCHEMA_V5: tuple[str, ...] = (
+    """CREATE TABLE transcripts (
+        id INTEGER PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        language TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL,
+        source_name TEXT NOT NULL DEFAULT '',
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        segments_json TEXT NOT NULL DEFAULT '[]',
+        problems_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_transcripts_video ON transcripts(video_id, id)",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
-MIGRATIONS: tuple[tuple[str, ...], ...] = (_SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4)
+MIGRATIONS: tuple[tuple[str, ...], ...] = (
+    _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5
+)
 
 _ORDER_COLUMNS = frozenset(
     {"view_count", "like_count", "comment_count", "published_at", "title", "updated_at", "video_id"}
@@ -280,6 +297,22 @@ class TranslationRecord:
     back_translation: dict[str, str]  # the verifier's blind back-translation: title, description
     input_tokens: int
     output_tokens: int
+    created_at: str
+
+
+@dataclass(frozen=True)
+class TranscriptRecord:
+    """A timed transcript of a video's audio. Every time comes from the audio itself: the segment
+    boundaries are where the audio was cut, so chapters and subtitles never invent a time."""
+
+    id: int  # 0 before it is stored
+    video_id: str
+    language: str  # the language hint it was transcribed with, e.g. "en" ("" for none)
+    model: str  # model id that transcribed it
+    source_name: str  # the audio or video file's name (not its full path)
+    duration_ms: int  # length of the audio
+    segments: list[dict[str, Any]]  # [{"start_ms", "end_ms", "text"}], in order
+    problems: list[str]  # pieces that could not be transcribed, as short sentences
     created_at: str
 
 
@@ -762,6 +795,44 @@ class Store:
             "SELECT * FROM translations WHERE video_id = ? ORDER BY id DESC", (video_id,)
         ).fetchall()
         return [self._row_to_translation(r) for r in rows]
+
+    @staticmethod
+    def _row_to_transcript(row: sqlite3.Row) -> TranscriptRecord:
+        return TranscriptRecord(
+            id=row["id"],
+            video_id=row["video_id"],
+            language=row["language"],
+            model=row["model"],
+            source_name=row["source_name"],
+            duration_ms=row["duration_ms"],
+            segments=json.loads(row["segments_json"]),
+            problems=json.loads(row["problems_json"]),
+            created_at=row["created_at"],
+        )
+
+    def add_transcript(self, record: TranscriptRecord, now: datetime | None = None) -> int:
+        """Store a transcript (its `id` and `created_at` are ignored); returns the new id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO transcripts (video_id, language, model, source_name, duration_ms, "
+                "segments_json, problems_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (record.video_id, record.language, record.model, record.source_name,
+                 record.duration_ms, _dumps(record.segments), _dumps(record.problems), _iso(now)),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def get_transcript(self, transcript_id: int) -> TranscriptRecord | None:
+        row = self._conn.execute(
+            "SELECT * FROM transcripts WHERE id = ?", (transcript_id,)
+        ).fetchone()
+        return self._row_to_transcript(row) if row else None
+
+    def latest_transcript(self, video_id: str) -> TranscriptRecord | None:
+        """The newest transcript of a video, or None."""
+        row = self._conn.execute(
+            "SELECT * FROM transcripts WHERE video_id = ? ORDER BY id DESC LIMIT 1", (video_id,)
+        ).fetchone()
+        return self._row_to_transcript(row) if row else None
 
     def latest_translations(self, video_id: str) -> dict[str, TranslationRecord]:
         """The newest translation of a video per language."""

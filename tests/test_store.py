@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from yezatas.store import MIGRATIONS, DraftRow, PushRecord, Store, TranslationRecord, Video
+from yezatas.store import (MIGRATIONS, DraftRow, PushRecord, Store, TranscriptRecord,
+                           TranslationRecord, Video)
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -40,7 +41,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 4
+        assert s.schema_version == len(MIGRATIONS) == 5
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -50,7 +51,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 4
+        assert s.schema_version == 5
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -146,10 +147,10 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
         s.add_quota_entry("videos.list", 1, quota_day="2026-10-01", now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 1 database
     conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; "
-                       "DROP TABLE translations; PRAGMA user_version = 1;")
+                       "DROP TABLE translations; DROP TABLE transcripts; PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 4
+        assert s.schema_version == 5
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -170,7 +171,7 @@ def test_v3_drafts_get_the_catalog_language_as_their_base(tmp_path: Path) -> Non
         s.put_draft(make_draft("vid00000002"))
     conn = sqlite3.connect(path)  # turn it back into a version 3 database
     conn.executescript(
-        "DROP TABLE translations; ALTER TABLE drafts DROP COLUMN default_language; "
+        "DROP TABLE transcripts; DROP TABLE translations; ALTER TABLE drafts DROP COLUMN default_language; "
         "ALTER TABLE drafts DROP COLUMN localizations_json; "
         "ALTER TABLE drafts DROP COLUMN base_default_language; "
         "ALTER TABLE drafts DROP COLUMN base_localizations_json; PRAGMA user_version = 3;")
@@ -320,3 +321,22 @@ def test_translations_round_trip_and_latest_per_language(store: Store) -> None:
     assert set(latest) == {"es", "de"} and latest["es"].title == "Uno bis"
     assert latest["es"].status == "flagged" and store.list_translations("other") == []
 
+
+
+def test_transcripts_round_trip(store: Store) -> None:
+    assert store.latest_transcript("vid00000001") is None
+    segments = [{"start_ms": 0, "end_ms": 4200, "text": "Hallo und willkommen 🌵"},
+                {"start_ms": 4200, "end_ms": 9800, "text": "Heute topfen wir um."}]
+    first = store.add_transcript(TranscriptRecord(0, "vid00000001", "de", "asr-test", "clip.mp4",
+                                                  9800, segments, [], ""), now=T0)
+    second = store.add_transcript(TranscriptRecord(0, "vid00000001", "", "asr-test", "clip.mp4",
+                                                   9800, segments[:1], ["Piece 2 failed."], ""),
+                                  now=T0 + timedelta(minutes=1))
+    got = store.get_transcript(first)
+    assert got is not None and got.id == first and got.segments == segments
+    assert (got.language, got.model, got.source_name, got.duration_ms) == ("de", "asr-test",
+                                                                          "clip.mp4", 9800)
+    assert got.created_at == T0.isoformat()
+    latest = store.latest_transcript("vid00000001")
+    assert latest is not None and latest.id == second and latest.problems == ["Piece 2 failed."]
+    assert store.get_transcript(999) is None
