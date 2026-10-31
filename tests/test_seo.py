@@ -337,6 +337,26 @@ def test_chapters_out_of_order_or_too_close():
     assert not check(make_video(description="0:00 A\n1:00 A again\n1:00 B"), chap).passed
 
 
+def test_chapters_problem_names_the_short_chapters():
+    chap = "description_chapters"
+    result = check(make_video(description="0:00 A\n0:14 B\n0:23 C\n1:39 D\n1:48 E\n2:30 F"), chap)
+    assert not result.passed
+    assert "2 chapters are shorter than 10 seconds: 0:14 (9 s), 1:39 (9 s)." in result.detail
+    one = check(make_video(description="0:00 A\n0:09 B\n1:30 C"), chap).detail
+    assert one.startswith("1 chapter is shorter than 10 seconds: 0:00 (9 s).")
+    back = check(make_video(description="0:00 A\n4:10 B\n1:30 C"), chap).detail
+    assert back == "The timestamps must go up, but 1:30 comes after 4:10."
+
+
+def test_chapter_problem_writes_hours_like_youtube():
+    from yezatas.seo import chapter_problem
+
+    assert chapter_problem([0, 3600, 3605]) == (
+        "1 chapter is shorter than 10 seconds: 1:00:00 (5 s). YouTube only shows chapters when "
+        "every one is at least 10 seconds long.")
+    assert chapter_problem([0, 60, 120]) == ""
+
+
 def test_chapters_need_three():
     assert not check(make_video(description="0:00 A\n1:30 B"), "description_chapters").passed
     assert not check(make_video(description="no chapters at all"), "description_chapters").passed

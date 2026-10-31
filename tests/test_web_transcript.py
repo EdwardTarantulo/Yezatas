@@ -258,6 +258,16 @@ def test_make_chapters_is_disabled_when_the_description_has_timestamps(tmp_path:
     section = card(page(ui))
     assert "disabled" in section.split("Make chapters")[0].rsplit("<button", 1)[1]
     assert "already has timestamps" in section
+    assert "will not show them" not in section
+
+
+def test_timestamps_youtube_will_not_show_are_named_on_the_chapters_card(tmp_path: Path) -> None:
+    ui, _ = make_ts_ui(tmp_path, description="Intro.\n0:00 Start\n0:14 Box\n0:23 Look\n2:00 End")
+    seed_transcript(ui.config, V1)
+    section = card(page(ui))
+    assert "disabled" in section.split("Make chapters")[0].rsplit("<button", 1)[1]
+    assert "but YouTube will not show them as chapters" in section
+    assert "1 chapter is shorter than 10 seconds: 0:14 (9 s)." in section
 
 
 def test_a_draft_with_timestamps_blocks_chapters_even_if_the_video_has_none(tmp_path: Path) -> None:

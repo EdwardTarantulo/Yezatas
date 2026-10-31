@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Sequence
 
 from .store import Video
 
@@ -348,6 +348,31 @@ def parse_chapters(description: str) -> list[int]:
             for h, m, s in _TIMESTAMP.findall(description)]
 
 
+def _clock(seconds: int) -> str:
+    """`m:ss`, or `h:mm:ss` from an hour up, as YouTube writes chapter times."""
+    hours, rest = divmod(seconds, 3600)
+    return f"{hours}:{rest // 60:02d}:{rest % 60:02d}" if hours else f"{rest // 60}:{rest % 60:02d}"
+
+
+def chapter_problem(stamps: Sequence[int]) -> str:
+    """Why YouTube would not show these chapter times, in a sentence naming the times, or ""."""
+    if len(stamps) < CHAPTERS_MIN_COUNT:
+        return f"Found {len(stamps)} timestamps; chapters need at least {CHAPTERS_MIN_COUNT}."
+    if stamps[0] != 0:
+        return "The first timestamp is not 0:00."
+    pairs = list(zip(stamps, stamps[1:]))
+    back = next(((a, b) for a, b in pairs if b <= a), None)
+    if back is not None:
+        return f"The timestamps must go up, but {_clock(back[1])} comes after {_clock(back[0])}."
+    short = [(a, b) for a, b in pairs if b - a < CHAPTER_MIN_GAP]
+    if not short:
+        return ""
+    listed = ", ".join(f"{_clock(a)} ({b - a} s)" for a, b in short)
+    which = "1 chapter is" if len(short) == 1 else f"{len(short)} chapters are"
+    return (f"{which} shorter than {CHAPTER_MIN_GAP} seconds: {listed}. YouTube only shows "
+            f"chapters when every one is at least {CHAPTER_MIN_GAP} seconds long.")
+
+
 def check_description_chapters(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "Long video has chapters starting at 0:00"
     seconds = parse_duration(video.duration)
@@ -355,14 +380,7 @@ def check_description_chapters(video: Video, context: ChannelContext | None) -> 
         return _skip("description_chapters", "description", title, 8,
                      "Chapters only matter for videos of 4 minutes or more.")
     stamps = parse_chapters(video.description)
-    if len(stamps) < CHAPTERS_MIN_COUNT:
-        problem = f"Found {len(stamps)} timestamps; chapters need at least {CHAPTERS_MIN_COUNT}."
-    elif stamps[0] != 0:
-        problem = "The first timestamp is not 0:00."
-    elif any(b - a < CHAPTER_MIN_GAP for a, b in zip(stamps, stamps[1:])):
-        problem = f"Timestamps must go up, at least {CHAPTER_MIN_GAP} seconds apart."
-    else:
-        problem = ""
+    problem = chapter_problem(stamps)
     return _result("description_chapters", "description", title, 8, 0 if problem else 8,
                    problem or f"{len(stamps)} chapters found.",
                    "Add chapters, one per line like \"0:00 Intro\", at least 3, starting at "

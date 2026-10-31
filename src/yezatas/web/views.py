@@ -18,8 +18,8 @@ from ..diffs import DraftDiff, diff_row
 from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_TYPICAL, MIN_AGE_DAYS,
                         OUTLIER_THRESHOLD, PEERS, OutlierScore, below_norm, outliers, ratio_label)
 from ..push import PushItem
-from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, fix_priority,
-                   parse_chapters, parse_duration)
+from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, chapter_problem,
+                   fix_priority, parse_chapters, parse_duration)
 from ..store import (AgentRun, DraftRow, OutlierReport, PackagingReview, PushRecord,
                      SubtitleTranslationRecord, ThumbnailVariant, TranscriptRecord, TranslationRecord,
                      Video)
@@ -907,7 +907,13 @@ def chapters_blocker(video: Video, row: DraftRow | None, record: TranscriptRecor
         return (f"Chapters only help on videos of {CHAPTERS_MIN_DURATION // 60} minutes or more; "
                 "this one is shorter.")
     text = row.description if row is not None else video.description
-    if parse_chapters(text):
+    stamps = parse_chapters(text)
+    if stamps:
+        problem = chapter_problem(stamps)
+        if problem:
+            return (f"The description already has timestamps, but YouTube will not show them as "
+                    f"chapters. {problem} Yezatas never rewrites your own chapters: fix them in "
+                    "the description, or remove them to make new ones here.")
         return ("The description already has timestamps. Yezatas never rewrites your own "
                 "chapters; remove them first if you want new ones.")
     if not any(str(s.get("text") or "").strip() for s in record.segments):
