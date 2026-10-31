@@ -43,6 +43,30 @@ def env(tmp_path: Path):
     store.close()
 
 
+def test_catalog_keeps_the_tag_order_sent_not_the_response_order(env) -> None:
+    # Real YouTube: the videos.update response lists tags alphabetically, a later read gives the
+    # order sent. Storing the response's order made the next push of that video a false conflict.
+    store, writer = env
+    real_update = writer.update_video
+
+    def sorted_response(body, part):
+        response = real_update(body, part)
+        response["snippet"]["tags"] = sorted(response["snippet"]["tags"])
+        return response
+
+    writer.update_video = sorted_response
+    save_draft(store, V1, "A better title", "New text", ["zebra", "apple"], now=NOW)
+    approve(store, V1, now=NOW)
+    seen = fingerprint(store.get_draft(V1))
+    result = push_drafts(writer, store, make_guard(store), {V1: seen}, lambda _: None, now=NOW)
+    assert result.items[0].status == "pushed"
+    assert store.get_video(V1).tags == ["zebra", "apple"]
+    approved_draft(store, V1, "Second change")  # the next push is not a conflict
+    seen = fingerprint(store.get_draft(V1))
+    result = push_drafts(writer, store, make_guard(store), {V1: seen}, lambda _: None, now=NOW)
+    assert result.items[0].status == "pushed"
+
+
 def approved_draft(store: Store, video_id: str, title: str | None = None) -> str:
     """Save and approve a draft; returns the fingerprint the creator saw."""
     save_draft(store, video_id, title or f"New title for {video_id}", "New text", ["x", "y"],

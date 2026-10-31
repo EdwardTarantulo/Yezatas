@@ -260,7 +260,9 @@ def push_drafts(
             video_id,
             returned.get("title", sent["title"]),
             returned.get("description", sent["description"]),
-            returned.get("tags", sent["tags"]),
+            # The update response lists tags alphabetically, but YouTube keeps the order sent (a
+            # later read returns it): storing the response's order made the next push conflict.
+            sent["tags"],
             now,
             **extra,
         )
