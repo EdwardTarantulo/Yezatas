@@ -44,7 +44,7 @@
           {{ thumb(e.thumb, 'sm') }}
           <span class="fix-main">
             <span class="fix-title">{{ e.video.title }}</span>
-            <span class="fix-meta">{{ e.views_text }} views{% if e.top_failed %} &middot; To fix: {{ e.top_failed }}{% endif %}{% if e.card.missing %} &middot; +{{ e.card.missing }} points possible{% endif %}</span>
+            <span class="fix-meta">{{ e.views_text }} views{% if e.card.missing %} &middot; +{{ e.card.missing }} points possible{% endif %}{% if e.top_failed %} &middot; To fix: {{ e.top_failed }}{% endif %}</span>
           </span>
           {{ score_badge(e.card.score, e.band) }}
         </a>
