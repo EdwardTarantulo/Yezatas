@@ -15,7 +15,7 @@ import time
 import webbrowser
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Sequence
 from urllib.parse import quote, urlencode
@@ -29,6 +29,7 @@ from starlette.templating import Jinja2Templates
 
 from .. import agent, auth, bulk, edits, push, subtitle_translate
 from .. import chapters as chapters_mod
+from .. import adcheck as adcheck_mod
 from .. import copilot as copilot_mod
 from .. import links as links_mod
 from .. import outliers as outliers_mod
@@ -39,7 +40,7 @@ from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
 from ..quota import QuotaGuard
 from ..seo import score_catalog
-from ..store import OutlierReport, Store, ThumbnailVariant
+from ..store import AdCheck, OutlierReport, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import GoogleYouTubeReader, GoogleYouTubeWriter, YouTubeReader, YouTubeWriter
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
@@ -50,7 +51,7 @@ from .security import CSRF_FIELD, Sessions, install_security, load_session_key, 
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
 from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
-                    build_bulk_preview, build_copilot_turns, build_links_view, build_listing,
+                    build_adcheck_view, build_bulk_preview, build_copilot_turns, build_links_view, build_listing,
                     build_outlier_view, build_packaging_view, build_preview, build_subtitles_view,
                     build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
                     chapters_blocker, dashboard_model, format_cost, format_count, format_date,
@@ -119,6 +120,10 @@ LINKS_TIMEOUT_MESSAGE = (
     "The link check took more than 10 minutes, so Yezatas stopped waiting. The links it "
     "finished are kept on the Links page."
 )
+ADCHECK_TIMEOUT_SECONDS = 3 * 60.0
+ADCHECK_TIMEOUT_MESSAGE = (
+    "The advertiser-friendly check took more than 3 minutes, so Yezatas stopped waiting. Try again."
+)
 NO_PACKAGING_KEY = "There is no Meta API key. Add one in Setup. Nothing was sent."
 MAX_ID_DIGITS = 12  # a variant id in a URL; longer is never a real one
 MAX_PATH_CHARS = 1000
@@ -139,6 +144,8 @@ TranscribeFn = Callable[..., "transcribe_mod.TranscribeResult"]
 ChaptersFn = Callable[[Store, str, Report], "chapters_mod.ChaptersResult"]
 # (store, question, chat id, the time of the views, report) -> the id of the new copilot turn
 CopilotFn = Callable[[Store, str, int, datetime, Report], int]
+# (store, video id, the time now, report) -> the stored check (a failed one included)
+AdcheckFn = Callable[[Store, str, datetime, Report], "AdCheck"]
 # The three packaging clients (None without a Meta API key); the real one reads the key from the config.
 PackagingToolsFactory = Callable[[Config], "packaging_mod.PackagingTools | None"]
 
@@ -292,6 +299,29 @@ def make_default_copilot(config: Config) -> CopilotFn:
     return run
 
 
+def map_adcheck_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if type(exc) is ValueError:  # the plain sentence of the check's own guard
+        return "adcheck", str(exc)
+    return "adcheck", f"The advertiser-friendly check stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def make_default_adcheck(config: Config) -> AdcheckFn:
+    """The real check: Muse Spark through Meta's Model API, one client per check."""
+
+    def run(store: Store, video_id: str, now: datetime, report: Report) -> "AdCheck":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        return adcheck_mod.check_video(store, client, video_id, now=now, report=report)
+
+    return run
+
+
 def make_default_transcribe(config: Config) -> TranscribeFn:
     """The real transcribe function: Muse Voice Transcribe through Meta's Model API."""
 
@@ -410,6 +440,7 @@ class WebState:
         packaging_key: Callable[[Config], bool] | None = None,
         copilot_fn: CopilotFn | None = None,
         link_fetch: links_mod.Fetch | None = None,
+        adcheck_fn: AdcheckFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -423,6 +454,7 @@ class WebState:
         self._transcribe = transcribe_fn or make_default_transcribe(config)
         self._chapters = chapters_fn or make_default_chapters(config)
         self._copilot = copilot_fn or make_default_copilot(config)
+        self._adcheck = adcheck_fn or make_default_adcheck(config)
         self._link_fetch = link_fetch  # None: the real visit, links_mod.fetch_url
         self.packaging_tools = packaging_tools
         # Whether a Meta key exists, asked on page loads without building any client. None: an
@@ -471,6 +503,10 @@ class WebState:
         self._copilot_chat: int | None = None  # None: the chat of the newest turn
         self.links_job = Job(map_links_error, LINKS_TIMEOUT_SECONDS, LINKS_TIMEOUT_MESSAGE, clock)
         self._links_seen: JobSnapshot | None = None
+        self.adcheck_job = Job(map_adcheck_error, ADCHECK_TIMEOUT_SECONDS, ADCHECK_TIMEOUT_MESSAGE,
+                               clock)
+        self._adcheck_seen: JobSnapshot | None = None
+        self._adcheck_video = ""
         self.variants_job = Job(map_variants_error, VARIANTS_TIMEOUT_SECONDS,
                                 VARIANTS_TIMEOUT_MESSAGE, clock)
         self._variants_seen: JobSnapshot | None = None
@@ -983,6 +1019,34 @@ class WebState:
             with self._lock:
                 self._links_seen = snap
 
+    # --- advertiser-friendly check of one video --------------------------------------------------
+    def start_adcheck(self, video_id: str) -> bool:
+        """Check one video in the one adcheck job; the result is stored by the check itself."""
+        if not self.adcheck_job.start(lambda report: self._run_adcheck(video_id, report)):
+            return False
+        with self._lock:
+            self._adcheck_video = video_id
+        return True
+
+    def _run_adcheck(self, video_id: str, report: Report) -> "AdCheck":
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            return self._adcheck(store, video_id, datetime.now(timezone.utc), report)
+
+    def adcheck_state(self) -> tuple[JobSnapshot, str]:
+        """(job snapshot, the video id it works on). A finished job the creator dismissed is idle."""
+        snap = self.adcheck_job.snapshot()
+        with self._lock:
+            if snap is self._adcheck_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._adcheck_video
+
+    def dismiss_adcheck_result(self) -> None:
+        snap = self.adcheck_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._adcheck_seen = snap
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -1020,6 +1084,7 @@ def create_app(
     packaging_key: Callable[[Config], bool] | None = None,
     copilot: CopilotFn | None = None,
     link_fetch: links_mod.Fetch | None = None,
+    adcheck: AdcheckFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1033,7 +1098,7 @@ def create_app(
                      packaging_tools or packaging_mod.packaging_tools_from_config,
                      packaging_fetch or packaging_mod.fetch_thumbnail,
                      packaging_key or (None if packaging_tools else has_meta_key), copilot,
-                     link_fetch)
+                     link_fetch, adcheck)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -1290,6 +1355,13 @@ def create_app(
                 "vision": config.model, "segmenter": packaging_mod.SAM_MODEL,
                 "maker": packaging_mod.IMAGE_MODEL, "check": checking, "variants": making}
 
+    def adcheck_panel(video_id: str, has_key: bool) -> dict[str, Any]:
+        """What the advertiser-friendly check job is doing, for one video page."""
+        snap, job_video = state.adcheck_state()
+        panel = job_panel(snap, job_video, video_id)
+        panel.update({"has_key": has_key, "model": config.model})
+        return panel
+
     def video_not_found(request: Request) -> Response:
         return render(request, "error.html", {
             "layout": "shell.html", "active": "content",
@@ -1360,7 +1432,12 @@ def create_app(
         text = ((row.title, row.description, row.tags) if row is not None
                 else (video.title, video.description, tuple(video.tags)))
         score = next((s for s in outlier_scores(data) if s.video_id == video_id), None)
+        ac = adcheck_panel(video_id, pk["has_tools"])  # one key check per page load
+        with Store(config.catalog_db) as store:
+            stored_check = store.latest_ad_check(video_id)
+            current_hash = adcheck_mod.current_source_hash(store, video_id)
         return render(request, "video.html", {
+            "ac": ac, "av": build_adcheck_view(stored_check, current_hash, _local_time),
             "outlier_line": outlier_line(score),
             "change": card,
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
@@ -1382,7 +1459,8 @@ def create_app(
                      or ts["chapters"]["running"] or ts["chapters"]["busy"]
                      or sb["running"] or sb["busy"]
                      or pk["check"]["running"] or pk["check"]["busy"]
-                     or pk["variants"]["running"] or pk["variants"]["busy"]),
+                     or pk["variants"]["running"] or pk["variants"]["busy"]
+                     or ac["running"] or ac["busy"]),
         })
 
     def usable_variant(video_id: str, raw: str) -> ThumbnailVariant | None:
@@ -1554,6 +1632,7 @@ def create_app(
             "outliers": _job_json(state.outliers_job.snapshot()),
             "copilot": _job_json(state.copilot_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
+            "adcheck": _job_json(state.adcheck_job.snapshot()),
             "variants": _job_json(state.variants_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
@@ -2370,6 +2449,31 @@ def create_app(
         state.dismiss_packaging_result()
         video_id = str(form.get("video_id") or "")
         return see_other(f"/videos/{quote(video_id)}#packaging" if video_id else "/")
+
+    # --- advertiser-friendly check (advice only) ---------------------------------------------
+    @app.post("/videos/{video_id}/adcheck")
+    async def check_video_ads(request: Request, video_id: str) -> Response:
+        await read_form(request)
+
+        def exists() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.get_video(video_id) is not None
+
+        if not await run_in_threadpool(exists):
+            return video_not_found(request)
+        if not await run_in_threadpool(has_packaging_key):
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif not state.start_adcheck(video_id):
+            flash(request, "error", "An advertiser-friendly check is already running. Wait for it "
+                                    "to finish.")
+        return see_other(f"/videos/{quote(video_id)}#adcheck")
+
+    @app.post("/adcheck/done")
+    async def dismiss_adcheck(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_adcheck_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#adcheck" if video_id else "/")
 
     # --- outliers: what the best videos share ------------------------------------------------------
     @app.post("/outliers/explain")

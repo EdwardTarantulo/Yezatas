@@ -1,0 +1,56 @@
+{# The "Advertiser-friendly check" card of the video page. `ac` is the job state, `av` the newest stored check. Advice only. #}
+<section class="card ac-card" id="adcheck" aria-labelledby="h-adcheck">
+  <h2 id="h-adcheck">Advertiser-friendly check</h2>
+  <p class="muted">{{ ac.model }} reads the title, description, tags and transcript of this video and points out words that may limit its ads under YouTube's advertiser-friendly guidelines. Every quote is checked by code against the real text.</p>
+  <p class="ac-advice" id="adcheck-advice">{{ av.advice }}</p>
+
+  {% if ac.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="adcheck-msg" role="status" aria-live="polite">{{ ac.message or 'Starting…' }}</span></p>
+  <p class="hint">This takes a minute or two. You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if ac.failed %}
+  <div class="flash error" role="alert" id="adcheck-failed">{{ ac.failed }}</div>
+  <form class="inline" method="post" action="/adcheck/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if ac.busy %}<p class="hint" id="adcheck-busy">Another video is being checked. Wait for it to finish.</p>{% endif %}
+  {% if not ac.has_key %}<p class="hint" id="adcheck-no-key">There is no Meta API key yet, so the check cannot run. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  <form class="ac-form" method="post" action="/videos/{{ video.video_id|urlencode }}/adcheck">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="hint">The title, description, tags and transcript go to Meta's Model API ({{ ac.model }}, Standard mode: Meta does not use them for training). Nothing is sent to YouTube and nothing is changed.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if ac.busy or not ac.has_key %} disabled{% endif %}>{{ 'Try again' if av.failed else ('Check again' if av.check else 'Check this video') }}</button></div>
+  </form>
+  {% endif %}
+
+  {% if av.check %}
+  <div id="adcheck-result">
+    <h3 class="run-h">Last check{% if av.when %}: {{ av.when }}{% endif %}</h3>
+    {% if av.failed %}
+    <div class="flash error" role="alert" id="adcheck-error">{{ av.error }}</div>
+    {% else %}
+    <p class="ac-verdict"><span class="pill {{ av.tone }}" id="adcheck-verdict">{{ av.verdict }}</span></p>
+    {% if av.summary %}<p id="adcheck-summary">{{ av.summary }}</p>{% endif %}
+    {% if av.changed_line %}<p class="flash" id="adcheck-changed">{{ av.changed_line }}</p>{% endif %}
+    {% if av.no_transcript_line %}<p class="hint" id="adcheck-no-transcript">{{ av.no_transcript_line }} <a href="#transcript">Transcribe the video</a> for a full check.</p>{% endif %}
+    {% if av.findings %}
+    <ul class="ac-findings" id="adcheck-findings">
+      {% for f in av.findings %}
+      <li class="ac-finding">
+        <p class="ac-head"><strong>{{ f.category }}</strong> <span class="muted">&middot; {{ f.where }}</span></p>
+        <blockquote class="ac-quote">{{ f.quote }}</blockquote>
+        {% if f.why %}<p class="ac-why">{{ f.why }}</p>{% endif %}
+        {% if f.fix %}<p class="ac-fix"><span class="muted">Suggested change:</span> {{ f.fix }}</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if av.notes %}
+    <ul class="ac-notes muted" id="adcheck-notes">
+      {% for note in av.notes %}<li>{{ note }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+    <p class="muted" id="adcheck-cost">{{ av.model }}{% if av.tokens %} &middot; {{ av.tokens }} tokens &middot; cost {{ av.cost }}{% endif %}</p>
+  </div>
+  {% endif %}
+</section>

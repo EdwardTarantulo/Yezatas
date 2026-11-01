@@ -15,6 +15,7 @@ from urllib.parse import quote, urlencode
 
 from markupsafe import Markup, escape
 
+from .. import adcheck as adcheck_mod
 from .. import edits
 from ..agent import estimate_cost
 from ..bulk import MAX_BULK, BulkChange, BulkResult, BulkSpec
@@ -26,7 +27,7 @@ from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_T
 from ..push import PushItem
 from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, chapter_problem,
                    fix_priority, parse_chapters, parse_duration)
-from ..store import (AgentRun, CopilotProposal, CopilotTurn, DraftRow, OutlierReport,
+from ..store import (AdCheck, AgentRun, CopilotProposal, CopilotTurn, DraftRow, OutlierReport,
                      PackagingReview, PushRecord, PushRun, SubtitleTranslationRecord,
                      ThumbnailVariant, TranscriptRecord, TranslationRecord, Video)
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
@@ -2075,3 +2076,78 @@ def links_check_line(summary: LinkCheckSummary) -> str:
         text += (f" {_count(summary.not_checked, 'link')} with the least reach "
                  f"{'was' if summary.not_checked == 1 else 'were'} left out.")
     return text
+
+
+# --- the advertiser-friendly check card -----------------------------------------------------------
+AD_VERDICT_TONES = {"no_concerns": "done", "worth_a_look": "warn", "likely_limited": "problem"}
+AD_CHANGED_LINE = "The title, description, tags or transcript changed since this check."
+AD_NO_TRANSCRIPT_LINE = "No transcript: only the title, description and tags were read."
+
+
+@dataclass(frozen=True)
+class AdFindingView:
+    category: str  # the plain label
+    where: str  # "Title", "Description", "Tags" or "Transcript at 1:05"
+    quote: str
+    why: str
+    fix: str
+
+
+@dataclass(frozen=True)
+class AdCheckView:
+    """What the Advertiser-friendly check card shows besides the job state."""
+
+    check: AdCheck | None
+    failed: bool
+    error: str
+    verdict: str  # the plain label, "" for a failed check
+    tone: str
+    summary: str
+    findings: tuple[AdFindingView, ...]
+    notes: tuple[str, ...]
+    changed_line: str  # AD_CHANGED_LINE when the text differs from what was read, else ""
+    no_transcript_line: str
+    when: str
+    model: str
+    tokens: str
+    cost: str
+    advice: str
+
+
+def _ad_finding(item: Any) -> AdFindingView | None:
+    if not isinstance(item, dict):
+        return None
+    category = str(item.get("category") or "")
+    source = str(item.get("source") or "")
+    where = adcheck_mod.SOURCE_LABELS.get(source, source)
+    if source == "transcript" and item.get("time"):
+        where += f" at {item['time']}"
+    return AdFindingView(
+        category=adcheck_mod.CATEGORIES.get(category, category), where=where,
+        quote=str(item.get("quote") or ""), why=str(item.get("why") or ""),
+        fix=str(item.get("fix") or ""))
+
+
+def build_adcheck_view(check: AdCheck | None, current_hash: str | None,
+                       when: Callable[[str], str] = lambda iso: iso) -> AdCheckView:
+    """The newest check of a video as plain text for the template. Everything in it is escaped there."""
+    advice = adcheck_mod.ADVICE_LINE
+    if check is None:
+        return AdCheckView(None, False, "", "", "", "", (), (), "", "", "", "", "", "", advice)
+    failed = check.status != "done"
+    tokens = check.input_tokens + check.output_tokens
+    cost = estimate_cost(check.model, check.input_tokens, check.cached_tokens, check.output_tokens)
+    found = (_ad_finding(item) for item in check.findings) if not failed else ()
+    return AdCheckView(
+        check=check, failed=failed, error=check.error or "The check did not finish. Try again.",
+        verdict="" if failed else adcheck_mod.VERDICTS.get(check.verdict, check.verdict),
+        tone="problem" if failed else AD_VERDICT_TONES.get(check.verdict, ""),
+        summary=check.summary,
+        findings=tuple(f for f in found if f is not None),
+        notes=tuple(str(n) for n in check.notes),
+        changed_line=(AD_CHANGED_LINE if not failed and current_hash is not None
+                      and current_hash != check.source_hash else ""),
+        no_transcript_line="" if failed or check.had_transcript else AD_NO_TRANSCRIPT_LINE,
+        when=when(check.created_at), model=check.model,
+        tokens=f"{tokens:,}" if tokens else "", cost=format_cost(cost) if tokens else "",
+        advice=advice)
