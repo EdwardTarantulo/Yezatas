@@ -34,6 +34,7 @@ from .. import adcheck as adcheck_mod
 from .. import shorts as shorts_mod
 from .. import copilot as copilot_mod
 from .. import strategy as strategy_mod
+from .. import competitors as competitors_mod
 from .. import links as links_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
@@ -56,6 +57,7 @@ from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
                          parse_client_file, read_saved_client, save_client_file)
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
+from .competitors_view import build_competitor_cards, build_insight_view
 from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
@@ -124,6 +126,9 @@ OUTLIERS_TIMEOUT_MESSAGE = (
     "Explaining the outliers took more than 10 minutes, so Yezatas stopped waiting. Try again."
 )
 STRATEGY_TIMEOUT_SECONDS = 5 * 60.0
+COMPETITORS_TIMEOUT_SECONDS = 5 * 60.0
+COMPETITORS_TIMEOUT_MESSAGE = ("Reading or explaining the other channels took more than 5 minutes, so "
+                               "Yezatas stopped waiting. Try again.")
 STRATEGY_TIMEOUT_MESSAGE = (
     "The strategy report took more than 5 minutes, so Yezatas stopped waiting. Try again."
 )
@@ -186,6 +191,11 @@ CommentsAssistFn = Callable[[Store, str, datetime, Report], "comments_mod.Assist
 RuleMakerFn = Callable[[str], "customchecks_mod.RuleDraft"]
 # (store, home, the time of the views, report) -> the saved report
 StrategyFn = Callable[[Store, Path, datetime, Report], "strategy_mod.StrategyReport"]
+# (credentials) -> a reader of public channels
+CompetitorReaderFactory = Callable[[Any], "competitors_mod.PublicChannelReader"]
+# (the followed channels, report) -> the saved explanation
+CompetitorExplainFn = Callable[[list["competitors_mod.CompetitorChannel"], Report],
+                               "competitors_mod.CompetitorInsight"]
 # (store, the creator's words) -> the proposed bulk plan
 BulkAskerFn = Callable[[Store, str], "bulkask_mod.AskProposal"]
 
@@ -348,6 +358,33 @@ def make_default_strategy(config: Config) -> StrategyFn:
         client = MetaModelClient(key, strategy_mod.STRATEGY_MODEL)
         made = strategy_mod.make_report(store, client, as_of=as_of, report=report)
         strategy_mod.save_report(home, made)
+        return made
+
+    return run
+
+
+def map_competitors_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, competitors_mod.CompetitorError):
+        return "competitors", str(exc)
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    return map_api_error(exc)
+
+
+def make_default_competitor_explain(config: Config) -> CompetitorExplainFn:
+    def run(
+        channels: list["competitors_mod.CompetitorChannel"],
+        report: Report,
+    ) -> "competitors_mod.CompetitorInsight":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        report("Asking the model")
+        made = competitors_mod.explain(channels, client)
+        competitors_mod.save_insight(config.home, made)
         return made
 
     return run
@@ -603,6 +640,8 @@ class WebState:
         rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
         strategy_fn: StrategyFn | None = None,
         shorts_fn: ShortsFn | None = None,
+        competitor_reader: CompetitorReaderFactory | None = None,
+        competitor_explain: CompetitorExplainFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -623,6 +662,8 @@ class WebState:
         self._bulk_asker = bulk_asker or make_default_bulk_asker(config)
         self._strategy = strategy_fn or make_default_strategy(config)
         self._shorts = shorts_fn or make_default_shorts(config)
+        self._competitor_reader = competitor_reader  # None: the real reader
+        self._competitor_explain = competitor_explain or make_default_competitor_explain(config)
         self._link_fetch = link_fetch  # None: the real visit, links_mod.fetch_url
         self.packaging_tools = packaging_tools
         # Whether a Meta key exists, asked on page loads without building any client. None: an
@@ -668,6 +709,12 @@ class WebState:
         self.strategy_job = Job(map_strategy_error, STRATEGY_TIMEOUT_SECONDS,
                                 STRATEGY_TIMEOUT_MESSAGE, clock)
         self._strategy_seen: JobSnapshot | None = None
+        self.competitors_job = Job(map_competitors_error, COMPETITORS_TIMEOUT_SECONDS,
+                                   COMPETITORS_TIMEOUT_MESSAGE, clock)
+        self.competitors_explain_job = Job(map_competitors_error, COMPETITORS_TIMEOUT_SECONDS,
+                                           COMPETITORS_TIMEOUT_MESSAGE, clock)
+        self._competitors_seen: JobSnapshot | None = None
+        self._competitors_explain_seen: JobSnapshot | None = None
         self.copilot_job = Job(map_copilot_error, COPILOT_TIMEOUT_SECONDS,
                                COPILOT_TIMEOUT_MESSAGE, clock)
         self._copilot_seen: JobSnapshot | None = None
@@ -1193,7 +1240,54 @@ class WebState:
             with self._lock:
                 self._strategy_seen = snap
 
-    # --- copilot: questions about the channel ----------------------------------------------------
+    # --- competitors: outliers on other public channels (C8) -----------------------------------------
+    def read_credentials(self) -> Any:
+        """Read-only credentials (the setup sign-in), or None. Never raises."""
+        try:
+            return self._credentials_loader(self.config)
+        except Exception:  # noqa: BLE001 - a broken token file just means "sign in again"
+            return None
+
+    def start_competitor_fetch(self, ref: Any, creds: Any) -> bool:
+        return self.competitors_job.start(lambda report: self._run_competitor_fetch(ref, creds, report))
+
+    def _run_competitor_fetch(self, ref: Any, creds: Any, report: Report) -> Any:
+        report("Starting…")
+        if self._competitor_reader is None:
+            reader: Any = competitors_mod.GooglePublicChannelReader(creds)
+        else:
+            reader = self._competitor_reader(creds)
+        with Store(self.config.catalog_db) as store:
+            guard = QuotaGuard(store, self.config.daily_quota_budget)
+            channel = competitors_mod.fetch_channel(reader, ref, guard, report=report)
+        competitors_mod.save_channel(self.config.home, channel)
+        return channel
+
+    def start_competitor_explain(self) -> bool:
+        return self.competitors_explain_job.start(
+            lambda report: self._competitor_explain(competitors_mod.load_channels(self.config.home), report)
+        )
+
+    def competitors_state(self) -> tuple[JobSnapshot, JobSnapshot]:
+        fetch_snap = self.competitors_job.snapshot()
+        explain_snap = self.competitors_explain_job.snapshot()
+        with self._lock:
+            if fetch_snap is self._competitors_seen:
+                fetch_snap = JobSnapshot("idle")
+            if explain_snap is self._competitors_explain_seen:
+                explain_snap = JobSnapshot("idle")
+        return fetch_snap, explain_snap
+
+    def dismiss_competitors_results(self) -> None:
+        fetch_snap = self.competitors_job.snapshot()
+        explain_snap = self.competitors_explain_job.snapshot()
+        with self._lock:
+            if not fetch_snap.running:
+                self._competitors_seen = fetch_snap
+            if not explain_snap.running:
+                self._competitors_explain_seen = explain_snap
+
+    # --- copilot: questions about the channel -----------------------------------------------------
     def copilot_chat(self, store: Store) -> int | None:
         """The chat on screen: the one picked with "New chat", else the newest (None: no turns)."""
         with self._lock:
@@ -1420,6 +1514,8 @@ def create_app(
     rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
     strategy: StrategyFn | None = None,
     shorts: ShortsFn | None = None, shorts_key: Callable[[Config], bool] | None = None,
+    competitor_reader: CompetitorReaderFactory | None = None,
+    competitor_explain: CompetitorExplainFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1434,7 +1530,8 @@ def create_app(
                      packaging_fetch or packaging_mod.fetch_thumbnail,
                      packaging_key or (None if packaging_tools else has_meta_key), copilot,
                      link_fetch, adcheck, comment_reader, comments_assist, rule_maker, bulk_asker,
-                     strategy_fn=strategy, shorts_fn=shorts)
+                     strategy_fn=strategy, shorts_fn=shorts,
+                     competitor_reader=competitor_reader, competitor_explain=competitor_explain)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -1972,6 +2069,33 @@ def create_app(
             "poll": snap.running,
         })
 
+    @app.get("/competitors")
+    def competitors_page(request: Request) -> Response:
+        cards = build_competitor_cards(competitors_mod.load_channels(config.home), _local_time)
+        insight = build_insight_view(competitors_mod.latest_insight(config.home), _local_time)
+        fetch_snap, explain_snap = state.competitors_state()
+        return render(request, "competitors.html", {
+            "active": "competitors",
+            "cards": cards,
+            "insight": insight,
+            "signed_in": config.token_path.is_file(),
+            "has_key": has_packaging_key(),
+            "model": config.model,
+            "max_channels": competitors_mod.MAX_CHANNELS,
+            "max_videos": competitors_mod.MAX_VIDEOS,
+            "units": competitors_mod.estimate_units(),
+            "remaining": remaining_quota(),
+            "estimate": format_cost(agent.estimate_cost(config.model, 3000, 0, 1500)),
+            "full": len(cards) >= competitors_mod.MAX_CHANNELS,
+            "fetch_running": fetch_snap.running,
+            "fetch_message": fetch_snap.message,
+            "fetch_failed": fetch_snap.message if fetch_snap.status == "failed" else "",
+            "explain_running": explain_snap.running,
+            "explain_message": explain_snap.message,
+            "explain_failed": explain_snap.message if explain_snap.status == "failed" else "",
+            "poll": fetch_snap.running or explain_snap.running,
+        })
+
     @app.get("/copilot")
     def copilot_page(request: Request) -> Response:
         """The chat about the channel. Showing it calls no model."""
@@ -2053,6 +2177,8 @@ def create_app(
             "packaging": _job_json(state.packaging_job.snapshot()),
             "outliers": _job_json(state.outliers_job.snapshot()),
             "strategy": _job_json(state.strategy_job.snapshot()),
+            "competitors": _job_json(state.competitors_job.snapshot()),
+            "competitors_explain": _job_json(state.competitors_explain_job.snapshot()),
             "copilot": _job_json(state.copilot_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),
@@ -3503,7 +3629,76 @@ def create_app(
         state.dismiss_strategy_result()
         return see_other("/strategy")
 
-    # --- links: visit each external link once ----------------------------------------------------
+    # --- competitors: outliers on other public channels (C8) -----------------------------------------
+    @app.post("/competitors/add")
+    async def add_competitor(request: Request) -> Response:
+        form = await read_form(request)
+        text = str(form.get("channel") or "")
+        try:
+            ref = competitors_mod.parse_channel(text)
+        except competitors_mod.CompetitorError as exc:
+            flash(request, "error", str(exc))
+            return see_other("/competitors")
+        count = await run_in_threadpool(competitors_mod.channel_count, config.home)
+        if count >= competitors_mod.MAX_CHANNELS:
+            flash(request, "error", "Yezatas follows at most 5 channels. Remove one first.")
+            return see_other("/competitors")
+        creds = await run_in_threadpool(state.read_credentials)
+        if creds is None:
+            flash(request, "error", "Reading other channels needs the YouTube sign-in. Sign in in Setup first.")
+            return see_other("/competitors")
+        ok = state.start_competitor_fetch(ref, creds)
+        if not ok:
+            flash(request, "error", "A channel is already being read. Wait for it to finish.")
+        return see_other("/competitors")
+
+    @app.post("/competitors/refresh")
+    async def refresh_competitor(request: Request) -> Response:
+        form = await read_form(request)
+        channel_id = str(form.get("channel_id") or "")
+        loaded = await run_in_threadpool(competitors_mod.load_channels, config.home)
+        if not any(c.channel_id == channel_id for c in loaded):
+            flash(request, "error", "That channel is not on your list.")
+            return see_other("/competitors")
+        creds = await run_in_threadpool(state.read_credentials)
+        if creds is None:
+            flash(request, "error", "Reading other channels needs the YouTube sign-in. Sign in in Setup first.")
+            return see_other("/competitors")
+        ok = state.start_competitor_fetch(competitors_mod.ChannelRef("id", channel_id), creds)
+        if not ok:
+            flash(request, "error", "A channel is already being read. Wait for it to finish.")
+        return see_other("/competitors")
+
+    @app.post("/competitors/remove")
+    async def remove_competitor(request: Request) -> Response:
+        form = await read_form(request)
+        channel_id = str(form.get("channel_id") or "")
+        ok = await run_in_threadpool(competitors_mod.remove_channel, config.home, channel_id)
+        if ok:
+            flash(request, "ok", "The channel was removed from your list.")
+        else:
+            flash(request, "error", "That channel is not on your list.")
+        return see_other("/competitors")
+
+    @app.post("/competitors/explain")
+    async def explain_competitors(request: Request) -> Response:
+        form = await read_form(request)
+        has_key = await run_in_threadpool(has_packaging_key)
+        if not has_key:
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+            return see_other("/competitors")
+        ok = state.start_competitor_explain()
+        if not ok:
+            flash(request, "error", "The outliers are already being explained. Wait for it to finish.")
+        return see_other("/competitors")
+
+    @app.post("/competitors/done")
+    async def dismiss_competitors(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_competitors_results()
+        return see_other("/competitors")
+
+    # --- links: visit each external link once -----------------------------------------------------
     @app.post("/links/check")
     async def check_links(request: Request) -> Response:
         await read_form(request)

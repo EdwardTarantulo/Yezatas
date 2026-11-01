@@ -1,0 +1,122 @@
+{% extends "shell.html" %}
+{% block title %}Competitors - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Competitors: outliers on other channels</h1>
+<p class="muted" id="competitors-about">Each video is compared with the median views of the 20 public videos its channel published nearest to it, as of the time Yezatas read the channel; 10× or more is an outlier. Yezatas reads the newest {{ max_videos }} public videos of each channel, read-only.</p>
+
+<section class="card" id="competitors-add" aria-labelledby="h-competitors-add">
+  <h2 id="h-competitors-add">Follow a channel</h2>
+  {% if fetch_running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="competitors-msg" role="status" aria-live="polite">{{ fetch_message or 'Starting…' }}</span></p>
+  <p class="hint">This can take a few minutes. You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if fetch_failed %}
+  <div class="flash error" role="alert" id="competitors-failed">{{ fetch_failed }}</div>
+  <form class="inline" method="post" action="/competitors/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if not signed_in %}<p class="hint" id="competitors-no-sign-in">Reading other channels needs the YouTube sign-in. <a href="/setup">Sign in in Setup</a>.</p>{% endif %}
+  {% if full %}<p class="hint" id="competitors-full">You follow {{ max_channels }} channels, the most Yezatas reads. Remove one to add another.</p>{% endif %}
+  <form class="packaging-form" method="post" action="/competitors/add">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="competitor-channel">Channel handle, link or ID</label>
+    <input id="competitor-channel" name="channel" type="text" placeholder="@channel" required>
+    <p class="hint">Reading one channel uses about {{ units }} of your {{ remaining }} YouTube quota units left today. Nothing is written to YouTube.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if not signed_in or full %} disabled{% endif %}>Add channel</button></div>
+  </form>
+  {% endif %}
+</section>
+
+{% for c in cards %}
+<section class="card competitor" id="competitor-{{ c.channel_id }}">
+  <h2><a href="{{ c.url }}" rel="noopener noreferrer" target="_blank">{{ c.title }}</a> <span class="muted">{{ c.handle }}</span></h2>
+  <p class="muted">Read {{ c.when }} · {{ c.video_count }} videos read · {{ c.scored_count }} scored</p>
+  {% if c.rows %}
+  <table class="vtable ol-table">
+    <caption class="visually-hidden">Outliers for {{ c.title }}</caption>
+    <thead>
+      <tr>
+        <th class="col-video" scope="col">Video</th>
+        <th class="col-date" scope="col">Published</th>
+        <th class="col-num" scope="col">Views</th>
+        <th class="col-ratio" scope="col">vs its channel's norm</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td class="col-video"><a class="vtitle" href="{{ r.url }}" rel="noopener noreferrer" target="_blank">{{ r.title }}</a></td>
+        <td class="col-date">{{ r.published }}</td>
+        <td class="col-num">{{ r.views }}</td>
+        <td class="col-ratio">{{ r.ratio }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-note">No video of this channel is 10× or more above its norm.</p>
+  {% endif %}
+  <form class="inline" method="post" action="/competitors/refresh"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="channel_id" value="{{ c.channel_id }}"><button type="submit" class="button secondary"{% if fetch_running %} disabled{% endif %}>Refresh</button></form>
+  <form class="inline" method="post" action="/competitors/remove"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="channel_id" value="{{ c.channel_id }}"><button type="submit" class="button secondary">Remove</button></form>
+</section>
+{% endfor %}
+
+<section class="card" id="competitors-why" aria-labelledby="h-competitors-why">
+  <h2 id="h-competitors-why">Why they did well</h2>
+  <p class="muted">{{ model }} reads only the titles, the channel names and the numbers code made (year, length, views, ratio) of up to 8 outliers and 8 typical videos. A line that quotes a number it was not given is dropped.</p>
+  {% if explain_running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="competitors_explain-msg" role="status" aria-live="polite">{{ explain_message or 'Starting…' }}</span></p>
+  <p class="hint">This can take a few minutes. You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if explain_failed %}
+  <div class="flash error" role="alert" id="competitors-explain-failed">{{ explain_failed }}</div>
+  <form class="inline" method="post" action="/competitors/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if not has_key %}<p class="hint" id="competitors-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  <form class="packaging-form" method="post" action="/competitors/explain">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="hint">These go to Meta's Model API ({{ model }}). Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products. Nothing is sent to YouTube. One run costs about {{ estimate }}.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if not has_key or not cards %} disabled{% endif %}>Explain with Muse Spark</button></div>
+  </form>
+  {% endif %}
+  {% if insight %}
+  <div id="competitors-insight">
+    <h3 class="run-h">Last explanation: {{ insight.when }}</h3>
+    {% if insight.status == "too_few" %}
+    <p class="empty-note">Fewer than 2 outliers on the channels you follow, so there was nothing to explain.</p>
+    {% elif insight.status == "error" %}
+    <div class="flash error" role="alert">{{ insight.error }}</div>
+    {% else %}
+    <ul class="run-list">
+      {% for pat in insight.patterns %}
+      <li>{{ pat.text }}
+        {% if pat.refs %}
+        <div class="chip-row">
+          {% for ref in pat.refs %}<a href="{{ ref.url }}" rel="noopener noreferrer" target="_blank">{{ ref.title }}</a> <span class="muted">{{ ref.channel }}</span>{% endfor %}
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <ul class="run-list" id="competitors-whys">
+      {% for w in insight.whys %}
+      <li><a href="{{ w.ref.url }}" rel="noopener noreferrer" target="_blank">{{ w.ref.title }}</a> ({{ w.ref.channel }}): {{ w.why }}</li>
+      {% endfor %}
+    </ul>
+    <ul class="run-list" id="competitors-ideas">
+      {% for idea in insight.ideas %}
+      <li>{{ idea }}</li>
+      {% endfor %}
+    </ul>
+    {% if insight.notes %}
+    <ul class="run-list muted" id="competitors-notes">
+      {% for n in insight.notes %}
+      <li>{{ n }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+    <p class="muted">{% if insight.model %}{{ insight.model }}{% endif %}{% if insight.tokens %} · {{ insight.tokens }} tokens{% endif %}{% if insight.cost %} · Cost {{ insight.cost }}{% endif %}</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
