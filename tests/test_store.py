@@ -5,13 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from yezatas.store import (MIGRATIONS, AdCheck, DraftRow, OutlierReport, PackagingReview, PushRecord,
+from yezatas.store import (MIGRATIONS, AdCheck, Comment, CommentReply, CustomRule, DraftRow,
+                           OutlierReport, PackagingReview, PushRecord, ReplyTemplate,
                            Store, SubtitleTranslationRecord, ThumbnailVariant,
                            TranscriptRecord, TranslationRecord, Video)
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
-# undoes the v9 migration, for tests that turn a database back into an older version
-BACK_TO_V10 = "DROP TABLE link_checks; DROP TABLE ad_checks; "
+# undo the newest migrations, for tests that turn a database back into an older version
+BACK_TO_V11 = "DROP TABLE comments; DROP TABLE comment_replies; DROP TABLE reply_templates; DROP TABLE custom_rules; "
+BACK_TO_V10 = BACK_TO_V11 + "DROP TABLE link_checks; DROP TABLE ad_checks; "
 BACK_TO_V9 = BACK_TO_V10 + "DROP TABLE copilot_proposals; DROP TABLE copilot_turns; "
 BACK_TO_V8 = BACK_TO_V9 + ("DROP INDEX idx_pushes_run; ALTER TABLE pushes DROP COLUMN run_id; "
                            "DROP TABLE push_runs; ")
@@ -47,7 +49,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 11
+        assert s.schema_version == len(MIGRATIONS) == 12
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -57,7 +59,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 11
+        assert s.schema_version == 12
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -158,7 +160,7 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
                        "DROP TABLE push_runs; " + BACK_TO_V9 + "PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 11
+        assert s.schema_version == 12
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -312,7 +314,7 @@ def test_v8_database_upgrades_and_keeps_its_pushes(tmp_path: Path) -> None:
     conn.executescript(BACK_TO_V8 + "PRAGMA user_version = 8;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 11
+        assert s.schema_version == 12
         record = s.get_push(push)
         assert record is not None and record.run_id is None and record.status == "pushed"
         assert record.before == {"title": "old"} and record.after == {"title": "new"}
@@ -329,7 +331,7 @@ def test_v9_database_upgrades_and_keeps_its_push_runs(tmp_path: Path) -> None:
     conn.executescript(BACK_TO_V9 + "PRAGMA user_version = 9;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 11
+        assert s.schema_version == 12
         record = s.get_push(push)
         assert record is not None and record.run_id == run
         assert s.latest_copilot_chat_id() is None and s.next_copilot_chat_id() == 1
@@ -378,7 +380,7 @@ def test_v10_database_upgrades_to_v11_and_keeps_its_copilot_turns(tmp_path: Path
     conn.executescript(BACK_TO_V10 + "PRAGMA user_version = 10;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 11
+        assert s.schema_version == 12
         assert s.get_copilot_turn(turn) is not None
         assert s.latest_link_checks() == {} and s.latest_ad_check("vid00000001") is None
 
@@ -543,7 +545,7 @@ def test_v5_database_upgrades_to_v6_and_keeps_its_data(tmp_path: Path) -> None:
                        "DROP TABLE subtitle_translations; " + BACK_TO_V8 + "PRAGMA user_version = 5;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 11
+        assert s.schema_version == 12
         assert s.get_video("vid00000001") is not None and s.get_draft("vid00000001") is not None
         transcript = s.latest_transcript("vid00000001")
         assert transcript is not None and transcript.segments[0]["text"] == "Hello"
@@ -613,7 +615,7 @@ def test_v6_database_upgrades_to_v7_and_keeps_its_data(tmp_path: Path) -> None:
                        "" + BACK_TO_V8 + "PRAGMA user_version = 6;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 11
+        assert s.schema_version == 12
         assert s.get_video("vid00000001") is not None
         assert len(s.list_subtitle_translations("vid00000001")) == 1
         assert s.latest_packaging_review("vid00000001") is None
@@ -660,8 +662,133 @@ def test_v7_database_upgrades_to_v8_and_keeps_its_data(tmp_path: Path) -> None:
     conn.executescript("DROP TABLE outlier_reports; " + BACK_TO_V8 + "PRAGMA user_version = 7;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 11
+        assert s.schema_version == 12
         assert s.get_video("vid00000001") is not None
         assert s.latest_packaging_review("vid00000001") is not None
         assert s.latest_outlier_report() is None
         assert s.save_outlier_report(make_outlier_report(), now=T0) > 0
+
+
+def make_comment(comment_id: str = "cmt00000001", **kw: object) -> Comment:
+    base: dict[str, object] = dict(
+        comment_id=comment_id, video_id="vid00000001", author="Ada",
+        text="How often should I water it?", published_at="2026-09-01T10:00:00Z",
+        like_count=3, reply_count=1, fetched_at=T0.isoformat(),
+    )
+    base.update(kw)
+    return Comment(**base)  # type: ignore[arg-type]
+
+
+def test_comments_round_trip_newest_first(store: Store) -> None:
+    assert store.list_comments("vid00000001") == []
+    assert store.upsert_comments([
+        make_comment("cmt00000001", published_at="2026-09-01T10:00:00Z"),
+        make_comment("cmt00000002", text="Great video!", published_at="2026-09-03T10:00:00Z"),
+        make_comment("cmt00000003", video_id="vid00000002", published_at="2026-09-04T10:00:00Z"),
+    ], now=T0) == 3
+    comments = store.list_comments("vid00000001")
+    assert [c.comment_id for c in comments] == ["cmt00000002", "cmt00000001"]
+    assert comments[1] == make_comment("cmt00000001")
+    assert comments[1].category == "" and comments[1].classified_at == ""
+
+
+def test_upsert_comments_updates_text_and_counts_but_keeps_the_category(store: Store) -> None:
+    store.upsert_comments([make_comment()], now=T0)
+    store.set_comment_categories({"cmt00000001": "question"}, now=T0)
+    later = T0 + timedelta(days=1)
+    assert store.upsert_comments(
+        [make_comment(text="Edited words", like_count=9, reply_count=4, fetched_at="")],
+        now=later) == 1
+    got = store.list_comments("vid00000001")[0]
+    assert (got.text, got.like_count, got.reply_count) == ("Edited words", 9, 4)
+    assert got.category == "question" and got.classified_at == T0.isoformat()
+    assert got.fetched_at == later.isoformat()
+    assert len(store.list_comments("vid00000001")) == 1
+
+
+def test_set_comment_categories_stamps_classified_at(store: Store) -> None:
+    store.upsert_comments([make_comment("cmt00000001"), make_comment("cmt00000002")], now=T0)
+    store.set_comment_categories({"cmt00000001": "question", "cmt00000002": "praise"}, now=T0)
+    by_id = {c.comment_id: c for c in store.list_comments("vid00000001")}
+    assert by_id["cmt00000001"].category == "question"
+    assert by_id["cmt00000002"].category == "praise"
+    assert by_id["cmt00000001"].classified_at == T0.isoformat()
+
+
+def test_comment_replies_round_trip_and_status(store: Store) -> None:
+    assert store.list_comment_replies("vid00000001") == []
+    pinned = store.add_comment_reply("vid00000001", "", "Thanks for watching!", "muse-spark-1.3",
+                                     ["A draft was dropped."], now=T0)
+    reply = store.add_comment_reply("vid00000001", "cmt00000001", "Water it weekly.",
+                                    "muse-spark-1.3", [], now=T0)
+    store.add_comment_reply("vid00000002", "", "Other video.", "muse-spark-1.3", [], now=T0)
+    drafts = store.list_comment_replies("vid00000001")
+    assert [d.id for d in drafts] == [pinned, reply]
+    assert drafts[0] == CommentReply(pinned, "vid00000001", "", "Thanks for watching!",
+                                     "muse-spark-1.3", T0.isoformat(), "open",
+                                     ("A draft was dropped.",))
+    assert drafts[1].notes == ()
+    store.set_comment_reply_status(reply, "used")
+    assert [d.id for d in store.list_comment_replies("vid00000001", "used")] == [reply]
+    assert [d.id for d in store.list_comment_replies("vid00000001", "open")] == [pinned]
+    assert store.list_comment_replies("vid00000001", "dismissed") == []
+    with pytest.raises(ValueError):
+        store.set_comment_reply_status(reply, "posted")
+    assert store.list_comment_replies("vid00000001", "used")[0].status == "used"
+
+
+def test_reply_templates_round_trip_by_name(store: Store) -> None:
+    assert store.list_reply_templates() == []
+    thanks = store.save_reply_template("Thanks", "Thanks, {name}!", now=T0)
+    question = store.save_reply_template("Answer", "Hi {name}, the answer is weekly.", now=T0)
+    assert [t.name for t in store.list_reply_templates()] == ["Answer", "Thanks"]
+    got = store.list_reply_templates()[1]
+    assert got == ReplyTemplate(thanks, "Thanks", "Thanks, {name}!", T0.isoformat(), T0.isoformat())
+    later = T0 + timedelta(hours=2)
+    assert store.save_reply_template("Thanks!", "Thank you, {name}!", now=later,
+                                     template_id=thanks) == thanks
+    got = store.list_reply_templates()[1]
+    assert (got.name, got.body) == ("Thanks!", "Thank you, {name}!")
+    assert got.created_at == T0.isoformat() and got.updated_at == later.isoformat()
+    assert store.delete_reply_template(question) is True
+    assert store.delete_reply_template(question) is False
+    assert [t.name for t in store.list_reply_templates()] == ["Thanks!"]
+
+
+def test_custom_rules_round_trip(store: Store) -> None:
+    assert store.list_custom_rules() == []
+    rule = {"kind": "must_link", "domain": "example.com", "visibility": "public"}
+    first = store.add_custom_rule("Newsletter link", "every public video must link my newsletter",
+                                  rule, now=T0)
+    second = store.add_custom_rule("Title length", "titles stay short",
+                                   {"kind": "title_max", "chars": 60, "visibility": "all"}, now=T0)
+    rules = store.list_custom_rules()
+    assert [r.id for r in rules] == [first, second]
+    assert rules[0] == CustomRule(first, "Newsletter link",
+                                  "every public video must link my newsletter", rule, True,
+                                  T0.isoformat())
+    assert rules[0].enabled is True
+    store.set_custom_rule_enabled(first, False)
+    assert store.list_custom_rules()[0].enabled is False
+    assert [r.id for r in store.list_custom_rules(enabled_only=True)] == [second]
+    assert store.delete_custom_rule(first) is True
+    assert store.delete_custom_rule(first) is False
+    assert [r.id for r in store.list_custom_rules()] == [second]
+
+
+def test_v11_database_upgrades_to_v12_and_keeps_its_data(tmp_path: Path) -> None:
+    path = tmp_path / "v11.sqlite"
+    with Store(path) as s:
+        turn = s.begin_copilot_turn(1, "What should I fix?", "muse-spark-1.3", now=T0)
+        s.save_link_check("https://example.com/page", "ok", 200, now=T0)
+    conn = sqlite3.connect(path)  # turn it back into a version 11 database
+    conn.executescript(BACK_TO_V11 + "PRAGMA user_version = 11;")
+    conn.close()
+    with Store(path) as s:
+        assert s.schema_version == 12
+        assert s.get_copilot_turn(turn) is not None
+        assert set(s.latest_link_checks()) == {"https://example.com/page"}
+        assert s.list_comments("vid00000001") == [] and s.list_reply_templates() == []
+        assert s.list_custom_rules() == []
+        assert s.upsert_comments([make_comment()], now=T0) == 1
+        assert s.save_reply_template("Thanks", "Thanks, {name}!", now=T0) > 0

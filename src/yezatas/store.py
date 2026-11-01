@@ -327,10 +327,54 @@ _SCHEMA_V11: tuple[str, ...] = (
     "CREATE INDEX idx_ad_checks_video ON ad_checks(video_id, id)",
 )
 
+# v12: comments (G4: fetched comments and their categories, reply and pinned-comment drafts,
+# reply templates) and custom checks (G7: rules the creator described in plain words).
+_SCHEMA_V12: tuple[str, ...] = (
+    """CREATE TABLE comments (
+        comment_id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        author TEXT NOT NULL DEFAULT '',
+        text TEXT NOT NULL,
+        published_at TEXT NOT NULL DEFAULT '',
+        like_count INTEGER NOT NULL DEFAULT 0,
+        reply_count INTEGER NOT NULL DEFAULT 0,
+        fetched_at TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '',
+        classified_at TEXT NOT NULL DEFAULT ''
+    )""",
+    "CREATE INDEX idx_comments_video_published ON comments(video_id, published_at)",
+    """CREATE TABLE comment_replies (
+        id INTEGER PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        comment_id TEXT NOT NULL DEFAULT '',
+        text TEXT NOT NULL,
+        model TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        notes_json TEXT NOT NULL DEFAULT '[]'
+    )""",
+    "CREATE INDEX idx_comment_replies_video ON comment_replies(video_id, id)",
+    """CREATE TABLE reply_templates (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE custom_rules (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        request TEXT NOT NULL DEFAULT '',
+        rule_json TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )""",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
     _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
-    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11,
+    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11, _SCHEMA_V12,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -525,6 +569,60 @@ class AdCheck:
     input_tokens: int
     cached_tokens: int
     output_tokens: int
+
+
+@dataclass(frozen=True)
+class Comment:
+    """One top-level comment on a video, as fetched from YouTube, with its category ("" until classified)."""
+
+    comment_id: str
+    video_id: str
+    author: str = ""
+    text: str = ""
+    published_at: str = ""
+    like_count: int = 0
+    reply_count: int = 0
+    fetched_at: str = ""
+    category: str = ""  # a key of comments.CATEGORIES, or "" when not classified yet
+    classified_at: str = ""
+
+
+@dataclass(frozen=True)
+class CommentReply:
+    """One reply draft for a comment (or, with an empty `comment_id`, the pinned-comment draft
+    for the video). A draft only: the creator posts it themself; nothing is sent to YouTube."""
+
+    id: int
+    video_id: str
+    comment_id: str  # "" is the pinned-comment draft for the video
+    text: str
+    model: str
+    created_at: str
+    status: str  # "open" | "used" | "dismissed"
+    notes: tuple[str, ...]  # what the guards dropped or changed, in plain words
+
+
+@dataclass(frozen=True)
+class ReplyTemplate:
+    """One saved reply text the creator can reuse; `{name}` in the body is the commenter's name."""
+
+    id: int
+    name: str
+    body: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class CustomRule:
+    """One custom check the creator described in plain words, turned into a fixed rule by code."""
+
+    id: int
+    name: str
+    request: str  # the creator's own words the rule was made from
+    rule: dict[str, Any]  # the fixed rule: {"kind": ..., ...} (see customchecks.KINDS)
+    enabled: bool
+    created_at: str
 
 
 @dataclass(frozen=True)
@@ -1618,3 +1716,188 @@ class Store:
         row = self._conn.execute(
             "SELECT * FROM outlier_reports ORDER BY id DESC LIMIT 1").fetchone()
         return self._row_to_outlier_report(row) if row else None
+
+    # --- comments, reply drafts and templates (G4, G5) --------------------
+    @staticmethod
+    def _row_to_comment(row: sqlite3.Row) -> Comment:
+        return Comment(
+            comment_id=row["comment_id"],
+            video_id=row["video_id"],
+            author=row["author"],
+            text=row["text"],
+            published_at=row["published_at"],
+            like_count=row["like_count"],
+            reply_count=row["reply_count"],
+            fetched_at=row["fetched_at"],
+            category=row["category"],
+            classified_at=row["classified_at"],
+        )
+
+    def upsert_comments(self, comments: Sequence[Comment], now: datetime | None = None) -> int:
+        """Store fetched comments; returns how many were given.
+
+        A comment that is already stored keeps its category and classified_at: only its text,
+        author, published time, likes and reply count are updated.
+        """
+        items = list(comments)
+        ts = _iso(now)
+        with self._conn:
+            self._conn.executemany(
+                """
+                INSERT INTO comments (comment_id, video_id, author, text, published_at,
+                    like_count, reply_count, fetched_at, category, classified_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(comment_id) DO UPDATE SET
+                    video_id=excluded.video_id, author=excluded.author, text=excluded.text,
+                    published_at=excluded.published_at, like_count=excluded.like_count,
+                    reply_count=excluded.reply_count, fetched_at=excluded.fetched_at
+                """,
+                [(c.comment_id, c.video_id, c.author, c.text, c.published_at, c.like_count,
+                  c.reply_count, c.fetched_at or ts, c.category, c.classified_at) for c in items],
+            )
+        return len(items)
+
+    def list_comments(self, video_id: str) -> list[Comment]:
+        """The stored comments of a video, newest first."""
+        rows = self._conn.execute(
+            "SELECT * FROM comments WHERE video_id = ? ORDER BY published_at DESC, comment_id",
+            (video_id,),
+        ).fetchall()
+        return [self._row_to_comment(r) for r in rows]
+
+    def set_comment_categories(self, categories: dict[str, str], now: datetime | None = None) -> None:
+        """Set the category of each comment in the {comment_id: category} mapping given."""
+        ts = _iso(now)
+        with self._conn:
+            self._conn.executemany(
+                "UPDATE comments SET category = ?, classified_at = ? WHERE comment_id = ?",
+                [(category, ts, comment_id) for comment_id, category in dict(categories).items()],
+            )
+
+    @staticmethod
+    def _row_to_comment_reply(row: sqlite3.Row) -> CommentReply:
+        return CommentReply(
+            id=row["id"],
+            video_id=row["video_id"],
+            comment_id=row["comment_id"],
+            text=row["text"],
+            model=row["model"],
+            created_at=row["created_at"],
+            status=row["status"],
+            notes=tuple(json.loads(row["notes_json"])),
+        )
+
+    def add_comment_reply(self, video_id: str, comment_id: str, text: str, model: str,
+                          notes: Sequence[str], now: datetime | None = None) -> int:
+        """Store a reply draft (an empty `comment_id` is the pinned-comment draft); returns its id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO comment_replies (video_id, comment_id, text, model, created_at, "
+                "notes_json) VALUES (?, ?, ?, ?, ?, ?)",
+                (video_id, comment_id, text, model, _iso(now), _dumps(list(notes))),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def list_comment_replies(self, video_id: str, status: str | None = None) -> list[CommentReply]:
+        """The reply drafts of a video in the order they were made, optionally only one status."""
+        if status is None:
+            rows = self._conn.execute(
+                "SELECT * FROM comment_replies WHERE video_id = ? ORDER BY id", (video_id,)
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM comment_replies WHERE video_id = ? AND status = ? ORDER BY id",
+                (video_id, status),
+            ).fetchall()
+        return [self._row_to_comment_reply(r) for r in rows]
+
+    def set_comment_reply_status(self, id: int, status: str) -> None:
+        """Set a reply draft's status: "open", "used" or "dismissed"."""
+        if status not in ("open", "used", "dismissed"):
+            raise ValueError(f'Unknown reply status "{status}": use open, used or dismissed.')
+        with self._conn:
+            self._conn.execute(
+                "UPDATE comment_replies SET status = ? WHERE id = ?", (status, id))
+
+    @staticmethod
+    def _row_to_reply_template(row: sqlite3.Row) -> ReplyTemplate:
+        return ReplyTemplate(
+            id=row["id"],
+            name=row["name"],
+            body=row["body"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def save_reply_template(self, name: str, body: str, now: datetime | None = None,
+                            template_id: int | None = None) -> int:
+        """Save a reply template; with `template_id`, update that template. Returns its id."""
+        ts = _iso(now)
+        with self._conn:
+            if template_id is None:
+                cur = self._conn.execute(
+                    "INSERT INTO reply_templates (name, body, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (name, body, ts, ts),
+                )
+                return int(cur.lastrowid)  # type: ignore[arg-type]
+            self._conn.execute(
+                "UPDATE reply_templates SET name = ?, body = ?, updated_at = ? WHERE id = ?",
+                (name, body, ts, template_id),
+            )
+        return template_id
+
+    def list_reply_templates(self) -> list[ReplyTemplate]:
+        """Every reply template, by name."""
+        rows = self._conn.execute(
+            "SELECT * FROM reply_templates ORDER BY name COLLATE NOCASE, id").fetchall()
+        return [self._row_to_reply_template(r) for r in rows]
+
+    def delete_reply_template(self, id: int) -> bool:
+        """Delete a reply template. True when there was one."""
+        with self._conn:
+            cur = self._conn.execute("DELETE FROM reply_templates WHERE id = ?", (id,))
+        return cur.rowcount > 0
+
+    # --- custom rules (G7) --------------------------------------------------
+    @staticmethod
+    def _row_to_custom_rule(row: sqlite3.Row) -> CustomRule:
+        return CustomRule(
+            id=row["id"],
+            name=row["name"],
+            request=row["request"],
+            rule=json.loads(row["rule_json"]),
+            enabled=bool(row["enabled"]),
+            created_at=row["created_at"],
+        )
+
+    def add_custom_rule(self, name: str, request: str, rule: dict[str, Any],
+                        now: datetime | None = None) -> int:
+        """Store a custom rule; returns its id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO custom_rules (name, request, rule_json, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (name, request, _dumps(rule), _iso(now)),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def list_custom_rules(self, enabled_only: bool = False) -> list[CustomRule]:
+        """Every custom rule in the order they were made, or only the enabled ones."""
+        if enabled_only:
+            rows = self._conn.execute(
+                "SELECT * FROM custom_rules WHERE enabled != 0 ORDER BY id").fetchall()
+        else:
+            rows = self._conn.execute("SELECT * FROM custom_rules ORDER BY id").fetchall()
+        return [self._row_to_custom_rule(r) for r in rows]
+
+    def set_custom_rule_enabled(self, id: int, enabled: bool) -> None:
+        with self._conn:
+            self._conn.execute(
+                "UPDATE custom_rules SET enabled = ? WHERE id = ?", (int(bool(enabled)), id))
+
+    def delete_custom_rule(self, id: int) -> bool:
+        """Delete a custom rule. True when there was one."""
+        with self._conn:
+            cur = self._conn.execute("DELETE FROM custom_rules WHERE id = ?", (id,))
+        return cur.rowcount > 0
