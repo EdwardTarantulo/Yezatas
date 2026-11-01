@@ -2,7 +2,7 @@
 {% from "_macros.html" import icon, mark %}
 {% block body_class %}app{% endblock %}
 {% block body %}
-{% set nav = [('dashboard', 'Dashboard', '/'), ('content', 'Content', '/videos'), ('outliers', 'Outliers', '/outliers'), ('copilot', 'Copilot', '/copilot'), ('changes', 'Changes', '/changes'), ('history', 'History', '/history'), ('agent', 'Agent log', '/agent'), ('setup', 'Setup', '/setup')] %}
+{% set nav = [('dashboard', 'Dashboard', '/'), ('content', 'Content', '/videos'), ('links', 'Links', '/links'), ('outliers', 'Outliers', '/outliers'), ('copilot', 'Copilot', '/copilot'), ('changes', 'Changes', '/changes'), ('history', 'History', '/history'), ('agent', 'Agent log', '/agent'), ('setup', 'Setup', '/setup')] %}
 <header class="topbar">
   <a class="brand" href="/" aria-label="Yezatas home">{{ mark() }}<span class="brand-name">Yezatas</span></a>
   <form class="search" action="/videos" method="get" role="search">

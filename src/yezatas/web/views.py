@@ -20,6 +20,7 @@ from ..agent import estimate_cost
 from ..bulk import MAX_BULK, BulkChange, BulkResult, BulkSpec
 from ..copilot import REF
 from ..diffs import DraftDiff, diff_row
+from ..links import SKIPPED_MESSAGE, LinkCheckSummary, LinkEntry
 from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_TYPICAL, MIN_AGE_DAYS,
                         OUTLIER_THRESHOLD, PEERS, OutlierScore, below_norm, outliers, ratio_label)
 from ..push import PushItem
@@ -1862,3 +1863,215 @@ def build_copilot_turns(turns: Sequence[CopilotTurn], proposals: Sequence[Copilo
     running, so a turn that still says "running" is not an interrupted one."""
     return [_turn_view(t, [p for p in proposals if p.turn_id == t.id], videos, drafts, running,
                        when) for t in turns]
+
+
+# --- links: every link in the descriptions, ranked by reach ---------------------------------
+LINKS_PAGE_SIZE = 200
+LINK_SHORT_CHARS = 60
+# (key, label) in display order; the key goes into the `show` query parameter.
+LINK_FILTERS: tuple[tuple[str, str], ...] = (
+    ("all", "All"),
+    ("broken", "Broken"),
+    ("redirected", "Redirected"),
+    ("trouble", "Could not be checked"),
+    ("own", "Own private or unknown videos"),
+    ("unchecked", "Not checked"),
+)
+LINK_FILTER_KEYS = tuple(k for k, _ in LINK_FILTERS)
+LINK_OWN_PROBLEMS = ("private", "not_in_catalog")
+# own-video state -> (label, pill class)
+LINK_OWN_STATES: dict[str, tuple[str, str]] = {
+    "public": ("Your public video", "done"),
+    "unlisted": ("Your unlisted video", "done"),
+    "private": ("Your private video", "problem"),
+    "not_in_catalog": ("Not in your catalog", "warn"),
+}
+# check status -> (label, pill class)
+LINK_CHECK_STATES: dict[str, tuple[str, str]] = {
+    "ok": ("Working", "done"),
+    "redirected": ("Moves", "warn"),
+    "broken": ("Broken", "problem"),
+    "error": ("Could not be checked", "warn"),
+}
+
+
+def shorten_link(url: str, limit: int = LINK_SHORT_CHARS) -> str:
+    """The link as shown in a table: no scheme, no "www.", cut with an ellipsis. The full text
+    goes into a title attribute."""
+    text = url.split("://", 1)[1] if "://" in url else url
+    if text.lower().startswith("www."):
+        text = text[4:]
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def link_href(url: str) -> str:
+    """Something a browser can open: a link written as `www.…` gets https."""
+    return url if "://" in url else "https://" + url
+
+
+def _external_state(entry: LinkEntry) -> str:
+    """The check status that counts for a link: "" when it was never visited (or only skipped)."""
+    check = entry.check
+    return check.status if check is not None and check.status in LINK_CHECK_STATES else ""
+
+
+@dataclass(frozen=True)
+class LinkVideoRef:
+    video_id: str
+    title: str
+
+
+@dataclass(frozen=True)
+class LinkRow:
+    url: str
+    href: str  # what the browser opens
+    short: str
+    domain: str
+    kind: str  # "video" | "youtube" | "external"
+    videos: tuple[LinkVideoRef, ...]  # most viewed first
+    reach: str  # "12.3K"
+    reach_title: str  # "12,345 views in total"
+    status: str  # a word for the status pill
+    status_class: str  # "done" | "warn" | "problem" | "unverified"
+    detail: str  # the plain sentence behind the status ("Not found (404).")
+    when: str  # when it was checked ("" when it was not)
+    replace_href: str
+
+
+@dataclass(frozen=True)
+class LinksSummary:
+    links: int
+    videos: int  # videos that carry at least one link
+    broken: int
+    redirected: int
+    trouble: int  # could not be checked
+    own: int  # links to the creator's own private or unknown videos
+    unchecked: int  # external links never visited
+    external: int  # all external links (what a check visits)
+    line: str
+
+
+@dataclass(frozen=True)
+class LinksView:
+    rows: tuple[LinkRow, ...]
+    summary: LinksSummary
+    show: str
+    chips: tuple[Chip, ...]
+    total: int  # rows matching the filter
+    page: int
+    pages: int
+    first: int
+    last: int
+    prev_href: str
+    next_href: str
+
+
+def _links_line(s: LinksSummary) -> str:
+    if not s.links:
+        return "No links in your descriptions."
+    parts = [f"{s.broken} broken", f"{s.redirected} redirected"]
+    if s.trouble:
+        parts.append(f"{s.trouble} could not be checked")
+    parts.append(f"{s.own} to your private or unknown videos")
+    parts.append(f"{s.unchecked} not checked")
+    return f"{_count(s.links, 'link')} in {_count(s.videos, 'video')}; " + ", ".join(parts) + "."
+
+
+def links_page_href(show: str = "all", page: int = 1) -> str:
+    args: list[tuple[str, str]] = []
+    if show != "all":
+        args.append(("show", show))
+    if page > 1:
+        args.append(("page", str(page)))
+    return "/links" + ("?" + urlencode(args) if args else "")
+
+
+def _link_matches(entry: LinkEntry, show: str) -> bool:
+    state = _external_state(entry)
+    if show == "broken":
+        return state == "broken"
+    if show == "redirected":
+        return state == "redirected"
+    if show == "trouble":
+        return state == "error"
+    if show == "own":
+        return entry.target_state in LINK_OWN_PROBLEMS
+    if show == "unchecked":
+        return entry.kind == "external" and not state
+    return True
+
+
+def _link_row(entry: LinkEntry, titles: Mapping[str, str],
+              when: Callable[[str], str]) -> LinkRow:
+    state = _external_state(entry)
+    check = entry.check
+    checked = ""
+    if entry.kind == "video":
+        status, css = LINK_OWN_STATES[entry.target_state]
+        detail = entry.finding
+    elif entry.kind == "youtube":
+        status, css, detail = "Not visited", "unverified", SKIPPED_MESSAGE
+    elif state and check is not None:
+        status, css = LINK_CHECK_STATES[state]
+        detail, checked = check.message, when(check.checked_at)
+    else:
+        status, css, detail = "Not checked yet", "unverified", ""
+    return LinkRow(
+        url=entry.url, href=link_href(entry.url), short=shorten_link(entry.url),
+        domain=entry.domain, kind=entry.kind,
+        videos=tuple(LinkVideoRef(v, titles.get(v) or v) for v in entry.video_ids),
+        reach=format_count(entry.reach), reach_title=f"{entry.reach:,} views in total",
+        status=status, status_class=css, detail=detail, when=checked,
+        replace_href="/bulk?" + urlencode([("kind", "replace"), ("find", entry.url),
+                                          ("field", "description"), ("visibility", "all")]))
+
+
+def build_links_view(entries: Sequence[LinkEntry], videos: Sequence[Video],
+                     params: Mapping[str, str],
+                     when: Callable[[str], str] = lambda iso: iso) -> LinksView:
+    """Filter and page the inventory (already ranked by reach). Unknown values fall back to the
+    defaults; never raises."""
+    show = _pick(params.get("show"), LINK_FILTER_KEYS, "all")
+    states = [_external_state(e) for e in entries]
+    summary = LinksSummary(
+        links=len(entries), videos=len({v for e in entries for v in e.video_ids}),
+        broken=states.count("broken"), redirected=states.count("redirected"),
+        trouble=states.count("error"),
+        own=sum(1 for e in entries if e.target_state in LINK_OWN_PROBLEMS),
+        unchecked=sum(1 for e, st in zip(entries, states) if e.kind == "external" and not st),
+        external=sum(1 for e in entries if e.kind == "external"), line="")
+    summary = replace(summary, line=_links_line(summary))
+    counts = {"all": len(entries), "broken": summary.broken, "redirected": summary.redirected,
+              "trouble": summary.trouble, "own": summary.own, "unchecked": summary.unchecked}
+
+    rows = [e for e in entries if _link_matches(e, show)]
+    total = len(rows)
+    pages = max(1, -(-total // LINKS_PAGE_SIZE))
+    page = min(max(_page_number(params.get("page")), 1), pages)
+    shown = rows[(page - 1) * LINKS_PAGE_SIZE: page * LINKS_PAGE_SIZE]
+    titles = {v.video_id: v.title for v in videos}
+    return LinksView(
+        rows=tuple(_link_row(e, titles, when) for e in shown), summary=summary, show=show,
+        chips=tuple(Chip(f"{label} ({counts[key]})", links_page_href(key), key == show)
+                    for key, label in LINK_FILTERS),
+        total=total, page=page, pages=pages,
+        first=(page - 1) * LINKS_PAGE_SIZE + 1 if total else 0,
+        last=min(page * LINKS_PAGE_SIZE, total),
+        prev_href=links_page_href(show, page - 1) if page > 1 else "",
+        next_href=links_page_href(show, page + 1) if page < pages else "")
+
+
+def links_check_line(summary: LinkCheckSummary) -> str:
+    """The one line shown when a link check ends, such as "Checked 212 links: 3 broken."."""
+    problems = [f"{summary.count(status)} {label}" for status, label in
+                (("broken", "broken"), ("redirected", "redirected"),
+                 ("error", "could not be checked")) if summary.count(status)]
+    text = f"Checked {_count(summary.checked, 'link')}"
+    if problems:
+        text += ": " + ", ".join(problems) + "."
+    else:
+        text += ": all answered." if summary.checked else "."
+    if summary.not_checked:
+        text += (f" {_count(summary.not_checked, 'link')} with the least reach "
+                 f"{'was' if summary.not_checked == 1 else 'were'} left out.")
+    return text

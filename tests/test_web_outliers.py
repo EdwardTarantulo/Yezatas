@@ -196,11 +196,11 @@ def test_the_page_has_no_inline_scripts_or_styles(tmp_path: Path) -> None:
     assert not re.search(r"<script(?![^>]*\bsrc=)", html)
 
 
-def test_nav_has_an_outliers_item_after_content(tmp_path: Path) -> None:
+def test_nav_has_an_outliers_item_after_links(tmp_path: Path) -> None:
     ui, _, _ = make_ol_ui(tmp_path)
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/outliers") == items.index("/videos") + 1
+    assert items.index("/outliers") == items.index("/links") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/outliers"]
     assert re.findall(r'class="nav-item active" href="([^"]+)"', page(ui, "/videos")) == ["/videos"]
 

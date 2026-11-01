@@ -183,6 +183,10 @@ def outcome_for_status(url: str, http_status: int, final_url: str = "") -> LinkO
         return LinkOutcome("ok", http_status, "", "")
     if http_status in (404, 410):
         return LinkOutcome("broken", http_status, "", f"Not found ({http_status}).")
+    if 500 <= http_status < 600:
+        return LinkOutcome("error", http_status, "", (
+            f"The site answered {http_status} (a problem on the site). "
+            "Try again later or open it yourself."))
     return LinkOutcome("error", http_status, "", (
         f"The site answered {http_status}; it may block checks. Open it yourself."))
 

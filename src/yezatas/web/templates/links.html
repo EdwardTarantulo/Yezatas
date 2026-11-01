@@ -1,0 +1,94 @@
+{% extends "shell.html" %}
+{% block title %}Links - Yezatas{% endblock %}
+{% block content %}
+{% set sm = lv.summary %}
+<h1 class="page-title">Links in your descriptions</h1>
+
+<p class="muted" id="links-line">{{ sm.line }}</p>
+
+<section class="card" id="links-check" aria-labelledby="h-links-check">
+  <h2 id="h-links-check">Check the links</h2>
+  <p class="muted" id="links-about">Yezatas visits each external link once from your computer (no YouTube quota). YouTube links are checked against your catalog. If you have more than {{ max_links }} external links, the {{ max_links }} with the most reach are visited. Nothing is changed: to fix a link, use <em>Replace everywhere&hellip;</em>, which only makes drafts.</p>
+  {% if running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="links-msg" role="status" aria-live="polite">{{ message or 'Starting…' }}</span></p>
+  <p class="hint">You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if check_summary %}<div class="flash ok" role="status" id="links-summary">{{ check_summary }}</div>{% endif %}
+  {% if failed %}<div class="flash error" role="alert" id="links-failed">{{ failed }}</div>{% endif %}
+  <form class="packaging-form" method="post" action="/links/check">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="actions"><button type="submit" class="button primary"{% if not sm.external %} disabled{% endif %}>Check links</button></div>
+  </form>
+  {% endif %}
+</section>
+
+{% if sm.links %}
+<div class="filters">
+  <div class="chip-row" role="group" aria-label="Show">
+    {% for chip in lv.chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }}</a>{% endfor %}
+  </div>
+</div>
+
+<p class="result-count" id="result-count">{{ lv.total }} link{{ '' if lv.total == 1 else 's' }}{% if lv.pages > 1 %} &middot; showing {{ lv.first }}-{{ lv.last }}{% endif %}</p>
+
+{% if lv.rows %}
+<table class="vtable lk-table" id="links-table">
+  <caption class="visually-hidden">Links in your descriptions, most reach first</caption>
+  <thead>
+    <tr>
+      <th class="col-link" scope="col">Link</th>
+      <th class="col-vids" scope="col">Videos</th>
+      <th class="col-num" scope="col">Reach</th>
+      <th class="col-status" scope="col">Status</th>
+      <th class="col-act" scope="col"><span class="visually-hidden">Action</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in lv.rows %}
+    <tr>
+      <td class="col-link">
+        <a class="lk-url" href="{{ r.href }}" title="{{ r.url }}" target="_blank" rel="noopener noreferrer">{{ r.short }}</a>
+        <span class="lk-domain muted">{{ r.domain }}</span>
+      </td>
+      <td class="col-vids">
+        <details class="lk-videos">
+          <summary>{{ r.videos|length }} video{{ '' if r.videos|length == 1 else 's' }}</summary>
+          <ul>
+            {% for v in r.videos %}<li><a href="/videos/{{ v.video_id|urlencode }}">{{ v.title }}</a></li>{% endfor %}
+          </ul>
+        </details>
+      </td>
+      <td class="col-num" title="{{ r.reach_title }}">{{ r.reach }}</td>
+      <td class="col-status">
+        <span class="pill {{ r.status_class }}">{{ r.status }}</span>
+        {% if r.detail %}<span class="lk-detail">{{ r.detail }}</span>{% endif %}
+        {% if r.when %}<span class="lk-when muted">Checked {{ r.when }}</span>{% endif %}
+      </td>
+      <td class="col-act"><a class="button secondary" href="{{ r.replace_href }}" title="Opens Bulk edit with this link filled in. Nothing changes until you preview and make drafts.">Replace everywhere&hellip;</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if lv.pages > 1 %}
+<nav class="pager" aria-label="Pages">
+  {% if lv.prev_href %}<a class="button secondary" rel="prev" href="{{ lv.prev_href }}">Previous</a>{% else %}<span class="button secondary disabled" aria-disabled="true">Previous</span>{% endif %}
+  <span class="muted">Page {{ lv.page }} of {{ lv.pages }}</span>
+  {% if lv.next_href %}<a class="button secondary" rel="next" href="{{ lv.next_href }}">Next</a>{% else %}<span class="button secondary disabled" aria-disabled="true">Next</span>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<section class="empty-state" id="no-links">
+  <h2>No links match</h2>
+  <p class="muted">Try another filter.</p>
+  <p><a class="button secondary" href="/links">Show all links</a></p>
+</section>
+{% endif %}
+{% else %}
+<section class="empty-state" id="no-links">
+  <h2>No links yet</h2>
+  <p class="muted">None of your descriptions has a link, so there is nothing to check.</p>
+</section>
+{% endif %}
+{% endblock %}

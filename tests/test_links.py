@@ -214,7 +214,15 @@ def test_not_found_is_broken() -> None:
     assert outcome_for_status("u", 410) == LinkOutcome("broken", 410, "", "Not found (410).")
 
 
-@pytest.mark.parametrize("code", [301, 304, 400, 401, 403, 429, 500, 503])
+@pytest.mark.parametrize("code", [500, 502, 503, 599])
+def test_server_errors_say_the_problem_is_on_the_site(code: int) -> None:
+    result = outcome_for_status("u", code)
+    assert result.status == "error" and result.http_status == code
+    assert result.message == (f"The site answered {code} (a problem on the site). "
+                              "Try again later or open it yourself.")
+
+
+@pytest.mark.parametrize("code", [301, 304, 400, 401, 403, 429])
 def test_other_statuses_are_errors_with_a_plain_sentence(code: int) -> None:
     result = outcome_for_status("u", code)
     assert result.status == "error" and result.http_status == code

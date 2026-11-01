@@ -765,3 +765,21 @@ button.gbtn { cursor: pointer; }
 .cp-foot { margin: 8px 0 0; font-size: 13px; }
 .cp-starters { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .cp-starter { height: auto; min-height: 36px; padding: 6px 16px; white-space: normal; text-align: left; }
+
+/* --- links --- */
+.lk-table { table-layout: auto; }
+.lk-table .col-link { width: 34%; overflow-wrap: anywhere; }
+.lk-table .col-vids { width: 150px; }
+.lk-table .col-num { width: 80px; }
+.lk-table .col-status { width: 26%; }
+.lk-table .col-act { width: 170px; text-align: right; }
+.lk-table td { vertical-align: top; }
+.lk-url { color: var(--link); overflow-wrap: anywhere; word-break: break-all; }
+.lk-domain, .lk-detail, .lk-when { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.lk-detail { margin-top: 4px; }
+.lk-videos summary { cursor: pointer; }
+.lk-videos ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .lk-table .col-vids, .lk-table .col-num { display: none; }
+  .lk-table .col-act { width: 120px; }
+}

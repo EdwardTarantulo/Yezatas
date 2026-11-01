@@ -14,6 +14,7 @@ import threading
 import time
 import webbrowser
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Sequence
@@ -29,6 +30,7 @@ from starlette.templating import Jinja2Templates
 from .. import agent, auth, bulk, edits, push, subtitle_translate
 from .. import chapters as chapters_mod
 from .. import copilot as copilot_mod
+from .. import links as links_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
 from .. import transcribe as transcribe_mod
@@ -48,14 +50,14 @@ from .security import CSRF_FIELD, Sessions, install_security, load_session_key, 
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
 from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
-                    build_bulk_preview, build_copilot_turns, build_listing, build_outlier_view,
-                    build_packaging_view, build_preview, build_subtitles_view,
+                    build_bulk_preview, build_copilot_turns, build_links_view, build_listing,
+                    build_outlier_view, build_packaging_view, build_preview, build_subtitles_view,
                     build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
                     chapters_blocker, dashboard_model, format_cost, format_count, format_date,
-                    group_checks, history_groups, lang_name, make_entries, outlier_count,
-                    outlier_line, parse_bulk_form, plan_lines, preview_card, pull_moment,
-                    push_results, run_restore_summary, run_view, stops_batch, thumb_url,
-                    top_other_videos)
+                    group_checks, history_groups, lang_name, links_check_line, make_entries,
+                    outlier_count, outlier_line, parse_bulk_form, plan_lines, preview_card,
+                    pull_moment, push_results, run_restore_summary, run_view, stops_batch,
+                    thumb_url, top_other_videos)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -111,6 +113,11 @@ OUTLIERS_TIMEOUT_MESSAGE = (
 COPILOT_TIMEOUT_SECONDS = 5 * 60.0
 COPILOT_TIMEOUT_MESSAGE = (
     "The answer took more than 5 minutes, so Yezatas stopped waiting. Try a shorter question."
+)
+LINKS_TIMEOUT_SECONDS = 10 * 60.0
+LINKS_TIMEOUT_MESSAGE = (
+    "The link check took more than 10 minutes, so Yezatas stopped waiting. The links it "
+    "finished are kept on the Links page."
 )
 NO_PACKAGING_KEY = "There is no Meta API key. Add one in Setup. Nothing was sent."
 MAX_ID_DIGITS = 12  # a variant id in a URL; longer is never a real one
@@ -263,6 +270,12 @@ def map_copilot_error(exc: BaseException) -> tuple[str, str]:
     return "copilot", f"The answer stopped unexpectedly ({exc.__class__.__name__})."
 
 
+def map_links_error(exc: BaseException) -> tuple[str, str]:
+    if type(exc) is ValueError:  # the plain sentence of _run_links' own check
+        return "links", str(exc)
+    return "links", f"The link check stopped unexpectedly ({exc.__class__.__name__})."
+
+
 def make_default_copilot(config: Config) -> CopilotFn:
     """The real copilot function: Muse Spark through Meta's Model API, one client per question."""
 
@@ -396,6 +409,7 @@ class WebState:
         packaging_fetch: Callable[[str], bytes] = packaging_mod.fetch_thumbnail,
         packaging_key: Callable[[Config], bool] | None = None,
         copilot_fn: CopilotFn | None = None,
+        link_fetch: links_mod.Fetch | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -409,6 +423,7 @@ class WebState:
         self._transcribe = transcribe_fn or make_default_transcribe(config)
         self._chapters = chapters_fn or make_default_chapters(config)
         self._copilot = copilot_fn or make_default_copilot(config)
+        self._link_fetch = link_fetch  # None: the real visit, links_mod.fetch_url
         self.packaging_tools = packaging_tools
         # Whether a Meta key exists, asked on page loads without building any client. None: an
         # injected packaging_tools factory (tests) answers instead.
@@ -454,6 +469,8 @@ class WebState:
                                COPILOT_TIMEOUT_MESSAGE, clock)
         self._copilot_seen: JobSnapshot | None = None
         self._copilot_chat: int | None = None  # None: the chat of the newest turn
+        self.links_job = Job(map_links_error, LINKS_TIMEOUT_SECONDS, LINKS_TIMEOUT_MESSAGE, clock)
+        self._links_seen: JobSnapshot | None = None
         self.variants_job = Job(map_variants_error, VARIANTS_TIMEOUT_SECONDS,
                                 VARIANTS_TIMEOUT_MESSAGE, clock)
         self._variants_seen: JobSnapshot | None = None
@@ -941,6 +958,31 @@ class WebState:
             with self._lock:
                 self._copilot_seen = snap
 
+    # --- links: visit each external link once ----------------------------------------------------
+    def start_links(self) -> bool:
+        """Check the links in the one links job."""
+        return self.links_job.start(self._run_links)
+
+    def _run_links(self, report: Report) -> links_mod.LinkCheckSummary:
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            if store.latest_pull() is None:
+                raise ValueError("There is no pulled catalog yet. Pull it in Setup first.")
+            entries = links_mod.inventory(store.list_videos(), store.latest_link_checks())
+            return links_mod.check_links(store, entries, fetch=self._link_fetch, report=report)
+
+    def links_state(self) -> JobSnapshot:
+        """The job snapshot. A finished job the page already showed is idle."""
+        snap = self.links_job.snapshot()
+        with self._lock:
+            return JobSnapshot("idle") if snap is self._links_seen else snap
+
+    def dismiss_links_result(self) -> None:
+        snap = self.links_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._links_seen = snap
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -977,6 +1019,7 @@ def create_app(
     packaging_fetch: Callable[[str], bytes] | None = None,
     packaging_key: Callable[[Config], bool] | None = None,
     copilot: CopilotFn | None = None,
+    link_fetch: links_mod.Fetch | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -989,7 +1032,8 @@ def create_app(
                      tools, transcribe, chapters,
                      packaging_tools or packaging_mod.packaging_tools_from_config,
                      packaging_fetch or packaging_mod.fetch_thumbnail,
-                     packaging_key or (None if packaging_tools else has_meta_key), copilot)
+                     packaging_key or (None if packaging_tools else has_meta_key), copilot,
+                     link_fetch)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -1454,6 +1498,30 @@ def create_app(
             "message": snap.message, "failed": failed, "poll": snap.running,
         })
 
+    @app.get("/links")
+    def links_page(request: Request) -> Response:
+        """Every link in the descriptions, ranked by reach. Showing it visits nothing."""
+        with Store(config.catalog_db) as store:
+            pull = store.latest_pull()
+            videos = store.list_videos() if pull is not None else []
+            checks = store.latest_link_checks() if pull is not None else {}
+        if pull is None:
+            return back_to_setup()
+        view = build_links_view(links_mod.inventory(videos, checks), videos,
+                                dict(request.query_params), _local_time)
+        snap = state.links_state()
+        summary = ""
+        failed = snap.message if snap.status == "failed" else ""
+        if snap.status == "done" and isinstance(snap.result, links_mod.LinkCheckSummary):
+            summary = links_check_line(snap.result)
+        if snap.status in ("done", "failed"):
+            state.dismiss_links_result()  # shown once
+        return render(request, "links.html", {
+            "active": "links", "lv": view, "running": snap.running, "message": snap.message,
+            "check_summary": summary, "failed": failed, "poll": snap.running,
+            "max_links": links_mod.MAX_LINKS,
+        })
+
     @app.get("/setup")
     def setup(request: Request) -> Response:
         data = page_data()
@@ -1485,6 +1553,7 @@ def create_app(
             "packaging": _job_json(state.packaging_job.snapshot()),
             "outliers": _job_json(state.outliers_job.snapshot()),
             "copilot": _job_json(state.copilot_job.snapshot()),
+            "links": _job_json(state.links_job.snapshot()),
             "variants": _job_json(state.variants_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
@@ -1860,7 +1929,10 @@ def create_app(
     # --- bulk edit (no model: drafts only) -----------------------------------------------------
     @app.get("/bulk")
     def bulk_page(request: Request) -> Response:
-        form = parse_bulk_form(request.query_params, submitted="preview" in request.query_params)
+        params = request.query_params
+        form = parse_bulk_form(params, submitted="preview" in params)
+        if not form.submitted and "find" in params:  # a link from the Links page: prefill only
+            form = replace(parse_bulk_form(params, submitted=True), submitted=False)
         error, preview = "", None
         if form.submitted:
             with Store(config.catalog_db) as store:
@@ -2321,6 +2393,21 @@ def create_app(
         await read_form(request)
         state.dismiss_outliers_result()
         return see_other("/outliers#why")
+
+    # --- links: visit each external link once ----------------------------------------------------
+    @app.post("/links/check")
+    async def check_links(request: Request) -> Response:
+        await read_form(request)
+
+        def has_pull() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.latest_pull() is not None
+
+        if not await run_in_threadpool(has_pull):
+            return back_to_setup()
+        if not state.start_links():
+            flash(request, "error", "A link check is already running. Wait for it to finish.")
+        return see_other("/links")
 
     # --- copilot: questions about the channel -----------------------------------------------------
     @app.post("/copilot/ask")
