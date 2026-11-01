@@ -32,6 +32,7 @@ from .. import agent, auth, bulk, edits, push, subtitle_translate
 from .. import chapters as chapters_mod
 from .. import adcheck as adcheck_mod
 from .. import copilot as copilot_mod
+from .. import strategy as strategy_mod
 from .. import links as links_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
@@ -60,7 +61,7 @@ from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
 from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
                     affiliate_apply_message, build_adcheck_view, build_affiliate_preview,
                     build_bulk_preview, build_checks_view, build_comments_view, build_copilot_turns, build_links_view, build_listing,
-                    build_outlier_view, build_packaging_view, build_preview, build_subtitles_view,
+                    build_outlier_view, build_packaging_view, build_preview, build_strategy_view, build_subtitles_view,
                     build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
                     chapters_blocker, dashboard_model, format_cost, format_count, format_date,
                     group_checks, history_groups, lang_name, links_check_line, make_entries,
@@ -120,6 +121,10 @@ OUTLIERS_TIMEOUT_SECONDS = 10 * 60.0
 OUTLIERS_TIMEOUT_MESSAGE = (
     "Explaining the outliers took more than 10 minutes, so Yezatas stopped waiting. Try again."
 )
+STRATEGY_TIMEOUT_SECONDS = 5 * 60.0
+STRATEGY_TIMEOUT_MESSAGE = (
+    "The strategy report took more than 5 minutes, so Yezatas stopped waiting. Try again."
+)
 COPILOT_TIMEOUT_SECONDS = 5 * 60.0
 COPILOT_TIMEOUT_MESSAGE = (
     "The answer took more than 5 minutes, so Yezatas stopped waiting. Try a shorter question."
@@ -170,6 +175,8 @@ CommentReaderFactory = Callable[[Any], CommentReader]
 CommentsAssistFn = Callable[[Store, str, datetime, Report], "comments_mod.AssistResult"]
 # (the creator's words) -> the proposed fixed rule
 RuleMakerFn = Callable[[str], "customchecks_mod.RuleDraft"]
+# (store, home, the time of the views, report) -> the saved report
+StrategyFn = Callable[[Store, Path, datetime, Report], "strategy_mod.StrategyReport"]
 # (store, the creator's words) -> the proposed bulk plan
 BulkAskerFn = Callable[[Store, str], "bulkask_mod.AskProposal"]
 
@@ -305,6 +312,31 @@ def map_links_error(exc: BaseException) -> tuple[str, str]:
     if type(exc) is ValueError:  # the plain sentence of _run_links' own check
         return "links", str(exc)
     return "links", f"The link check stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def map_strategy_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if isinstance(exc, strategy_mod.StrategyError) or type(exc) is ValueError:
+        return "strategy", str(exc)
+    return "strategy", f"The strategy report stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def make_default_strategy(config: Config) -> StrategyFn:
+    """The real strategy report: Muse Wonder through Meta's Model API, one client per report."""
+
+    def run(store: Store, home: Path, as_of: datetime, report: Report) -> "strategy_mod.StrategyReport":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, strategy_mod.STRATEGY_MODEL)
+        made = strategy_mod.make_report(store, client, as_of=as_of, report=report)
+        strategy_mod.save_report(home, made)
+        return made
+
+    return run
 
 
 def make_default_copilot(config: Config) -> CopilotFn:
@@ -537,6 +569,7 @@ class WebState:
         comment_reader: CommentReaderFactory | None = None,
         comments_assist: CommentsAssistFn | None = None,
         rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
+        strategy_fn: StrategyFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -555,6 +588,7 @@ class WebState:
         self._comments_assist = comments_assist or make_default_comments_assist(config)
         self._rule_maker = rule_maker or make_default_rule_maker(config)
         self._bulk_asker = bulk_asker or make_default_bulk_asker(config)
+        self._strategy = strategy_fn or make_default_strategy(config)
         self._link_fetch = link_fetch  # None: the real visit, links_mod.fetch_url
         self.packaging_tools = packaging_tools
         # Whether a Meta key exists, asked on page loads without building any client. None: an
@@ -597,6 +631,9 @@ class WebState:
         self.outliers_job = Job(map_outliers_error, OUTLIERS_TIMEOUT_SECONDS,
                                 OUTLIERS_TIMEOUT_MESSAGE, clock)
         self._outliers_seen: JobSnapshot | None = None
+        self.strategy_job = Job(map_strategy_error, STRATEGY_TIMEOUT_SECONDS,
+                                STRATEGY_TIMEOUT_MESSAGE, clock)
+        self._strategy_seen: JobSnapshot | None = None
         self.copilot_job = Job(map_copilot_error, COPILOT_TIMEOUT_SECONDS,
                                COPILOT_TIMEOUT_MESSAGE, clock)
         self._copilot_seen: JobSnapshot | None = None
@@ -1065,6 +1102,31 @@ class WebState:
             with self._lock:
                 self._outliers_seen = snap
 
+    # --- strategy: what works, what is missing and what to make next ---------------------------
+    def start_strategy(self) -> bool:
+        """Make the strategy report in the one strategy job."""
+        return self.strategy_job.start(lambda report: self._run_strategy(report))
+
+    def _run_strategy(self, report: Report) -> "strategy_mod.StrategyReport":
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            pull = store.latest_pull()
+            if pull is None:
+                raise ValueError("There is no pulled catalog yet. Pull it in Setup first.")
+            return self._strategy(store, self.config.home, pull_moment(pull), report)
+
+    def strategy_state(self) -> JobSnapshot:
+        """The job snapshot. A finished job the creator dismissed is idle."""
+        snap = self.strategy_job.snapshot()
+        with self._lock:
+            return JobSnapshot("idle") if snap is self._strategy_seen else snap
+
+    def dismiss_strategy_result(self) -> None:
+        snap = self.strategy_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._strategy_seen = snap
+
     # --- copilot: questions about the channel ----------------------------------------------------
     def copilot_chat(self, store: Store) -> int | None:
         """The chat on screen: the one picked with "New chat", else the newest (None: no turns)."""
@@ -1264,6 +1326,7 @@ def create_app(
     comment_reader: CommentReaderFactory | None = None,
     comments_assist: CommentsAssistFn | None = None,
     rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
+    strategy: StrategyFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1277,7 +1340,8 @@ def create_app(
                      packaging_tools or packaging_mod.packaging_tools_from_config,
                      packaging_fetch or packaging_mod.fetch_thumbnail,
                      packaging_key or (None if packaging_tools else has_meta_key), copilot,
-                     link_fetch, adcheck, comment_reader, comments_assist, rule_maker, bulk_asker)
+                     link_fetch, adcheck, comment_reader, comments_assist, rule_maker, bulk_asker,
+                     strategy_fn=strategy)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -1761,6 +1825,41 @@ def create_app(
             "poll": snap.running,
         })
 
+    @app.get("/strategy")
+    def strategy_page(request: Request) -> Response:
+        """What works, what is missing and what to make next. Showing it calls no model."""
+        with Store(config.catalog_db) as store:
+            pull = store.latest_pull()
+            if pull is None:
+                return back_to_setup()
+            videos = store.list_videos()
+            as_of = pull_moment(pull)
+            saved = strategy_mod.latest_report(config.home)
+            view = build_strategy_view(saved, videos, outliers_mod.score_videos(videos, as_of),
+                                       as_of, _local_time)
+            estimate = ""
+            context_error = ""
+            if videos:
+                try:
+                    context = strategy_mod.build_context(store, as_of)
+                except strategy_mod.StrategyError as exc:
+                    context_error = str(exc)
+                else:
+                    input_tokens = int(len(context.text) / 4)
+                    estimate = format_cost(agent.estimate_cost(
+                        strategy_mod.STRATEGY_MODEL, input_tokens, 0, 4000))
+            else:
+                context_error = "There is no pulled catalog yet. Pull it in Setup first."
+        snap = state.strategy_state()
+        return render(request, "strategy.html", {
+            "active": "strategy", "view": view, "has_key": has_packaging_key(),
+            "model": strategy_mod.STRATEGY_MODEL, "estimate": estimate,
+            "estimate_cost": estimate, "context_error": context_error,
+            "running": snap.running, "message": snap.message,
+            "failed": snap.message if snap.status == "failed" else "",
+            "poll": snap.running,
+        })
+
     @app.get("/copilot")
     def copilot_page(request: Request) -> Response:
         """The chat about the channel. Showing it calls no model."""
@@ -1841,6 +1940,7 @@ def create_app(
             "chapters": _job_json(state.chapters_job.snapshot()),
             "packaging": _job_json(state.packaging_job.snapshot()),
             "outliers": _job_json(state.outliers_job.snapshot()),
+            "strategy": _job_json(state.strategy_job.snapshot()),
             "copilot": _job_json(state.copilot_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),
@@ -3173,6 +3273,29 @@ def create_app(
         await read_form(request)
         state.dismiss_outliers_result()
         return see_other("/outliers#why")
+
+    # --- strategy: what works, what is missing and what to make next ----------------------------
+    @app.post("/strategy/run")
+    async def run_strategy(request: Request) -> Response:
+        await read_form(request)
+
+        def has_pull() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.latest_pull() is not None
+
+        if not await run_in_threadpool(has_pull):
+            return back_to_setup()
+        if not await run_in_threadpool(has_packaging_key):
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif not state.start_strategy():
+            flash(request, "error", "A strategy report is already being made. Wait for it to finish.")
+        return see_other("/strategy")
+
+    @app.post("/strategy/done")
+    async def dismiss_strategy(request: Request) -> Response:
+        await read_form(request)
+        state.dismiss_strategy_result()
+        return see_other("/strategy")
 
     # --- links: visit each external link once ----------------------------------------------------
     @app.post("/links/check")

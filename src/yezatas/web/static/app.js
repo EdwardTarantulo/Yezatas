@@ -1,4 +1,4 @@
-// Polls /api/status while a sign-in, a catalog pull, a push, a suggestion, a translation, subtitles, a transcript, chapters, a packaging check, variants, an outlier explanation, a copilot answer, a link check, an advertiser-friendly check, a comments fetch or a comment sort are running, then reloads the page when a job finishes.
+// Polls /api/status while a sign-in, a catalog pull, a push, a suggestion, a translation, subtitles, a transcript, chapters, a packaging check, variants, an outlier explanation, a strategy report, a copilot answer, a link check, an advertiser-friendly check, a comments fetch or a comment sort are running, then reloads the page when a job finishes.
 // Copy buttons copy the text of the element named by data-copy-target. Also stops double submits, shows character counters and wires the theme toggle. No external code.
 (function () {
   "use strict";
@@ -117,7 +117,7 @@
     fetch("/api/status", { credentials: "same-origin", headers: { "X-CSRF-Token": csrf } })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("status " + r.status)); })
       .then(function (s) {
-        var jobs = ["signin", "pull", "write", "push", "suggest", "translate", "subtitles", "transcribe", "chapters", "packaging", "variants", "outliers", "copilot", "links", "adcheck", "comments", "assist"];
+        var jobs = ["signin", "pull", "write", "push", "suggest", "translate", "subtitles", "transcribe", "chapters", "packaging", "variants", "outliers", "strategy", "copilot", "links", "adcheck", "comments", "assist"];
         var running = jobs.some(function (name) { return s[name] && s[name].status === "running"; });
         if (running) {
           seenRunning = true;

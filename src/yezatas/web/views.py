@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 from urllib.parse import quote, urlencode
 
@@ -38,6 +38,7 @@ from .. import customchecks as customchecks_mod
 from .. import replytemplates as replytemplates_mod
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
+from ..strategy import StrategyReport
 from ..validate import Issue, has_errors
 
 PAGE_SIZE = 50
@@ -2414,3 +2415,93 @@ def build_checks_view(rules: Sequence[Any], results: Mapping[int, Any],
             rule, explain_rule(rule), True, result.passing, result.not_applicable,
             failing, max(0, len(result.failing) - FAILING_LIMIT)))
     return tuple(rows)
+
+
+# --- strategy --------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class StrategyRef:
+    """One video a strategy point names. `ratio` is the code-made label, or ""."""
+
+    video_id: str
+    title: str
+    href: str
+    ratio: str
+
+
+@dataclass(frozen=True)
+class StrategyPointView:
+    text: str
+    refs: tuple[StrategyRef, ...]
+
+
+@dataclass(frozen=True)
+class StrategyIdeaView:
+    title: str
+    why: str
+    refs: tuple[StrategyRef, ...]
+
+
+@dataclass(frozen=True)
+class StrategyReportView:
+    """The newest saved strategy report, ready to show. All model text stays escaped."""
+
+    works: tuple[StrategyPointView, ...]
+    gaps: tuple[StrategyPointView, ...]
+    ideas: tuple[StrategyIdeaView, ...]
+    notes: tuple[str, ...]
+    model: str
+    tokens: str
+    cost: str
+    when: str
+    stale: bool
+
+
+def _strategy_moment(text: str) -> datetime | None:
+    """Parse an ISO time (a trailing Z counts as UTC); None when it cannot be read."""
+    try:
+        moment = datetime.fromisoformat((text or "").strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
+
+
+def build_strategy_view(report: StrategyReport | None, videos: Sequence[Video],
+                        scores: Sequence[OutlierScore], current_as_of: datetime | None,
+                        when: Callable[[str], str] = lambda iso: iso) -> StrategyReportView | None:
+    """The saved strategy report with current titles and code-made ratio labels.
+
+    A video that left the catalog shows its id as its title. The ratio shows only for
+    outliers and videos below the norm, and every number in it comes from code.
+    """
+    if report is None:
+        return None
+    titles = {v.video_id: v.title for v in videos}
+    score_by_id = {s.video_id: s for s in scores}
+    marked = {s.video_id for s in outliers(scores)} | {s.video_id for s in below_norm(scores)}
+
+    def ref_for(video_id: str) -> StrategyRef:
+        score = score_by_id.get(video_id)
+        ratio = (ratio_label(score.ratio)
+                 if video_id in marked and score is not None and score.ratio is not None else "")
+        return StrategyRef(video_id, titles.get(video_id) or video_id,
+                           f"/videos/{quote(video_id)}", ratio)
+
+    def refs_of(ids: Sequence[str]) -> tuple[StrategyRef, ...]:
+        return tuple(ref_for(video_id) for video_id in ids)
+
+    stale = False
+    if current_as_of is not None:
+        created = _strategy_moment(report.created_at)
+        current = (current_as_of.replace(tzinfo=timezone.utc)
+                   if current_as_of.tzinfo is None else current_as_of)
+        stale = created is not None and created < current
+    tokens = (f"{report.input_tokens:,} in, {report.output_tokens:,} out"
+              if report.input_tokens or report.output_tokens else "")
+    cost = format_cost(estimate_cost(report.model, report.input_tokens,
+                                     report.cached_tokens, report.output_tokens))
+    return StrategyReportView(
+        works=tuple(StrategyPointView(p.text, refs_of(p.video_ids)) for p in report.works),
+        gaps=tuple(StrategyPointView(p.text, refs_of(p.video_ids)) for p in report.gaps),
+        ideas=tuple(StrategyIdeaView(i.title, i.why, refs_of(i.video_ids)) for i in report.ideas),
+        notes=tuple(report.notes), model=report.model, tokens=tokens, cost=cost,
+        when=when(report.created_at), stale=stale)

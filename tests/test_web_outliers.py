@@ -201,6 +201,7 @@ def test_nav_has_an_outliers_item_after_affiliate(tmp_path: Path) -> None:
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
     assert items.index("/outliers") == items.index("/affiliate") + 1
+    assert items.index("/strategy") == items.index("/outliers") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/outliers"]
     assert re.findall(r'class="nav-item active" href="([^"]+)"', page(ui, "/videos")) == ["/videos"]
 

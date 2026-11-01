@@ -1,0 +1,79 @@
+{% extends "shell.html" %}
+{% block title %}Strategy - Yezatas{% endblock %}
+
+{# The videos one point or idea builds on. `refs` are StrategyRef; the ratio is made by code. #}
+{% macro ref_list(refs) %}
+{% if refs %}
+<ul class="chip-row">
+  {% for r in refs %}<li><a href="{{ r.href }}">{{ r.title }}</a>{% if r.ratio %} <strong>{{ r.ratio }}</strong>{% endif %}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endmacro %}
+
+{% block content %}
+<h1 class="page-title">Strategy</h1>
+
+<section class="card" id="strategy-run" aria-labelledby="h-strategy-run">
+  <h2 id="h-strategy-run">Make the report</h2>
+  {% if running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="strategy-msg" role="status" aria-live="polite">{{ message or 'Starting…' }}</span></p>
+  <p class="hint">This can take a few minutes. You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if failed %}
+  <div class="flash error" role="alert" id="strategy-failed">{{ failed }}</div>
+  <form class="inline" method="post" action="/strategy/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if not has_key %}<p class="hint" id="strategy-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  <form class="packaging-form" method="post" action="/strategy/run">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="hint">The video table, the outlier findings and up to 30 viewer questions go to Meta's Model API ({{ model }}). Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products. Nothing is sent to YouTube.</p>
+    {% if estimate %}<p class="hint">One run costs about {{ estimate }}.</p>{% endif %}
+    {% if context_error %}<p class="hint" id="strategy-no-videos">{{ context_error }}</p>{% endif %}
+    <div class="actions"><button type="submit" class="button primary"{% if not has_key or not estimate %} disabled{% endif %}>Make the strategy report</button></div>
+  </form>
+  {% endif %}
+</section>
+
+{% if view %}
+<div id="strategy-report">
+  {% if view.stale %}<p class="flash" id="strategy-stale">This report was made before your last pull, so it may not match your videos now.</p>{% endif %}
+  <section class="card" id="strategy-works" aria-labelledby="h-strategy-works">
+    <h2 id="h-strategy-works">What works</h2>
+    {% if view.works %}
+    <ul class="run-list">
+      {% for p in view.works %}<li><p>{{ p.text }}</p>{{ ref_list(p.refs) }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-note">Nothing kept in this section.</p>
+    {% endif %}
+  </section>
+  <section class="card" id="strategy-gaps" aria-labelledby="h-strategy-gaps">
+    <h2 id="h-strategy-gaps">Gaps</h2>
+    {% if view.gaps %}
+    <ul class="run-list">
+      {% for p in view.gaps %}<li><p>{{ p.text }}</p>{{ ref_list(p.refs) }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-note">Nothing kept in this section.</p>
+    {% endif %}
+  </section>
+  <section class="card" id="strategy-ideas" aria-labelledby="h-strategy-ideas">
+    <h2 id="h-strategy-ideas">Next video ideas</h2>
+    {% if view.ideas %}
+    <ul class="run-list">
+      {% for i in view.ideas %}<li><p><strong>{{ i.title }}</strong></p><p>{{ i.why }}</p>{{ ref_list(i.refs) }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-note">Nothing kept in this section.</p>
+    {% endif %}
+  </section>
+  {% if view.notes %}
+  <ul class="run-list muted" id="strategy-notes">
+    {% for n in view.notes %}<li>{{ n }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p class="muted">Made {{ view.when }}{% if view.model %} &middot; {{ view.model }}{% endif %}{% if view.tokens %} &middot; {{ view.tokens }} tokens{% endif %} &middot; Cost {{ view.cost }}</p>
+</div>
+{% endif %}
+{% endblock %}
