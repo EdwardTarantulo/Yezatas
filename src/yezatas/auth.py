@@ -20,6 +20,7 @@ from .config import Config, ensure_dirs
 
 READONLY = "https://www.googleapis.com/auth/youtube.readonly"
 WRITE = "https://www.googleapis.com/auth/youtube.force-ssl"
+ANALYTICS = "https://www.googleapis.com/auth/yt-analytics.readonly"
 
 
 class MissingClientSecrets(FileNotFoundError):
@@ -69,6 +70,29 @@ def can_edit(config: Config) -> bool:
     except (OSError, ValueError):
         return False
     return isinstance(info, dict) and _covers(info.get("scopes"), (WRITE,))
+
+
+def granted_scopes(config: Config) -> tuple[str, ...]:
+    """The scopes of the saved token. Reads the file only, never the network."""
+    try:
+        info = json.loads(config.token_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    if not isinstance(info, dict):
+        return ()
+    scopes = info.get("scopes")
+    if not isinstance(scopes, list):
+        return ()
+    return tuple(s for s in scopes if isinstance(s, str))
+
+
+def can_read_analytics(config: Config) -> bool:
+    return ANALYTICS in granted_scopes(config)
+
+
+def analytics_scopes(config: Config) -> tuple[str, ...]:
+    """The scopes for the search-terms sign-in: it keeps the edit access the creator already gave."""
+    return (WRITE if can_edit(config) else READONLY, ANALYTICS)
 
 
 def load_credentials(
