@@ -372,7 +372,9 @@ as it lands; the git history is the detailed record.
   files or exact edits, which were then reviewed and tested. In review it skipped an edit in the chat translator,
   left out two imports, copied the translate call into an error branch, added a broken import line and left a
   case untested. Six fix rounds, all by Spark Open, fixed them. About 190,000 tokens in 11 calls, from the event's
-  Baseten credits.
+  Baseten credits. Tried on the real channel the same day: with one product name kept, a video's Spanish and
+  German translations came back verified with the name intact. The browser found two bugs the tests had missed (the
+  add form had no CSRF token, and the outdated list linked to the wrong anchor); Spark Open fixed both.
 
 ---
 
