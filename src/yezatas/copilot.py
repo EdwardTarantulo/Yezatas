@@ -576,6 +576,12 @@ def _unsupported(text: str, allowed: set[str]) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+# Public aliases for other modules (same objects, no new behaviour).
+Catalog = _Catalog
+numbers_in = _numbers
+unsupported_numbers = _unsupported
+
+
 def _drop_unsupported(text: str, allowed: set[str]) -> tuple[str, list[str]]:
     """The answer without the sentences that quote a number nothing returned, and a note for each."""
     notes: list[str] = []
