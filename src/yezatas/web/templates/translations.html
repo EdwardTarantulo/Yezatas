@@ -39,6 +39,7 @@
     {% endif %}
 
     <form class="edit-form" method="post" action="/translations/glossary/add" id="glossary-add">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
       <div class="field">
         <label for="glossary-term">Term</label>
         <input type="text" id="glossary-term" name="term" autocomplete="off" maxlength="80">

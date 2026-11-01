@@ -428,6 +428,21 @@ def test_outdated_subtitles(tmp_path: Path) -> None:
     assert 'id="outdated-none"' in html2
 
 
+def test_every_form_on_the_page_carries_its_own_csrf_token(tmp_path: Path) -> None:
+    ui = make_ui(tmp_path)
+    # Add a term first so the delete form is on the page too
+    post_and_follow(ui, "/translations/glossary/add", data={"term": "Kaktus", "keep": "1"})
+    html = page(ui)
+    forms = re.findall(r'<form[^>]*method="post"[^>]*>(.*?)</form>', html, re.S)
+    assert forms, "no post forms found on translations page"
+    for body in forms:
+        assert 'name="csrf"' in body
+    token = re.search(r'id="glossary-add">.*?name="csrf" value="([^"]+)"', html, re.S).group(1)
+    ui.client.post("/translations/glossary/add", data={"csrf": token, "term": "Mesa", "keep": "1"})
+    text = glossary_path(ui).read_text(encoding="utf-8")
+    assert "Mesa" in text
+
+
 def test_outdated_limit(tmp_path: Path) -> None:
     from yezatas.web.views import build_outdated_view
     ui = make_ui(tmp_path)
