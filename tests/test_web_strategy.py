@@ -22,8 +22,8 @@ PULLED = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 START = datetime(2025, 1, 1, tzinfo=timezone.utc)
 HIGH, LOW = 5, 20  # indexes of the made-up videos far above and far below the norm
 SENT_LINE = ("The video table, the outlier findings and up to 30 viewer questions go to Meta's "
-             "Model API (muse-spark-1.3). Meta handles them under your Meta account's terms; "
-             "on free credits Meta may use them to improve its products. Nothing is sent to YouTube.")
+             "Model API (muse-spark-1.3). Meta's terms apply (<a href=\"/setup#ai-data\">what Meta may do with it</a>). "
+             "Nothing is sent to YouTube.")
 
 
 @pytest.fixture(autouse=True)
