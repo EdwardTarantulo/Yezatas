@@ -25,6 +25,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from googleapiclient.errors import HttpError
 from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
@@ -39,6 +40,7 @@ from .. import searchgaps as searchgaps_mod
 from .. import links as links_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
+from .. import thumbswap as thumbswap_mod
 from .. import transcribe as transcribe_mod
 from .. import translate
 from ..catalog import NoChannelError, PullResult, pull_catalog
@@ -54,12 +56,14 @@ from ..seo import score_catalog
 from ..store import AdCheck, OutlierReport, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
-                       GoogleYouTubeWriter, YouTubeReader, YouTubeWriter)
+                       GoogleYouTubeWriter, YouTubeReader, YouTubeWriter,
+                       api_error_info)
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
                          parse_client_file, read_saved_client, save_client_file)
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
 from .competitors_view import build_competitor_cards, build_insight_view
 from .searchgaps_view import build_gap_rows, build_ranking_view
+from .thumbswap_view import build_swap_rows
 from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
@@ -384,6 +388,34 @@ def make_default_strategy(config: Config) -> StrategyFn:
         return made
 
     return run
+
+
+def map_thumb_error(exc: BaseException) -> tuple[str, str]:
+    """Guidance for a failed thumbnail swap."""
+    if isinstance(exc, thumbswap_mod.ThumbSwapError):
+        return "thumb", str(exc)
+    if isinstance(exc, packaging_mod.PackagingError):
+        return (
+            "thumb",
+            "Yezatas could not save the current thumbnail, so nothing was changed on YouTube. "
+            + str(exc),
+        )
+    if isinstance(exc, HttpError):
+        reason = api_error_info(exc).reason
+        if reason == "forbidden":
+            return (
+                "thumb",
+                "YouTube refused to set this thumbnail. Custom thumbnails need a verified channel "
+                "(youtube.com/verify), and YouTube can refuse them for some videos. Nothing was "
+                "changed; the old thumbnail is saved in History.",
+            )
+        if reason == "uploadRateLimitExceeded":
+            return (
+                "thumb",
+                "YouTube says too many thumbnails were set recently. Try again later. Nothing was "
+                "changed.",
+            )
+    return map_api_error(exc)
 
 
 def map_competitors_error(exc: BaseException) -> tuple[str, str]:
@@ -814,6 +846,9 @@ class WebState:
         self.assist_job = Job(map_assist_error, ASSIST_TIMEOUT_SECONDS, ASSIST_TIMEOUT_MESSAGE, clock)
         self._assist_seen: JobSnapshot | None = None
         self._assist_video = ""
+        self.thumb_job = Job(map_thumb_error)
+        self._thumb_seen: JobSnapshot | None = None
+        self._thumb_page = ""  # the page that started the swap
         self._lock = threading.Lock()
         self._check_lock = threading.Lock()
         self._check: CheckState | None = None
@@ -1261,6 +1296,38 @@ class WebState:
         if not snap.running:
             with self._lock:
                 self._variants_seen = snap
+
+    # --- thumbnail swap (F3): only after the creator confirmed it ----------------------------
+    def start_thumb_swap(self, creds: Any, video_id: str, image: bytes, *, kind: str, new_file: str,
+                         variant_id: int | None, page: str) -> bool:
+        """Upload one confirmed thumbnail in the one thumbnail job; `page` is the confirmation page
+        that started it."""
+        def work(report: Report) -> thumbswap_mod.ThumbnailSwap:
+            with Store(self.config.catalog_db) as store:
+                guard = QuotaGuard(store, self.config.daily_quota_budget)
+                return thumbswap_mod.swap_thumbnail(
+                    self._writer_factory(creds), guard, self.images_dir, video_id, image,
+                    kind=kind, new_file=new_file, variant_id=variant_id,
+                    fetch=self._packaging_fetch, report=report)
+
+        if not self.thumb_job.start(work):
+            return False
+        with self._lock:
+            self._thumb_page = page
+        return True
+
+    def thumb_state(self) -> tuple[JobSnapshot, str]:
+        snap = self.thumb_job.snapshot()
+        with self._lock:
+            if snap is self._thumb_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._thumb_page
+
+    def dismiss_thumb_result(self) -> None:
+        snap = self.thumb_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._thumb_seen = snap
 
     # --- outliers: what the best videos share ---------------------------------------------------
     def start_outliers(self) -> bool:
@@ -2164,6 +2231,164 @@ def create_app(
                 f'attachment; filename="{video_id}-variant-{variant.id}.jpg"')
         return FileResponse(path, media_type="image/jpeg", headers=headers)
 
+    def thumb_page(request: Request, *, video: Any, page: str, heading: str, new_image: str,
+                   new_alt: str, back_url: str, back_text: str) -> Response:
+        """The confirmation page for one thumbnail swap, with the job's state for this page."""
+        with Store(config.catalog_db) as store:
+            preview = QuotaGuard(store, config.daily_quota_budget).preview(thumbswap_mod.SWAP_PLAN)
+        plan = {"lines": plan_lines(preview.lines), "total": preview.total, "used": preview.used,
+                "remaining": preview.remaining, "fits": preview.fits,
+                "budget": config.daily_quota_budget}
+        snap, started = state.thumb_state()
+        mine = started == page
+        running = snap.running and mine
+        busy = snap.running and not mine
+        done = snap.status == "done" and mine
+        failed = snap.message if snap.status == "failed" and mine else ""
+        result = snap.result if done else None
+        message = snap.message
+        poll = snap.running
+        if snap.status == "failed" and mine:
+            state.dismiss_thumb_result()
+        return render(request, "thumb_swap.html", {
+            "active": "content", "video": video, "heading": heading,
+            "current_image": thumb_url(video, ("maxres", "high", "medium", "default")),
+            "new_image": new_image, "new_alt": new_alt, "action": page,
+            "back_url": back_url, "back_text": back_text, "units": thumbswap_mod.swap_units(),
+            "plan": plan, "has_write": state.write_credentials() is not None,
+            "running": running, "busy": busy, "done": done, "failed": failed, "result": result,
+            "message": message, "poll": poll,
+        })
+
+    @app.get("/videos/{video_id}/packaging/variants/{variant_id}/replace")
+    def packaging_replace_page(request: Request, video_id: str, variant_id: str) -> Response:
+        data = catalog_data()
+        if data is None:
+            return back_to_setup()
+        entry = next((e for e in data["entries"] if e.video.video_id == video_id), None)
+        if entry is None:
+            return video_not_found(request)
+        video = entry.video
+        variant = usable_variant(video_id, variant_id)
+        if variant is None:
+            flash(request, "error", "There is no such variant idea.")
+            return see_other(f"/videos/{quote(video_id)}#packaging")
+        page = f"/videos/{quote(video_id)}/packaging/variants/{variant.id}/replace"
+        return thumb_page(
+            request, video=video, page=page, heading="Replace the current thumbnail",
+            new_image=f"/videos/{quote(video_id)}/packaging/variants/{variant.id}.jpg",
+            new_alt="Variant idea: " + variant.instruction,
+            back_url=f"/videos/{quote(video_id)}#packaging", back_text="Back to the video")
+
+    @app.post("/videos/{video_id}/packaging/variants/{variant_id}/replace")
+    async def packaging_replace_do(request: Request, video_id: str, variant_id: str) -> Response:
+        form = await read_form(request)
+        variant = usable_variant(video_id, variant_id)
+        if variant is None:
+            flash(request, "error", "There is no such variant idea.")
+            return see_other(f"/videos/{quote(video_id)}#packaging")
+        page = f"/videos/{quote(video_id)}/packaging/variants/{variant.id}/replace"
+        back = see_other(page)
+        if form.get("confirm") != "yes":
+            flash(request, "error",
+                  "Tick the box to confirm that you want to change the thumbnail on YouTube. "
+                  "Nothing was sent to YouTube.")
+            return back
+        creds = await run_in_threadpool(state.write_credentials)
+        if creds is None:
+            flash(request, "error",
+                  "Yezatas does not have permission to edit your videos yet. Allow it on the Push "
+                  "page first. Nothing was sent to YouTube.")
+            return back
+        try:
+            data_bytes = packaging_mod.stored_image_path(
+                state.images_dir, video_id, variant.image_file).read_bytes()
+        except (packaging_mod.PackagingError, OSError):
+            flash(request, "error", "The variant's picture is gone. Make the variants again.")
+            return back
+        ok = state.start_thumb_swap(creds, video_id, data_bytes, kind="replace",
+                                    new_file=variant.image_file, variant_id=variant.id, page=page)
+        if not ok:
+            flash(request, "error", "A thumbnail change is already running.")
+        return back
+
+    @app.get("/history/thumbnails/{swap_id}/backup.jpg")
+    def history_thumb_backup(request: Request, swap_id: int) -> Response:
+        missing = Response("There is no such picture.", status_code=404, media_type="text/plain")
+        swaps = thumbswap_mod.load_swaps(state.images_dir)
+        swap = next((s for s in swaps if s.swap_id == swap_id), None)
+        if swap is None:
+            return missing
+        try:
+            path = packaging_mod.stored_image_path(state.images_dir, swap.video_id, swap.backup_file)
+        except packaging_mod.PackagingError:
+            return missing
+        if not path.is_file():
+            return missing
+        return FileResponse(path, media_type="image/jpeg")
+
+    @app.get("/history/thumbnails/{swap_id}/restore")
+    def history_thumb_restore_page(request: Request, swap_id: int) -> Response:
+        swaps = thumbswap_mod.load_swaps(state.images_dir)
+        swap = next((s for s in swaps if s.swap_id == swap_id), None)
+        if swap is None:
+            flash(request, "error", "There is no such thumbnail change.")
+            return see_other("/history#thumbnails")
+        data = catalog_data()
+        if data is None:
+            return back_to_setup()
+        entry = next((e for e in data["entries"] if e.video.video_id == swap.video_id), None)
+        if entry is None:
+            return video_not_found(request)
+        video = entry.video
+        page = f"/history/thumbnails/{swap.swap_id}/restore"
+        return thumb_page(
+            request, video=video, page=page, heading="Put the old thumbnail back",
+            new_image=f"/history/thumbnails/{swap.swap_id}/backup.jpg",
+            new_alt=f"The thumbnail saved before change #{swap.swap_id}",
+            back_url="/history#thumbnails", back_text="Back to History")
+
+    @app.post("/history/thumbnails/{swap_id}/restore")
+    async def history_thumb_restore_do(request: Request, swap_id: int) -> Response:
+        form = await read_form(request)
+        page = f"/history/thumbnails/{swap_id}/restore"
+        back = see_other(page)
+        if form.get("confirm") != "yes":
+            flash(request, "error",
+                  "Tick the box to confirm that you want to change the thumbnail on YouTube. "
+                  "Nothing was sent to YouTube.")
+            return back
+        swaps = thumbswap_mod.load_swaps(state.images_dir)
+        swap = next((s for s in swaps if s.swap_id == swap_id), None)
+        if swap is None:
+            flash(request, "error", "There is no such thumbnail change.")
+            return see_other("/history#thumbnails")
+        creds = await run_in_threadpool(state.write_credentials)
+        if creds is None:
+            flash(request, "error",
+                  "Yezatas does not have permission to edit your videos yet. Allow it on the Push "
+                  "page first. Nothing was sent to YouTube.")
+            return back
+        try:
+            data_bytes = thumbswap_mod.backup_image(state.images_dir, swap)
+        except thumbswap_mod.ThumbSwapError as exc:
+            flash(request, "error", str(exc))
+            return back
+        ok = state.start_thumb_swap(creds, swap.video_id, data_bytes, kind="restore",
+                                    new_file=swap.backup_file, variant_id=None, page=page)
+        if not ok:
+            flash(request, "error", "A thumbnail change is already running.")
+        return back
+
+    @app.post("/thumbnails/done")
+    async def dismiss_thumb(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_thumb_result()
+        back = str(form.get("back") or "")
+        if back.startswith("/") and not back.startswith("//"):
+            return see_other(back)
+        return see_other("/history#thumbnails")
+
     @app.get("/outliers")
     def outliers_page(request: Request) -> Response:
         """The creator's own videos against their channel's norm for their age. No model is called."""
@@ -2428,6 +2653,7 @@ def create_app(
             "comments": _job_json(state.comments_job.snapshot()),
             "assist": _job_json(state.assist_job.snapshot()),
             "variants": _job_json(state.variants_job.snapshot()),
+            "thumb": _job_json(state.thumb_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
 
@@ -2739,6 +2965,7 @@ def create_app(
     # --- history ----------------------------------------------------------------------------
     @app.get("/history")
     def history_page(request: Request) -> Response:
+        swaps = thumbswap_mod.load_swaps(state.images_dir)
         with Store(config.catalog_db) as store:
             records = store.list_pushes(limit=HISTORY_LIMIT)
             run_ids = [r.run_id for r in records if r.run_id is not None]
@@ -2750,10 +2977,16 @@ def create_app(
                 video = store.get_video(record.video_id)
                 if video is not None:
                     titles[record.video_id] = video.title
+            swap_titles: dict[str, str] = {}
+            for s in swaps:
+                v = store.get_video(s.video_id)
+                if v is not None:
+                    swap_titles[s.video_id] = v.title
         return render(request, "history.html", {
             "active": "history",
             "groups": history_groups(records, runs, run_records, titles, _local_time, drafts),
             "limit": HISTORY_LIMIT, "shown": len(records),
+            "swaps": build_swap_rows(swaps, swap_titles, _local_time),
         })
 
     @app.post("/history/runs/{run_id}/undo")

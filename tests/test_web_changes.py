@@ -254,7 +254,8 @@ def test_push_page_without_write_access_asks_for_permission(tmp_path: Path) -> N
     # The explainer: Google's two pages drawn as slides, what the permission is used for, how to remove it.
     assert "aria-label=\"Google's pages for the edit permission\"" in html
     assert "See, edit, and permanently delete your YouTube videos" in html
-    assert "videos.update</strong> for a video's title, description and" in html
+    assert "<strong>videos.update</strong> for a video's title," in html
+    assert "<strong>thumbnails.set</strong> when you confirm a new thumbnail" in html
     assert "never deletes" in html and "https://myaccount.google.com/connections" in html
     assert 'id="about-edit-access"' not in html
     assert 'action="/changes/push"' not in html and "Push to YouTube</button>" not in html

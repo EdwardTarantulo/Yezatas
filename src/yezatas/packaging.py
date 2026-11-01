@@ -5,8 +5,9 @@ the text sits, the subject, a face), Meta's SAM measures how much of the frame t
 take, and Muse Spark writes a short critique. Numbers come only from code; the models write only words.
 A critique point that quotes a number the code did not measure is dropped, and so is any overlay text
 word that is not already in the title, the description or the current thumbnail. Muse Image can then
-make two variant ideas (AI-made images to download and judge); Yezatas never uploads a thumbnail and
-nothing here touches YouTube. The Meta API key is only handed to the clients; it is never logged, never
+make two variant ideas (AI-made images to download and judge). Nothing in this module touches
+YouTube; uploading one is `thumbswap.py`, only after the creator confirms it. The Meta API key
+is only handed to the clients; it is never logged, never
 in an error message or a repr.
 """
 

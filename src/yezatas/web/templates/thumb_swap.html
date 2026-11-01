@@ -1,0 +1,71 @@
+{% extends "shell.html" %}
+{% block title %}{{ heading }} - Yezatas{% endblock %}
+{% block content %}
+<p class="backlink"><a href="{{ back_url }}">{{ back_text }}</a></p>
+<h1 class="page-title">{{ heading }}</h1>
+<p class="intro">For <a href="/videos/{{ video.video_id|urlencode }}">{{ video.title }}</a>.</p>
+
+<ul class="pk-variants" id="thumb-compare">
+  <li class="pk-variant">
+    <div class="tr-head"><strong>Now on YouTube</strong></div>
+    {% if current_image %}
+    <img class="thumb lg" src="{{ current_image }}" alt="Current thumbnail" loading="lazy" width="1280" height="720">
+    {% else %}
+    <div class="thumb lg empty"></div>
+    {% endif %}
+    <p class="hint">From your last catalog pull.</p>
+  </li>
+  <li class="pk-variant">
+    <div class="tr-head"><strong>New thumbnail</strong></div>
+    <img class="thumb lg" src="{{ new_image }}" alt="{{ new_alt }}" loading="lazy" width="1280" height="720">
+  </li>
+</ul>
+
+{% if running %}
+<section class="card" id="thumb-progress">
+  <p><span class="spinner" aria-hidden="true"></span> <span id="thumb-msg" role="status" aria-live="polite">{{ message or 'Starting…' }}</span></p>
+</section>
+{% endif %}
+
+{% if done %}
+<section class="card" id="thumb-result">
+  <p>Done. YouTube now has the new thumbnail; it can take a few minutes to show everywhere. The old one is saved in <a href="/history#thumbnails">History</a>, where you can put it back.</p>
+  <p>Quota used: {{ result.units }} units.</p>
+  <form method="post" action="/thumbnails/done">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="back" value="{{ action }}">
+    <button class="button primary" type="submit">Done</button>
+  </form>
+</section>
+{% endif %}
+
+{% if failed %}
+<p class="issue warning" id="thumb-failed">{{ failed }}</p>
+{% endif %}
+
+{% if busy %}
+<p class="hint" id="thumb-busy">Another thumbnail change is running. Wait for it to finish.</p>
+{% endif %}
+
+{% if not running and not done and not busy %}
+<section class="card" id="thumb-confirm">
+  <ul>
+    <li>Yezatas reads the video's live thumbnail and saves a copy in History, then uploads the new one (YouTube's <code>thumbnails.set</code>).</li>
+    <li>The change is live at once; History can put the old one back.</li>
+  </ul>
+  <p>This uses {{ units }} of {{ plan.remaining }} units left today (budget {{ plan.budget }}).</p>
+  {% if not plan.fits %}
+  <p class="issue warning">Not enough quota left today. It resets at midnight Pacific time.</p>
+  {% elif not has_write %}
+  <p class="hint" id="thumb-no-write">Yezatas needs permission to edit your videos first. <a href="/changes/push">Allow it on the Push page</a>.</p>
+  {% else %}
+  <form method="post" action="{{ action }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label><input type="checkbox" name="confirm" value="yes" required> I want to change this video's thumbnail on YouTube now.</label>
+    <p><button class="button primary" type="submit">Change the thumbnail on YouTube</button></p>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+{% endblock %}

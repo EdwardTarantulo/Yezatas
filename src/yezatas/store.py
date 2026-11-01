@@ -752,8 +752,9 @@ class PackagingReview:
 
 @dataclass(frozen=True)
 class ThumbnailVariant:
-    """One variant idea made from a review's thumbnail by Muse Image (an AI-made image to download;
-    nothing is uploaded). `text_ok` is None when the text was not checked."""
+    """One variant idea made from a review's thumbnail by Muse Image (an AI-made image to download,
+    and to upload only when the creator confirms it on its own page). `text_ok` is None when the text
+    was not checked."""
 
     id: int  # 0 before it is stored
     review_id: int

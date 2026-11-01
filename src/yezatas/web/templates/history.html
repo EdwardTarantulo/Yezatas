@@ -48,4 +48,24 @@
   <p><a class="button secondary" href="/changes">Go to Changes</a></p>
 </section>
 {% endif %}
+{% if swaps %}
+<section class="history-group" id="thumbnails">
+  <h2>Thumbnails</h2>
+  <p class="muted">Before every thumbnail change, Yezatas saves the old picture here. Putting one back is a new change, so the picture it replaces is saved too.</p>
+  <ul class="history">
+    {% for r in swaps %}
+    <li class="card history-row" id="t-{{ r.swap.swap_id }}">
+      <div class="history-head">
+        <span class="pill done">{{ r.label }}</span>
+        <a class="history-title" href="/videos/{{ r.swap.video_id|urlencode }}">{{ r.title }}</a>
+        <span class="muted history-when">Change #{{ r.swap.swap_id }} &middot; {{ r.when }}</span>
+      </div>
+      <p class="muted">The thumbnail before this change:</p>
+      <img class="thumb sm" src="{{ r.backup_url }}" alt="The thumbnail saved before this change" loading="lazy" width="1280" height="720">
+      <div class="actions"><a class="button secondary" href="{{ r.restore_url }}">Put this thumbnail back</a></div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% endblock %}

@@ -454,6 +454,7 @@ ORIGIN_LABELS = {"manual": "Edited by you", "restore": "Restored text"}
 QUOTA_LABELS = {
     "videos.list": "Read the live text of your videos first",
     "videos.update": "Update one video",
+    "thumbnails.set": "Set the new thumbnail",
 }
 
 # push item status -> (label, pill class)
@@ -1183,6 +1184,7 @@ class VariantView:
     overlay: str
     image_url: str
     download_url: str
+    replace_url: str
     preview_url: str
     text_badge: str  # "Text matches", 'Text differs: reads "..."' or "Text not checked"
     text_tone: str
@@ -1286,6 +1288,7 @@ def _variant_view(video_id: str, variant: ThumbnailVariant) -> VariantView:
         id=variant.id, label=label, tone=tone, instruction=variant.instruction,
         overlay=variant.overlay_text, image_url=base if made else "",
         download_url=base + "?download=1" if made else "",
+        replace_url=f"/videos/{quote(video_id)}/packaging/variants/{variant.id}/replace" if made else "",
         preview_url=f"/videos/{quote(video_id)}/packaging?variant={variant.id}" if made else "",
         text_badge=badge if made else "", text_tone=text_tone, subject_change=change if made else "",
         error=variant.error, cost=format_cost(variant.cost_usd), model=variant.model)
