@@ -384,6 +384,13 @@ as it lands; the git history is the detailed record.
   the same code, the old-database tests that did not know the new table, a name clash that let the subtitles card
   overwrite the new card's data, and no page refresh while it runs. Five fix
   rounds, all by Spark Open.
+- **2026-11-01**: **Three fixes found by trying features on the real channel**, all built by **Muse Spark Open**
+  on Baseten (about 34K tokens; two fix rounds, both on the strategy guard). The strategy report named real
+  videos but described them wrongly (it called two game videos "a boot-manager choice"): code now drops a point
+  or idea that shares no word with the titles of the videos it names, and the prompt says so. A bulk change from
+  twitter.com to x.com warned on every video that the old link was missing: a link changed exactly as asked no
+  longer warns, and a link the change deletes still does. After a restart, Pull asked for the connection check
+  again: it now runs the check itself (1 quota unit).
 
 ---
 
