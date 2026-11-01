@@ -54,7 +54,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Suggest** | Video, Copilot | A suggestion agent with read-only tools and a fact guard, and a channel copilot with the whole catalog in one context. Edits are only ever proposals. |
 | **Translate** | Translate, Subtitles, Translations | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. A glossary of the creator's terms (kept as they are or with a fixed translation), checked by code, and a list of every translation made from older text. |
 | **Transcribe** | Transcript, Shorts finder | Transcripts of the creator's own video file, chapter starts chosen by segment number (code sets the times), SRT downloads, and moments that could stand alone as a Short (picked by segment number; times and quotes from the transcript). |
-| **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download and a feed preview. |
+| **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download, preview in a feed or set as the thumbnail after a confirmation (the old one is saved in History). |
 | **Insights** | Outliers, Strategy, Competitors, Search gaps | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos; the same outlier rule on up to 5 other public channels; and the real YouTube search terms whose words are missing from the titles. |
 | **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first, or described in plain words. |
 | **Ad safety** | Video | An advertiser-friendly check of the title, description, tags and transcript; every quote is checked by code. Advice only. |
@@ -74,7 +74,7 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
 | SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
-| Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download (never uploaded). |
+| Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download, or to set as the thumbnail only after the creator confirms it. |
 | Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs, and the comments, reply-template, affiliate-link and custom-check modules (with store v12) and their pages, bulk edit by asking and the strategy report. |
 | Muse Wonder 1.0 | Inside Muse Code (build time only) | Orchestrated the Muse Code build of those four modules, their pages, bulk edit by asking and the strategy report: planned, briefed Muse Spark 1.3 builders, reviewed their work and fixed what the audits found. |
 
@@ -434,6 +434,15 @@ as it lands; the git history is the detailed record.
   Checked in the browser on the real catalog in light and dark (no contrast or click-target problems) and at
   phone width. In review: blank lines left by the move, a link that opened its tool but scrolled to the wrong
   place, four tests that still expected the old order, and two theme rules the new tokens broke.
+- **2026-11-01**: **Replace current thumbnail** (issue #1), built by **Muse Spark Open** on Baseten (about 81K
+  tokens in 8 calls). A variant idea's card now has a **Replace current thumbnail** button next to Download .jpg.
+  It opens a confirmation page with the current thumbnail and the variant side by side and the quota cost (51
+  units: 1 to read the live video, 50 for YouTube's `thumbnails.set`). Only a ticked box and a click send it, and
+  only with the edit access already given for pushes. Before the upload, the live thumbnail is downloaded and
+  saved; **History** lists every thumbnail change with the saved picture and **Put this thumbnail back**, which
+  saves what it replaces too. YouTube's refusal for channels that cannot set custom thumbnails is shown as a
+  plain sentence. In review: a helper with the wrong indentation, a page path built from the raw request, three
+  skipped edits, and tests that read a flash already shown. Five web fix rounds, all by Spark Open.
 
 ---
 
