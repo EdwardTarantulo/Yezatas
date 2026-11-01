@@ -21,13 +21,16 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from . import agent
 from .config import Config, ensure_dirs
 from .facts import _EMAIL, _HANDLE, _TIME, extract_urls
 from .seo import _HASHTAG, _URL
 from .store import Store, TranslationRecord
+
+if TYPE_CHECKING:
+    from .glossary import GlossaryTerm
 
 # YouTube language code -> English name (the names go into the prompts).
 LANGUAGES: dict[str, str] = {
@@ -70,7 +73,7 @@ class Translator(Protocol):
     model: str
 
     def translate(self, source_language: str, target_language: str, title: str,
-                  description: str) -> Translated: ...
+                  description: str, glossary: str = "") -> Translated: ...
 
 
 @dataclass(frozen=True)
@@ -130,12 +133,13 @@ _KEEP_RULES = (
 
 
 def translator_messages(source_language: str, target_language: str, title: str,
-                        description: str) -> list[dict[str, str]]:
+                        description: str, glossary: str = "") -> list[dict[str, str]]:
     system = (
         "You are a professional YouTube localizer. Translate the video title and description from "
         f"{_name(source_language)} into {_name(target_language)} for viewers of that language: "
-        f"natural, not literal, and keep the creator's tone. {_KEEP_RULES} "
-        "Answer with exactly <title>...</title> and <description>...</description> and nothing else."
+        f"natural, not literal, and keep the creator's tone. {_KEEP_RULES}"
+        + (f" {glossary}" if glossary else "")
+        + " Answer with exactly <title>...</title> and <description>...</description> and nothing else."
     )
     user = f"<title>{title}</title>\n<description>\n{description}\n</description>"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -226,9 +230,9 @@ class ChatTranslator:
         )
 
     def translate(self, source_language: str, target_language: str, title: str,
-                  description: str) -> Translated:
+                  description: str, glossary: str = "") -> Translated:
         completion = self.complete(
-            translator_messages(source_language, target_language, title, description))
+            translator_messages(source_language, target_language, title, description, glossary=glossary))
         new_title, new_description = parse_translation(completion.content)
         return Translated(new_title, new_description, self.model, completion.input_tokens,
                           completion.output_tokens)
@@ -567,9 +571,11 @@ def _summary(records: Sequence[TranslationRecord], verifier_available: bool) -> 
 
 
 def _one(translator: Translator, source_language: str, target: str, title: str,
-         description: str) -> Translated | TranslateError:
+         description: str, glossary: str = "") -> Translated | TranslateError:
     """Runs in a worker thread: translator only, no Store access. Errors are returned, not raised."""
     try:
+        if glossary:
+            return translator.translate(source_language, target, title, description, glossary=glossary)
         return translator.translate(source_language, target, title, description)
     except TranslateError as exc:
         return exc
@@ -585,6 +591,7 @@ def translate_video(
     source_language: str,
     targets: Sequence[str],
     *,
+    glossary: Sequence[GlossaryTerm] = (),
     title: str | None = None,
     description: str | None = None,
     now: datetime | None = None,
@@ -622,10 +629,23 @@ def translate_video(
         if report is not None:
             report(text)
 
+    from .glossary import glossary_problems, glossary_rules
+
+    source_text = source_title + "\n" + source_description
     say(f"Translating {len(targets)} language" + ("" if len(targets) == 1 else "s"))
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(targets)))) as pool:
-        futures = [pool.submit(_one, translator, source_language, t, source_title,
-                               source_description) for t in targets]
+        futures = [
+            pool.submit(
+                _one,
+                translator,
+                source_language,
+                t,
+                source_title,
+                source_description,
+                glossary_rules(glossary, source_text, t),
+            )
+            for t in targets
+        ]
         outcomes = [f.result() for f in futures]
 
     verifier_available = bool(verifier is not None and verifier.available())
@@ -642,6 +662,15 @@ def translate_video(
         else:
             problems = check_translation(source_title, source_description, outcome.title,
                                          outcome.description)
+            problems = list(problems)
+            problems.extend(
+                glossary_problems(
+                    glossary,
+                    source_text,
+                    outcome.title + "\n" + outcome.description,
+                    target,
+                )
+            )
             verdict: Verdict | None = None
             note = ""  # why the checker could not check this one
             if verifier_available:

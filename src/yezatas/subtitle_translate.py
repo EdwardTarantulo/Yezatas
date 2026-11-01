@@ -18,9 +18,13 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Protocol, Sequence
 
 from .store import Store, SubtitleTranslationRecord
+
+if TYPE_CHECKING:
+    from .glossary import GlossaryTerm
+
 from .subtitles import to_srt
 from .transcribe import ASR_LANGUAGES
 from .translate import (
@@ -78,7 +82,7 @@ def _count_rule(items: Sequence[tuple[int, str]], language: str) -> str:
 
 
 def segment_messages(source_language: str, target_language: str, items: Sequence[tuple[int, str]],
-                     *, insist: bool = False) -> Messages:
+                     *, insist: bool = False, glossary: str = "") -> Messages:
     """The translator's prompt: numbered segments, no times. `insist` repeats the format rule in
     the user turn for the one retry after a bad answer."""
     source, target = language_name(source_language), language_name(target_language)
@@ -91,6 +95,8 @@ def segment_messages(source_language: str, target_language: str, items: Sequence
         'with exactly the same <s n="..."> tags, one per segment, in the same order, and nothing '
         "else."
     )
+    if glossary:
+        system += f" {glossary}"
     user = _lines(items)
     if insist:
         user = f"{_count_rule(items, target)}\n\n{user}"
@@ -190,7 +196,7 @@ class _Outcome:
 
 
 def _one(model: TextModel, source_language: str, target_language: str,
-         batch: Sequence[tuple[int, str]], stop: threading.Event) -> _Outcome:
+         batch: Sequence[tuple[int, str]], stop: threading.Event, glossary: str = "") -> _Outcome:
     """Runs in a worker thread: the translator only, no Store access. Errors are returned, not
     raised. A bad answer, a network error or a rate limit is tried once more; a refused key never."""
     numbers = [n for n, _ in batch]
@@ -202,7 +208,7 @@ def _one(model: TextModel, source_language: str, target_language: str,
             return _Outcome(None, TranslateError("auth", AUTH_MESSAGE), tokens_in, tokens_out)
         try:
             completion = model.complete(
-                segment_messages(source_language, target_language, batch, insist=insist))
+                segment_messages(source_language, target_language, batch, insist=insist, glossary=glossary))
             tokens_in += completion.input_tokens
             tokens_out += completion.output_tokens
             texts = parse_segments(completion.content, numbers)
@@ -346,6 +352,7 @@ def translate_subtitles(
     video_id: str,
     targets: Sequence[str],
     *,
+    glossary: Sequence[GlossaryTerm] = (),
     transcript_id: int | None = None,
     now: datetime | None = None,
     report: Callable[[str], None] | None = None,
@@ -389,13 +396,26 @@ def translate_subtitles(
         if report is not None:
             report(text)
 
+    from .glossary import glossary_problems, glossary_rules
+
+    source_text = "\n".join(text for _, text in items)
     say(f"Translating subtitles into {len(targets)} language" + ("" if len(targets) == 1 else "s"))
     batches = make_batches(items)
     stop = threading.Event()
     jobs = [(target, batch) for target in targets for batch in batches]
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs)))) as pool:
-        futures = [pool.submit(_one, translator, source_language, target, batch, stop)
-                   for target, batch in jobs]
+        futures = [
+            pool.submit(
+                _one,
+                translator,
+                source_language,
+                target,
+                batch,
+                stop,
+                glossary_rules(glossary, source_text, target),
+            )
+            for target, batch in jobs
+        ]
         outcomes = [f.result() for f in futures]
     if any(o.error is not None and o.error.kind == "auth" for o in outcomes):
         raise TranslateError("auth", AUTH_MESSAGE)  # nothing has been stored
@@ -427,6 +447,15 @@ def translate_subtitles(
             numbers = [n for n, _ in items]
             problems = check_segments(numbers, [texts[n] for n in numbers],
                                       [translated[n] for n in numbers])
+            problems = list(problems)
+            problems.extend(
+                glossary_problems(
+                    glossary,
+                    source_text,
+                    "\n".join(translated[n] for n in numbers),
+                    target,
+                )
+            )
             verdict: Verdict | None = None
             back: dict[int, str] = {}
             note = ""  # why the checker could not check this one
