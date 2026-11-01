@@ -58,6 +58,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Insights** | Outliers | Which videos beat the channel's own norm for their age, and what the winners share. |
 | **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first. |
 | **Ad safety** | Video | An advertiser-friendly check of the title, description, tags and transcript; every quote is checked by code. Advice only. |
+| **Community** | Video, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy (nothing is posted), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
 
 ---
 
@@ -67,15 +68,15 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 
 | Model | Where it runs | What Yezatas uses it for |
 |---|---|---|
-| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. |
+| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule. |
 | Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
 | SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
 | Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download (never uploaded). |
-| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs, and the comments, reply-template, affiliate-link and custom-check modules (with store v12). |
-| Muse Wonder 1.0 | Inside Muse Code (build time only) | Orchestrated the Muse Code build of those four modules: planned, briefed four Muse Spark 1.3 builders, reviewed their work and ran the tests. |
+| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs, and the comments, reply-template, affiliate-link and custom-check modules (with store v12) and their pages. |
+| Muse Wonder 1.0 | Inside Muse Code (build time only) | Orchestrated the Muse Code build of those four modules and their pages: planned, briefed Muse Spark 1.3 builders, reviewed their work and fixed what the audits found. |
 
 ---
 
@@ -320,8 +321,8 @@ as it lands; the git history is the detailed record.
   changed since the check. Advice only: YouTube's own review decides.
 - **2026-11-01**: **Meta's models built part of Yezatas themselves**: **Muse Code**, running **Muse Wonder** as the
   orchestrator with four **Muse Spark 1.3** builders, wrote the cores of four features from one written spec, each
-  builder on its own files. The work was then reviewed, fixed where needed and tested before it was committed. The
-  pages for these features come next:
+  builder on its own files. The work was then reviewed, fixed where needed and tested before it was committed. Their
+  pages followed the same day (next entry):
   - **Comments assistant.** Comments are only read. One Muse Spark call sorts them (question, feedback, praise,
     spam) and drafts replies and a pinned comment for the creator to post themself. Code drops a draft with a link
     that is not in the description, or a number that is in neither the comment nor the video's text.
@@ -333,6 +334,13 @@ as it lands; the git history is the detailed record.
     ever runs.
   - In review: the comments assistant called the model with no comments, tagging re-encoded a link's other
     parameters, and Make drafts lost an "all videos" preview; all fixed. Muse Wonder's part of the run cost about $4.
+- **2026-11-01**: **pages for those four features, also built by Muse Code** (Muse Wonder with Muse Spark 1.3
+  builders): a **Comments** card on the video page (read, sort, draft replies, copy, mark used; templates suggested
+  next to questions), and **Replies**, **Affiliate** (preview with ticked videos, then drafts) and **Checks** pages.
+  Comments are read with the YouTube permission that pushing uses; nothing is ever posted. In review: the tests used
+  placeholder links, so every affiliate row was blocked; a tagged link was reported as missing; the Checks page
+  copied the core's validation instead of sharing it. Muse Code fixed all three. The pages now also say plainly that
+  text sent to Meta's Model API is handled under the account's terms. Muse Wonder's part cost about $7.
 
 ---
 
