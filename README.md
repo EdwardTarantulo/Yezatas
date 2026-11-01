@@ -391,6 +391,14 @@ as it lands; the git history is the detailed record.
   twitter.com to x.com warned on every video that the old link was missing: a link changed exactly as asked no
   longer warns, and a link the change deletes still does. After a restart, Pull asked for the connection check
   again: it now runs the check itself (1 quota unit).
+- **2026-11-01**: **Design audit quick wins**, built by **Muse Spark Open** on Baseten (about 15K tokens, two
+  rounds). A design audit of the running app (contrast, font sizes, click targets, phone width) gave twelve
+  findings, and the small ones were fixed first. The Fix next rows say what to fix ("To fix: ...") and how many
+  points it gains. The privacy sentence that repeated on every AI card is a short line linking to the full text,
+  now kept once on Setup. Quota numbers have thousands separators. Suggest fixes is the dashboard's one primary
+  button, and the grid no longer leaves an empty area. Setup's step dots get a 24 px click target, and a missing
+  thumbnail says so. In review: a broken test string and a "+0 points" note on videos with nothing to fix; the
+  second round fixed both.
 
 ---
 
