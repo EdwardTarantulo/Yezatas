@@ -33,7 +33,7 @@ def clock() -> Clock:
 
 def test_cost_table() -> None:
     expected = {"videos.list": 1, "channels.list": 1, "playlistItems.list": 1,
-                "videos.update": 50, "thumbnails.set": 50, "captions.list": 50,
+                "commentThreads.list": 1, "videos.update": 50, "thumbnails.set": 50, "captions.list": 50,
                 "captions.download": 200, "captions.insert": 400, "captions.update": 450}
     assert COSTS == expected
     assert cost_of("captions.insert") == 400
