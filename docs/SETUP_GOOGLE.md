@@ -23,6 +23,8 @@ the written version, for reference and troubleshooting.
 
 1. Go to **APIs & Services → Library**.
 2. Search for **YouTube Data API v3**, open it, and click **Enable**.
+3. Optional, for the Search gaps page: search for **YouTube Analytics API** and enable it too. Yezatas asks
+   for its read-only access only when you click **Connect search terms**.
 
 ## 3. Set up the OAuth consent screen
 

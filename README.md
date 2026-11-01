@@ -55,7 +55,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Translate** | Translate, Subtitles, Translations | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. A glossary of the creator's terms (kept as they are or with a fixed translation), checked by code, and a list of every translation made from older text. |
 | **Transcribe** | Transcript, Shorts finder | Transcripts of the creator's own video file, chapter starts chosen by segment number (code sets the times), SRT downloads, and moments that could stand alone as a Short (picked by segment number; times and quotes from the transcript). |
 | **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download and a feed preview. |
-| **Insights** | Outliers, Strategy | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos. |
+| **Insights** | Outliers, Strategy, Competitors, Search gaps | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos; the same outlier rule on up to 5 other public channels; and the real YouTube search terms whose words are missing from the titles. |
 | **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first, or described in plain words. |
 | **Ad safety** | Video | An advertiser-friendly check of the title, description, tags and transcript; every quote is checked by code. Advice only. |
 | **Community** | Video, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy (nothing is posted), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
@@ -68,9 +68,8 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 
 | Model | Where it runs | What Yezatas uses it for |
 |---|---|---|
-| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule, and a bulk change described in words into fixed steps. |
-| Muse Wonder 1.0 | Meta's Model API | The strategy report: what works on the channel, the gaps and next video ideas, from tables made by code (every ref and number is checked by code). |
-| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles, and the Shorts finder (Muse Spark 1.3 as the fallback for both). At build time it also wrote the glossary, the Translations page and the Shorts finder (see the log). |
+| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule, and a bulk change described in words into fixed steps. The strategy report: what works, the gaps and next video ideas, from tables made by code (every ref and number is checked by code). Explaining why other channels' outliers did well, and ranking the search gaps worth fixing. |
+| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles, and the Shorts finder (Muse Spark 1.3 as the fallback for both). At build time it also wrote the glossary, the Translations page, the Shorts finder, Competitors and Search gaps (see the log). |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
@@ -149,7 +148,8 @@ src/yezatas/
   transcribe.py, chapters.py, subtitles.py   # transcripts, chapters, SRT
   shorts.py                  # the Shorts finder (Muse Spark Open)
   packaging.py, outliers.py  # the packaging check, own-channel outliers
-  strategy.py                # the strategy report (Muse Wonder 1.0)
+  strategy.py                # the strategy report (Muse Spark 1.3)
+  competitors.py, searchgaps.py   # other channels' outliers, real search terms missing from titles
   glossary.py                # the translation glossary, checked by code
   links.py, adcheck.py       # link inventory and dead-link check, advertiser-friendly check
   comments.py, replytemplates.py   # comments assistant (drafts only) and reply templates
@@ -399,6 +399,30 @@ as it lands; the git history is the detailed record.
   button, and the grid no longer leaves an empty area. Setup's step dots get a 24 px click target, and a missing
   thumbnail says so. In review: a broken test string and a "+0 points" note on videos with nothing to fix; the
   second round fixed both.
+- **2026-11-01**: **the strategy report moves to Muse Spark 1.3.** Muse Wonder 1.0 made it until now; the same
+  tables and the same code checks now go to **Muse Spark 1.3**. Tried once on the real channel: 15 points and 5
+  ideas kept, for about $0.06. On the page, refs such as "V12" in the report's text now show as the video's
+  title, only for a video the point itself names, so a ref can never become the wrong title (the saved report
+  keeps the refs). After a failed run, the older report says it is older. Built by **Muse Spark Open** on
+  Baseten (about 17K tokens; two fix rounds: it skipped the tests and left long lines).
+- **2026-11-01**: **Competitors**, built by **Muse Spark Open** on Baseten (about 67K tokens in 6 calls). The
+  creator adds up to 5 public channels by handle, link or ID. Yezatas reads each channel's newest 200 public videos
+  (about 9 YouTube quota units, read-only) and applies the same rule as Outliers: a video is an outlier at 10× the
+  median of the 20 public videos its channel published nearest to it. The code is shared with Outliers, not
+  copied. "Why they did well" sends **Muse Spark 1.3** only the titles, channel names and code-made labels (year,
+  length, views, ratio), by labels like O1 and T1; a line that quotes a number it was not given is dropped. In
+  review: test videos without a privacy status, a test that overwrote a saved channel, routes with the wrong
+  indentation, and tests that read a flash already shown. Four fix rounds, all by Spark Open.
+- **2026-11-01**: **Search gaps**, built by **Muse Spark Open** on Baseten (about 67K tokens in 8 calls). From
+  **YouTube Analytics** (read-only, a new scope the creator adds with one more sign-in, which keeps the edit
+  access already given), Yezatas reads the search terms of the last 90 days: 1 call for the channel and 1 for
+  each of the 25 most viewed public videos. Code finds the terms whose words are missing from the video's title
+  (a channel-wide term is a gap when no public title has all its words) and shows the views each term brought.
+  **Muse Spark 1.3** sees up to 30 gaps as labels and picks up to 10 with a priority and a reason; unknown or
+  repeated labels and reasons with invented numbers are dropped. Nothing is written to YouTube. In review: a
+  skipped auth edit, datetimes saved where text was needed, a dropped pick that blocked a later good pick of the
+  same gap, a Dismiss button that did nothing after a failed sign-in, and a nav place that broke other pages'
+  tests. Six fix rounds, all by Spark Open.
 
 ---
 
