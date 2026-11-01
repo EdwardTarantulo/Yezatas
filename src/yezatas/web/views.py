@@ -2360,7 +2360,7 @@ def build_outdated_view(store: Store, limit: int = 100) -> OutdatedView:
         if outdated_langs or outdated_subs:
             newest = max(dates) if dates else ""
             made = format_date(newest)
-            href = f"/videos/{quote(video.video_id)}#translate"
+            href = f"/videos/{quote(video.video_id)}#translations"
             rows.append(OutdatedRow(
                 video_id=video.video_id,
                 title=video.title,

@@ -348,7 +348,8 @@ def test_outdated_listed_when_video_text_changed(tmp_path: Path) -> None:
     html = page(ui)
     assert 'id="outdated-none"' not in html
     # language name appears and link to video
-    assert f"/videos/{vid}#translate" in html
+    assert f"/videos/{vid}#translations" in html
+    assert 'id="translations"' in page(ui, f"/videos/{vid}")
     # lang_name for es is Spanish
     from yezatas.web.views import lang_name
     assert lang_name("es") in html
@@ -378,7 +379,7 @@ def test_outdated_uses_draft_text(tmp_path: Path) -> None:
     with Store(ui.config.catalog_db) as store:
         _add_translation(store, vid, "de", catalog_hash)
     html2 = page(ui)
-    assert f"/videos/{vid}#translate" in html2
+    assert f"/videos/{vid}#translations" in html2
     from yezatas.web.views import lang_name
     assert lang_name("de") in html2
 
@@ -394,7 +395,7 @@ def test_outdated_failed_never_listed(tmp_path: Path) -> None:
         _add_translation(store, vid, "es", other_hash, status="failed")
     html = page(ui)
     assert 'id="outdated-none"' in html
-    assert f"/videos/{vid}#translate" not in html
+    assert f"/videos/{vid}#translations" not in html
 
 
 def test_outdated_subtitles(tmp_path: Path) -> None:
@@ -415,7 +416,7 @@ def test_outdated_subtitles(tmp_path: Path) -> None:
     # outdated subtitles should be listed (older transcript, newest has none in es)
     from yezatas.web.views import lang_name
     assert lang_name("es") in html
-    assert f"/videos/{vid}#translate" in html
+    assert f"/videos/{vid}#translations" in html
     # now add translation for latest transcript in same language -> not outdated
     with Store(ui.config.catalog_db) as store:
         store.add_subtitle_translation(SubtitleTranslationRecord(
