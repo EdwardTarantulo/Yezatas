@@ -44,6 +44,7 @@ from .. import affiliate as affiliate_mod
 from .. import bulkask as bulkask_mod
 from .. import comments as comments_mod
 from .. import customchecks as customchecks_mod
+from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
 from ..quota import QuotaExceeded, QuotaGuard
 from ..seo import score_catalog
@@ -60,13 +61,13 @@ from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
 from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
                     affiliate_apply_message, build_adcheck_view, build_affiliate_preview,
-                    build_bulk_preview, build_checks_view, build_comments_view, build_copilot_turns, build_links_view, build_listing,
-                    build_outlier_view, build_packaging_view, build_preview, build_strategy_view, build_subtitles_view,
+                    build_bulk_preview, build_checks_view, build_comments_view, build_copilot_turns, build_glossary_rows, build_links_view, build_listing,
+                    build_outlier_view, build_outdated_view, build_packaging_view, build_preview, build_strategy_view, build_subtitles_view,
                     build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
                     chapters_blocker, dashboard_model, format_cost, format_count, format_date,
                     group_checks, history_groups, lang_name, links_check_line, make_entries,
                     outlier_count, outlier_line, parse_affiliate_rule_form, parse_ask_proposal, parse_bulk_form,
-                    parse_rule_proposal, plan_lines, preview_card,
+                    parse_glossary_form, parse_rule_proposal, plan_lines, preview_card,
                     pull_moment, push_results, run_restore_summary, run_view, stops_batch,
                     thumb_url, top_other_videos)
 
@@ -873,9 +874,23 @@ class WebState:
         if translator is None:
             raise translate.TranslateError(
                 "auth", "There is no translation key. Add one in Setup. Nothing was sent.")
+        try:
+            glossary_terms = glossary_mod.load_glossary(
+                self.config.home / glossary_mod.GLOSSARY_FILE
+            )
+            broken = False
+        except glossary_mod.GlossaryError:
+            glossary_terms = []
+            broken = True
         with Store(self.config.catalog_db) as store:
             result = translate.translate_video(store, translator, verifier, video_id,
-                                               source_language, list(targets), report=report)
+                                               source_language, list(targets), report=report,
+                                               glossary=glossary_terms)
+        if broken:
+            result = replace(
+                result,
+                message=result.message + " (the glossary file could not be read, so it was not used)",
+            )
         failed = all(r.status == "failed" for r in result.records)
         self.add_flash(
             sid, "error" if failed else "ok",
@@ -918,9 +933,24 @@ class WebState:
         if translator is None:
             raise translate.TranslateError(
                 "auth", "There is no translation key. Add one in Setup. Nothing was sent.")
+        try:
+            glossary_terms = glossary_mod.load_glossary(
+                self.config.home / glossary_mod.GLOSSARY_FILE
+            )
+            broken = False
+        except glossary_mod.GlossaryError:
+            glossary_terms = []
+            broken = True
         with Store(self.config.catalog_db) as store:
-            return subtitle_translate.translate_subtitles(
-                store, translator, verifier, video_id, list(targets), report=report)  # type: ignore[arg-type]
+            result = subtitle_translate.translate_subtitles(
+                store, translator, verifier, video_id, list(targets), report=report,
+                glossary=glossary_terms)  # type: ignore[arg-type]
+        if broken:
+            result = replace(
+                result,
+                message=result.message + " (the glossary file could not be read, so it was not used)",
+            )
+        return result
 
     def subtitles_state(self) -> tuple[JobSnapshot, str]:
         """(job snapshot, the video id it works on). A finished job the creator dismissed is idle."""
@@ -2626,6 +2656,73 @@ def create_app(
         kind, message, target = await run_in_threadpool(work)
         flash(request, kind, message)
         return see_other(target)
+
+    # --- translations: the glossary (E7) ---
+    def translations_glossary_path() -> Path:
+        return config.home / glossary_mod.GLOSSARY_FILE
+
+    def load_glossary_terms() -> "tuple[list[glossary_mod.GlossaryTerm], str]":
+        try:
+            return glossary_mod.load_glossary(translations_glossary_path()), ""
+        except glossary_mod.GlossaryError as exc:
+            return [], str(exc)
+
+    @app.get("/translations")
+    def translations_page(request: Request) -> Response:
+        terms, glossary_error = load_glossary_terms()
+        rows = build_glossary_rows(terms)
+        outdated = None
+        with Store(config.catalog_db) as store:
+            if store.latest_pull() is not None:
+                outdated = build_outdated_view(store)
+        return render(request, "translations.html", {
+            "active": "translations", "terms": rows, "glossary_error": glossary_error, "outdated": outdated})
+
+    @app.post("/translations/glossary/add")
+    async def add_glossary_term(request: Request) -> Response:
+        form = await read_form(request)
+
+        def work() -> tuple[str, str]:
+            terms, error = load_glossary_terms()
+            if error:
+                return "error", error
+            try:
+                term = parse_glossary_form(form)
+            except glossary_mod.GlossaryError as exc:
+                return "error", str(exc)
+            lowered = term.term.lower()
+            for existing in terms:
+                if existing.term.lower() == lowered:
+                    return "error", "That term is already in the glossary."
+            glossary_mod.save_glossary(translations_glossary_path(), [*terms, term])
+            return "ok", f'Added the term "{term.term}" to the glossary.'
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/translations#glossary")
+
+    @app.post("/translations/glossary/delete")
+    async def delete_glossary_term(request: Request) -> Response:
+        form = await read_form(request)
+        raw = str(form.get("index") or "")
+
+        def work() -> tuple[str, str]:
+            terms, error = load_glossary_terms()
+            if error:
+                return "error", error
+            if not raw.isascii() or not raw.isdigit():
+                return "error", "That term is no longer in the glossary."
+            idx = int(raw)
+            if idx < 0 or idx >= len(terms):
+                return "error", "That term is no longer in the glossary."
+            removed = terms[idx]
+            del terms[idx]
+            glossary_mod.save_glossary(translations_glossary_path(), terms)
+            return "ok", f'Removed the term "{removed.term}".'
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/translations#glossary")
 
     # --- custom checks (G7) -----------------------------------------------------------------------
     def checks_data(proposal: dict[str, Any] | None = None) -> dict[str, Any]:

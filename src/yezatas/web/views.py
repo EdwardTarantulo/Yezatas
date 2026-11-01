@@ -30,11 +30,12 @@ from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, ch
 from ..store import (AdCheck, AgentRun, CopilotProposal, CopilotTurn, DraftRow, OutlierReport,
                      PackagingReview, PushRecord, PushRun, SubtitleTranslationRecord,
                      ThumbnailVariant, TranscriptRecord, TranslationRecord, Video, Comment,
-                     CommentReply, ReplyTemplate)
+                     CommentReply, ReplyTemplate, Store)
 from ..comments import CATEGORIES as COMMENT_CATEGORIES
 from .. import affiliate as affiliate_mod
 from .. import bulkask as bulkask_mod
 from .. import customchecks as customchecks_mod
+from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
@@ -2273,6 +2274,123 @@ def build_comments_view(video_id: str, comments: Sequence[Comment], replies: Seq
             youtube_url="https://www.youtube.com/watch?"
             + urlencode({"v": video_id, "lc": comment.comment_id})))
     return CommentsView(video_id=video_id, chips=tuple(chips), pinned=pinned, rows=tuple(rows), total=len(ordered), filtered_total=len(filtered), filter_key=selected)
+
+
+@dataclass(frozen=True)
+class GlossaryRow:
+    index: int
+    term: str
+    keep: bool
+    translations: str
+
+
+def build_glossary_rows(terms: Sequence["glossary_mod.GlossaryTerm"]) -> tuple[GlossaryRow, ...]:
+    rows: list[GlossaryRow] = []
+    for idx, gt in enumerate(terms):
+        if gt.keep:
+            trans_str = ""
+        else:
+            trans_str = ", ".join(f"{code}: {text}" for code, text in gt.translations)
+        rows.append(GlossaryRow(index=idx, term=gt.term, keep=gt.keep, translations=trans_str))
+    return tuple(rows)
+
+
+@dataclass(frozen=True)
+class OutdatedRow:
+    video_id: str
+    title: str
+    href: str
+    languages: tuple[str, ...]
+    subtitles: tuple[str, ...]
+    made: str
+
+
+@dataclass(frozen=True)
+class OutdatedView:
+    rows: tuple[OutdatedRow, ...]
+    more: int
+
+
+def build_outdated_view(store: Store, limit: int = 100) -> OutdatedView:
+    rows: list[OutdatedRow] = []
+    for video in store.list_videos():
+        draft = store.get_draft(video.video_id)
+        if draft is not None:
+            text = (draft.title, draft.description)
+        else:
+            text = (video.title, video.description)
+        current_hash = source_hash(*text)
+
+        latest_trans = store.latest_translations(video.video_id)
+        outdated_langs: list[str] = []
+        dates: list[str] = []
+        for code, rec in latest_trans.items():
+            if rec.status == "failed":
+                continue
+            if rec.source_hash != current_hash:
+                outdated_langs.append(lang_name(code))
+                dates.append(rec.created_at)
+
+        latest = store.latest_transcript(video.video_id)
+        # languages that already have a non-failed translation from the latest transcript
+        all_subs = list(store.list_subtitle_translations(video.video_id))
+        latest_lang_has: set[str] = set()
+        if latest is not None:
+            for rec in all_subs:
+                if rec.transcript_id == latest.id and rec.status != "failed":
+                    latest_lang_has.add(rec.language)
+
+        outdated_subs: list[str] = []
+        seen: set[str] = set()
+        for rec in all_subs:
+            if rec.language in seen:
+                continue
+            seen.add(rec.language)
+            if rec.status == "failed":
+                continue
+            if latest is None:
+                continue
+            if rec.transcript_id == latest.id:
+                continue
+            if rec.language in latest_lang_has:
+                continue
+            outdated_subs.append(lang_name(rec.language))
+            dates.append(rec.created_at)
+
+        if outdated_langs or outdated_subs:
+            newest = max(dates) if dates else ""
+            made = format_date(newest)
+            href = f"/videos/{quote(video.video_id)}#translate"
+            rows.append(OutdatedRow(
+                video_id=video.video_id,
+                title=video.title,
+                href=href,
+                languages=tuple(outdated_langs),
+                subtitles=tuple(outdated_subs),
+                made=made,
+            ))
+    more = max(0, len(rows) - limit)
+    kept = tuple(rows[:limit])
+    return OutdatedView(rows=kept, more=more)
+
+
+def parse_glossary_form(params: Mapping[str, Any]) -> "glossary_mod.GlossaryTerm":
+    term = str(params.get("term") or "")
+    keep = "keep" in params
+    raw = str(params.get("translations") or "")
+    translations: dict[str, str] = {}
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        if "=" not in line:
+            raise glossary_mod.GlossaryError(
+                'Write each fixed translation as "de = Wort", one per line.'
+            )
+        code_part, trans_part = line.split("=", 1)
+        code = code_part.strip()
+        trans = trans_part.strip()
+        translations[code] = trans
+    return glossary_mod.make_term(term, keep, translations)
 
 
 # --- affiliate links (G2) -------------------------------------------------------------------------

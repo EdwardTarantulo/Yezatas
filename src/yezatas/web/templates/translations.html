@@ -1,0 +1,94 @@
+{% extends "shell.html" %}
+{% block title %}Translations - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Translations</h1>
+
+<section class="card" id="glossary" aria-labelledby="h-glossary">
+  <h2 id="h-glossary">Glossary</h2>
+  <p class="hint">Terms here are sent with every translation (titles, descriptions and subtitles), and code checks each translation for them. A term that is broken flags the translation.</p>
+  {% if glossary_error %}<div class="flash error" role="alert" id="glossary-error">{{ glossary_error }}</div>{% endif %}
+  {% if not glossary_error %}
+    {% if terms %}
+    <table class="vtable">
+      <caption class="visually-hidden">Glossary terms</caption>
+      <thead>
+        <tr>
+          <th scope="col">Term</th>
+          <th scope="col">How</th>
+          <th scope="col"><span class="visually-hidden">Action</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in terms %}
+        <tr id="term-{{ row.index }}">
+          <td>{{ row.term }}</td>
+          <td>{% if row.keep %}Keep as it is{% else %}{{ row.translations }}{% endif %}</td>
+          <td>
+            <form method="post" action="/translations/glossary/delete">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="index" value="{{ row.index }}">
+              <button type="submit" class="button secondary">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" id="glossary-no-terms">No terms yet.</p>
+    {% endif %}
+
+    <form class="edit-form" method="post" action="/translations/glossary/add" id="glossary-add">
+      <div class="field">
+        <label for="glossary-term">Term</label>
+        <input type="text" id="glossary-term" name="term" autocomplete="off" maxlength="80">
+      </div>
+      <div class="field">
+        <label class="check-label"><input type="checkbox" id="glossary-keep" name="keep" value="1"> Keep as it is in every language</label>
+      </div>
+      <div class="field">
+        <label for="glossary-translations">Fixed translations</label>
+        <textarea id="glossary-translations" name="translations" placeholder="de = Kaktus"></textarea>
+        <p class="hint">Or give fixed translations, one per line: language code = translation.</p>
+      </div>
+      <div class="actions">
+        <button type="submit" class="button primary">Add the term</button>
+      </div>
+    </form>
+  {% endif %}
+</section>
+
+<section class="card" id="outdated" aria-labelledby="h-outdated">
+  <h2 id="h-outdated">Outdated translations</h2>
+  <p class="hint">These translations were made from an older title, description or transcript. Translate them again on the video page. Nothing is changed here.</p>
+  {% if outdated is none %}
+  <p class="muted">Pull your catalog first.</p>
+  {% elif not outdated.rows %}
+  <p class="muted" id="outdated-none">Every translation matches its video&#39;s current text.</p>
+  {% else %}
+  <table class="vtable">
+    <thead>
+      <tr>
+        <th scope="col">Video</th>
+        <th scope="col">Title and description</th>
+        <th scope="col">Subtitles</th>
+        <th scope="col">Made</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in outdated.rows %}
+      <tr>
+        <td><a href="{{ row.href }}">{{ row.title }}</a></td>
+        <td>{{ row.languages|join(", ") if row.languages else "–" }}</td>
+        <td>{{ row.subtitles|join(", ") if row.subtitles else "–" }}</td>
+        <td>{{ row.made }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if outdated.more %}
+  <p class="muted">And {{ outdated.more }} more.</p>
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}
