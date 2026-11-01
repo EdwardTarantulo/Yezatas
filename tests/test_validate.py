@@ -211,6 +211,16 @@ def test_link_kept_when_only_surrounding_punctuation_changes():
     assert "link_removed" not in codes(draft, original)
 
 
+def test_link_kept_when_upgraded_to_https():
+    original = make_draft(description="More at http://site.invalid/a and https://site.invalid/b")
+    upgraded = make_draft(description="More at https://site.invalid/a and https://site.invalid/b")
+    downgraded = make_draft(description="More at http://site.invalid/a and http://site.invalid/b")
+    assert "link_removed" not in codes(upgraded, original)
+    issues = [i for i in validate_draft(downgraded, original) if i.code == "link_removed"]
+    assert [i.message for i in issues] == [
+        'The link "https://site.invalid/b" was in the original description but is missing now.']
+
+
 def test_link_removed_needs_original():
     draft = make_draft(description="No links here.")
     assert "link_removed" not in codes(draft)

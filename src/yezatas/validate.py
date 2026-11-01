@@ -119,13 +119,17 @@ def _urls(text: str) -> list[str]:
 
 
 def _check_links_removed(draft: Draft, original: Draft) -> list[Issue]:
-    """One warning per original URL that is missing from the draft."""
+    """One warning per original URL that is missing from the draft.
+
+    An http:// link kept as https:// (the secure address of the same page) is not missing.
+    """
     current = set(_urls(draft.description))
     issues, seen = [], set()
     for url in _urls(original.description):
         if url not in seen:
             seen.add(url)
-            if url not in current:
+            secure = "https://" + url[len("http://"):] if url.startswith("http://") else url
+            if url not in current and secure not in current:
                 issues.append(Issue("description", "link_removed", "warning",
                                     f"The link \"{url}\" was in the original description "
                                     "but is missing now."))

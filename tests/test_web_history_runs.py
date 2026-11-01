@@ -47,7 +47,7 @@ def test_history_groups_rows_by_run_newest_first_with_an_undo_button(tmp_path: P
     first = seed_run(ui, [(V1, "Old one", "pushed"), (V2, "Old two", "conflict")])
     second = seed_run(ui, [(V2, "Older two", "pushed")])
     html = ui.client.get("/history").text
-    assert "Undo makes drafts with the text from before the push." in html
+    assert "undo a whole push: both make drafts with the text from before the push." in html
     assert "Nothing changes on YouTube until you approve and push them." in html
     assert html.index(f'id="run-{second}"') < html.index(f'id="run-{first}"')  # newest run first
     assert html.index(f'id="run-{first}"') < html.index('id="p-1"')  # the old push comes last
