@@ -1,0 +1,21 @@
+{# "What to fix" on the video page: this video's failed checks with their fixes and the points each one gains. #}
+<section class="card vfix" id="what-to-fix" aria-labelledby="h-what-to-fix">
+  <div class="card-title-row">
+    <h2 id="h-what-to-fix">What to fix</h2>
+    <a class="button secondary" href="#checks">All checks</a>
+  </div>
+  {% if card.failed %}
+  <p class="muted">{{ card.failed|length }} check{{ '' if card.failed|length == 1 else 's' }} to fix, +{{ card.missing }} points possible.</p>
+  <ul class="vfix-list">
+    {% for c in card.failed %}
+    <li class="vfix-item">
+      <a class="vfix-title" href="#check-{{ c.check_id }}">{{ c.title }}</a>
+      <span class="vfix-points">+{{ c.max_points - c.points }}</span>
+      {% if c.fix %}<p class="vfix-fix">{{ c.fix }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Every check passes. Nothing to fix.</p>
+  {% endif %}
+</section>

@@ -129,7 +129,7 @@ def finding(**override: Any) -> dict[str, Any]:
 def test_the_card_renders_before_any_check(tmp_path: Path) -> None:
     ui = make_ac_ui(tmp_path)
     html = page(ui)
-    assert html.index('id="packaging"') < html.index('id="adcheck"') < html.index('id="edit"')
+    assert html.index('id="edit"') < html.index('id="packaging"') < html.index('id="adcheck"')
     section = card(html)
     assert "Advertiser-friendly check" in section
     assert str(escape(adcheck.ADVICE_LINE)) in section

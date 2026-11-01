@@ -137,3 +137,32 @@
 
   setTimeout(poll, 1000);
 })();
+
+// Video page: the AI tools and the full check list are folded <details data-keep>. The page reloads when a job
+// finishes, so remember which ones the creator opened (per page, this tab only). Also open the one a link points
+// into, and any that shows a running job or an error.
+(function () {
+  "use strict";
+  var folds = Array.prototype.slice.call(document.querySelectorAll("details[data-keep]"));
+  if (!folds.length) return;
+  var key = "yz-open:" + window.location.pathname;
+  var saved = [];
+  try { saved = JSON.parse(window.sessionStorage.getItem(key) || "[]"); } catch (e) { saved = []; }
+  function remember() {
+    var open = folds.filter(function (d) { return d.open; }).map(function (d) { return d.id; });
+    try { window.sessionStorage.setItem(key, JSON.stringify(open)); } catch (e) { /* storage off: nothing to keep */ }
+  }
+  function openTarget() {
+    var id = decodeURIComponent(window.location.hash.slice(1));
+    var target = id && document.getElementById(id);
+    if (!target) return;
+    var fold = target.closest("details[data-keep]");
+    if (fold) { fold.open = true; target.scrollIntoView(); }
+  }
+  folds.forEach(function (d) {
+    if (saved.indexOf(d.id) >= 0 || d.querySelector(".waiting, .flash.error")) d.open = true;
+    d.addEventListener("toggle", remember);
+  });
+  openTarget();
+  window.addEventListener("hashchange", openTarget);
+})();

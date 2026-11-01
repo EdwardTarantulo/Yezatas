@@ -399,6 +399,31 @@ a.chip:hover { background: var(--line); }
 .checks { list-style: none; margin: 8px 0 0; padding: 0; }
 .check { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; padding: 12px 0; margin: 0; border-top: 1px solid var(--line); }
 .check:first-child { border-top: 0; }
+
+/* --- video page: what to fix, folded AI tools and checks --- */
+.vfix-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.vfix-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.vfix-title { font-weight: 500; }
+.vfix-points { color: var(--muted); font-variant-numeric: tabular-nums; }
+.vfix-fix { grid-column: 1 / -1; margin: 0; color: var(--muted); }
+.vtools { margin: 24px 0 16px; }
+.vtools > h2 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.tool, .all-checks { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin: 0 0 8px; }
+.tool > summary, .all-checks > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 14px 22px; cursor: pointer; list-style: none; }
+.tool > summary::-webkit-details-marker, .all-checks > summary::-webkit-details-marker { display: none; }
+.tool > summary::before, .all-checks > summary::before { content: "\25B8"; color: var(--muted); }
+.tool[open] > summary::before, .all-checks[open] > summary::before { content: "\25BE"; }
+.tool-name { font-weight: 600; }
+.tool-what { color: var(--muted); }
+.tool-state { margin-left: auto; font-size: 13px; font-weight: 500; color: var(--link); }
+.tool > .card { border: 0; margin: 0; padding-top: 0; background: none; }
+.tool > .card > h2, .tool > .card > .card-title-row > h2 { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.tool > .card > .card-title-row { justify-content: flex-end; }
+.vtools .button.primary { background: var(--hover); color: var(--text); }
+.vtools .button.primary:hover:not(:disabled) { background: var(--line); }
+.all-checks { margin-top: 16px; }
+.all-checks > .check-group { border: 0; border-top: 1px solid var(--line); border-radius: 0; margin: 0; background: none; }
+
 .check-icon .icon { width: 22px; height: 22px; }
 .check.pass .icon { color: var(--good); }
 .check.fail .icon { color: var(--bad); }

@@ -12,7 +12,7 @@
     {% if outlier_line %}<p class="muted" id="video-outlier">{% if outlier_line.link %}<a href="{{ outlier_line.link }}">{{ outlier_line.text }}</a>{% else %}{{ outlier_line.text }}{% endif %}</p>{% endif %}
     <p class="muted">{% if published %}Published {{ published }} &middot; {% endif %}{{ entry.visibility or 'Unknown visibility' }}</p>
     <p class="vactions">
-      <a class="button primary" href="https://studio.youtube.com/video/{{ video.video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">Edit in YouTube Studio</a>
+      <a class="button secondary" href="https://studio.youtube.com/video/{{ video.video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">Edit in YouTube Studio</a>
       <a class="button secondary" href="https://www.youtube.com/watch?v={{ video.video_id|urlencode }}" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>
     </p>
   </div>
@@ -22,13 +22,7 @@
   </div>
 </section>
 
-{% include "_suggest_card.html" %}
-{% include "_translate_card.html" %}
-{% include "_transcript_card.html" %}
-{% include "_packaging_card.html" %}
-{% include "_shorts_card.html" %}
-{% include "_adcheck_card.html" %}
-{% include "_comments_card.html" %}
+{% include "_video_fixes.html" %}
 
 <section class="card edit-card" id="edit" aria-labelledby="h-edit">
   <div class="card-title-row">
@@ -60,6 +54,10 @@
   </form>
 </section>
 
+{% include "_video_tools.html" %}
+
+<details class="all-checks" id="checks" data-keep>
+  <summary><span class="tool-name">All checks</span><span class="tool-what">{{ card.score }}/100 &middot; every check with its points</span></summary>
 {% for group in groups %}
 <section class="card check-group" id="group-{{ group.key }}" aria-labelledby="g-{{ group.key }}">
   <div class="card-title-row">
@@ -82,4 +80,5 @@
   </ul>
 </section>
 {% endfor %}
+</details>
 {% endblock %}

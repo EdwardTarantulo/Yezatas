@@ -181,7 +181,7 @@ def test_video_page_header_and_links(tmp_path: Path) -> None:
     assert 'href="/videos"' in html and "Content" in html
     assert "21.1K views" in html and "1.5K likes" in html and "12 comments" in html
     assert "Oct 30, 2026" in html
-    assert re.search(r'<a class="button primary" href="https://studio.youtube.com/video/vid000007/edit" '
+    assert re.search(r'<a class="button secondary" href="https://studio.youtube.com/video/vid000007/edit" '
                      r'target="_blank" rel="noopener noreferrer">Edit in YouTube Studio</a>', html)
     assert re.search(r'href="https://www.youtube.com/watch\?v=vid000007" target="_blank" '
                      r'rel="noopener noreferrer">Watch on YouTube</a>', html)
@@ -226,6 +226,41 @@ def test_unknown_video_is_a_404_page(tmp_path: Path) -> None:
         assert "Back to Content" in resp.text
         assert "<script>alert" not in resp.text
     assert 'class="topbar"' in ui.client.get("/videos/nope").text  # shown inside the shell
+
+
+def test_video_page_puts_the_edit_form_first_and_folds_the_tools(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 40)
+    vid = next(i for i, card in ui.cards.items() if card.failed)
+    html = ui.client.get(f"/videos/{vid}").text
+    marks = ['id="video-head"', 'id="what-to-fix"', 'id="edit"', 'id="h-tools"', 'id="checks"']
+    assert [html.index(m) for m in marks] == sorted(html.index(m) for m in marks)
+    tids = ["tool-suggest", "tool-translations", "tool-transcript", "tool-packaging", "tool-shorts", "tool-adcheck", "tool-comments"]
+    last = -1
+    for tid in tids:
+        needle = f'<details class="tool" id="{tid}" data-keep>'
+        assert needle in html
+        pos = html.index(needle)
+        assert pos > last
+        last = pos
+    for inner in ["suggest", "translations", "transcript", "packaging", "shorts", "adcheck", "comments"]:
+        assert f'id="{inner}"' in html
+    assert '<details class="all-checks" id="checks" data-keep>' in html
+
+
+def test_what_to_fix_lists_the_failed_checks_with_points(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 40)
+    vid = next(i for i, card in ui.cards.items() if card.failed)
+    card = ui.cards[vid]
+    html = ui.client.get(f"/videos/{vid}").text
+    part = html[html.index('id="what-to-fix"'):html.index('id="edit"')]
+    for c in card.failed:
+        assert f'href="#check-{c.check_id}"' in part
+        assert f"+{c.max_points - c.points}" in part
+    assert f"+{card.missing} points possible." in part
+    passing = [vid2 for vid2, card2 in ui.cards.items() if not card2.failed]
+    if passing:
+        html2 = ui.client.get(f"/videos/{passing[0]}").text
+        assert "Every check passes. Nothing to fix." in html2
 
 
 def test_csp_allows_only_the_thumbnail_host_for_images(tmp_path: Path) -> None:

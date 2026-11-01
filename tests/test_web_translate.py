@@ -102,7 +102,7 @@ def test_the_card_names_the_language_models_and_the_privacy_rules(tmp_path: Path
     assert "a few minutes" not in section  # that sentence belongs to the running state
     assert f'action="/videos/{V1}/translate"' in section
     assert "<script>" not in html and "style=" not in html
-    assert html.index('id="suggest"') < html.index('id="translations"') < html.index('id="edit"')
+    assert html.index('id="edit"') < html.index('id="suggest"') < html.index('id="translations"')
 
 
 def test_the_privacy_sentence_names_baseten_or_metas_api(tmp_path: Path) -> None:
