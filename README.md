@@ -443,6 +443,12 @@ as it lands; the git history is the detailed record.
   saves what it replaces too. YouTube's refusal for channels that cannot set custom thumbnails is shown as a
   plain sentence. In review: a helper with the wrong indentation, a page path built from the raw request, three
   skipped edits, and tests that read a flash already shown. Five web fix rounds, all by Spark Open.
+- **2026-11-01**: **Three review fixes for Replace current thumbnail**, built by **Muse Spark Open** on Baseten
+  (about 5K tokens, two rounds). A second review found that YouTube's refusal message said the old thumbnail was
+  saved in History, though nothing is recorded when the upload fails; it now only says nothing changed. The
+  Dismiss button's way back now refuses `/\host` as well as `//host`, which browsers both read as another site,
+  and the confirmation page shows its quota numbers with separators. In review: a test string with an invalid
+  escape.
 
 ---
 
