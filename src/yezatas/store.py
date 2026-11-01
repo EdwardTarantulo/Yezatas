@@ -260,10 +260,44 @@ _SCHEMA_V9: tuple[str, ...] = (
     "CREATE INDEX idx_pushes_run ON pushes(run_id, id)",
 )
 
+# v10: the copilot chat. One row per question and its answer; proposals are edits the model
+# offered in an answer, which become drafts only when the creator asks.
+_SCHEMA_V10: tuple[str, ...] = (
+    """CREATE TABLE copilot_turns (
+        id INTEGER PRIMARY KEY,
+        chat_id INTEGER NOT NULL,
+        asked_at TEXT NOT NULL,
+        finished_at TEXT,
+        question TEXT NOT NULL,
+        model TEXT NOT NULL,
+        status TEXT NOT NULL,
+        answer TEXT NOT NULL DEFAULT '',
+        refs_json TEXT NOT NULL DEFAULT '{}',
+        notes_json TEXT NOT NULL DEFAULT '[]',
+        log_json TEXT NOT NULL DEFAULT '[]',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX idx_copilot_turns_chat ON copilot_turns(chat_id, id)",
+    """CREATE TABLE copilot_proposals (
+        id INTEGER PRIMARY KEY,
+        turn_id INTEGER NOT NULL,
+        video_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        reason TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_copilot_proposals_turn ON copilot_proposals(turn_id, id)",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
     _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
-    _SCHEMA_V8, _SCHEMA_V9,
+    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -389,6 +423,41 @@ class AgentRun:
     input_tokens: int
     cached_tokens: int
     output_tokens: int
+
+
+@dataclass(frozen=True)
+class CopilotTurn:
+    """One question to the copilot and its answer, with what it looked at and what it cost."""
+
+    id: int
+    chat_id: int
+    asked_at: str
+    finished_at: str | None
+    question: str
+    model: str
+    status: str  # "running" | "answered" | "failed"
+    answer: str  # the checked answer; videos appear as refs like "V12" (see `refs`)
+    refs: dict[str, str]  # ref -> video id, for the refs the answer and its proposals use
+    notes: list[str]  # what the checks removed or changed, shown under the answer
+    log: list[Any]  # events in order: tool calls, guard problems, errors
+    input_tokens: int
+    cached_tokens: int
+    output_tokens: int
+
+
+@dataclass(frozen=True)
+class CopilotProposal:
+    """An edit the copilot offered for one video. It becomes a draft only when the creator asks."""
+
+    id: int
+    turn_id: int
+    video_id: str
+    title: str
+    description: str
+    tags: tuple[str, ...]
+    reason: str
+    status: str  # "open" | "drafted" | "dismissed"
+    created_at: str
 
 
 @dataclass(frozen=True)
@@ -1002,6 +1071,124 @@ class Store:
                 (video_id, limit),
             ).fetchall()
         return [self._row_to_agent_run(r) for r in rows]
+
+    # --- copilot -----------------------------------------------------------
+    @staticmethod
+    def _row_to_copilot_turn(row: sqlite3.Row) -> CopilotTurn:
+        return CopilotTurn(
+            id=row["id"],
+            chat_id=row["chat_id"],
+            asked_at=row["asked_at"],
+            finished_at=row["finished_at"],
+            question=row["question"],
+            model=row["model"],
+            status=row["status"],
+            answer=row["answer"],
+            refs=json.loads(row["refs_json"]),
+            notes=json.loads(row["notes_json"]),
+            log=json.loads(row["log_json"]),
+            input_tokens=row["input_tokens"],
+            cached_tokens=row["cached_tokens"],
+            output_tokens=row["output_tokens"],
+        )
+
+    def begin_copilot_turn(self, chat_id: int, question: str, model: str,
+                           now: datetime | None = None) -> int:
+        """Record a question; status "running"."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO copilot_turns (chat_id, asked_at, question, model, status) "
+                "VALUES (?, ?, ?, ?, 'running')",
+                (chat_id, _iso(now), question, model),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def finish_copilot_turn(
+        self,
+        turn_id: int,
+        status: str,
+        answer: str,
+        refs: dict[str, str],
+        notes: Sequence[str],
+        log: list[Any],
+        tokens: tuple[int, int, int] = (0, 0, 0),
+        now: datetime | None = None,
+    ) -> None:
+        """Close a turn. `tokens` is (input, cached, output)."""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE copilot_turns SET finished_at = ?, status = ?, answer = ?, refs_json = ?, "
+                "notes_json = ?, log_json = ?, input_tokens = ?, cached_tokens = ?, "
+                "output_tokens = ? WHERE id = ?",
+                (_iso(now), status, answer, _dumps(refs), _dumps(list(notes)), _dumps(log),
+                 *tokens, turn_id),
+            )
+
+    def get_copilot_turn(self, turn_id: int) -> CopilotTurn | None:
+        row = self._conn.execute("SELECT * FROM copilot_turns WHERE id = ?", (turn_id,)).fetchone()
+        return self._row_to_copilot_turn(row) if row else None
+
+    def list_copilot_turns(self, chat_id: int) -> list[CopilotTurn]:
+        """The turns of one chat, oldest first."""
+        rows = self._conn.execute(
+            "SELECT * FROM copilot_turns WHERE chat_id = ? ORDER BY id", (chat_id,)).fetchall()
+        return [self._row_to_copilot_turn(r) for r in rows]
+
+    def latest_copilot_chat_id(self) -> int | None:
+        """The chat of the newest turn, or None before the first question."""
+        row = self._conn.execute(
+            "SELECT chat_id FROM copilot_turns ORDER BY id DESC LIMIT 1").fetchone()
+        return int(row["chat_id"]) if row else None
+
+    def next_copilot_chat_id(self) -> int:
+        """An id no turn uses yet, for a new chat."""
+        row = self._conn.execute("SELECT MAX(chat_id) AS top FROM copilot_turns").fetchone()
+        return int(row["top"] or 0) + 1
+
+    @staticmethod
+    def _row_to_copilot_proposal(row: sqlite3.Row) -> CopilotProposal:
+        return CopilotProposal(
+            id=row["id"],
+            turn_id=row["turn_id"],
+            video_id=row["video_id"],
+            title=row["title"],
+            description=row["description"],
+            tags=tuple(json.loads(row["tags_json"])),
+            reason=row["reason"],
+            status=row["status"],
+            created_at=row["created_at"],
+        )
+
+    def add_copilot_proposal(self, turn_id: int, video_id: str, title: str, description: str,
+                             tags: Sequence[str], reason: str, now: datetime | None = None) -> int:
+        """Store an edit the copilot offered; status "open"."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO copilot_proposals (turn_id, video_id, title, description, tags_json, "
+                "reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (turn_id, video_id, title, description, _dumps(list(tags)), reason, _iso(now)),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def get_copilot_proposal(self, proposal_id: int) -> CopilotProposal | None:
+        row = self._conn.execute(
+            "SELECT * FROM copilot_proposals WHERE id = ?", (proposal_id,)).fetchone()
+        return self._row_to_copilot_proposal(row) if row else None
+
+    def list_copilot_proposals(self, turn_ids: Sequence[int]) -> list[CopilotProposal]:
+        """The proposals of these turns, in the order they were made."""
+        if not turn_ids:
+            return []
+        marks = ", ".join("?" * len(turn_ids))
+        rows = self._conn.execute(
+            f"SELECT * FROM copilot_proposals WHERE turn_id IN ({marks}) ORDER BY id",
+            tuple(turn_ids)).fetchall()
+        return [self._row_to_copilot_proposal(r) for r in rows]
+
+    def set_copilot_proposal_status(self, proposal_id: int, status: str) -> None:
+        with self._conn:
+            self._conn.execute("UPDATE copilot_proposals SET status = ? WHERE id = ?",
+                               (status, proposal_id))
 
     # --- translations ----------------------------------------------------
     @staticmethod

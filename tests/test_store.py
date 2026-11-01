@@ -11,7 +11,9 @@ from yezatas.store import (MIGRATIONS, DraftRow, OutlierReport, PackagingReview,
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 # undoes the v9 migration, for tests that turn a database back into an older version
-BACK_TO_V8 = "DROP INDEX idx_pushes_run; ALTER TABLE pushes DROP COLUMN run_id; DROP TABLE push_runs; "
+BACK_TO_V9 = "DROP TABLE copilot_proposals; DROP TABLE copilot_turns; "
+BACK_TO_V8 = BACK_TO_V9 + ("DROP INDEX idx_pushes_run; ALTER TABLE pushes DROP COLUMN run_id; "
+                           "DROP TABLE push_runs; ")
 
 
 def make_video(vid: str = "vid00000001", **kw: object) -> Video:
@@ -44,7 +46,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 9
+        assert s.schema_version == len(MIGRATIONS) == 10
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -54,7 +56,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 9
+        assert s.schema_version == 10
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -152,10 +154,10 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
     conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; "
                        "DROP TABLE translations; DROP TABLE transcripts; DROP TABLE subtitle_translations; "
                        "DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
-                       "DROP TABLE push_runs; PRAGMA user_version = 1;")
+                       "DROP TABLE push_runs; " + BACK_TO_V9 + "PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 9
+        assert s.schema_version == 10
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -300,7 +302,7 @@ def test_later_pushed_finds_the_next_pushed_row_of_the_video(store: Store) -> No
     assert store.later_pushed("vid00000001", third) is None
 
 
-def test_v8_database_upgrades_to_v9_and_keeps_its_pushes(tmp_path: Path) -> None:
+def test_v8_database_upgrades_and_keeps_its_pushes(tmp_path: Path) -> None:
     path = tmp_path / "v8.sqlite"
     with Store(path) as s:
         push = s.begin_push("vid00000001", "manual", {"title": "old"}, now=T0)
@@ -309,12 +311,62 @@ def test_v8_database_upgrades_to_v9_and_keeps_its_pushes(tmp_path: Path) -> None
     conn.executescript(BACK_TO_V8 + "PRAGMA user_version = 8;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 9
+        assert s.schema_version == 10
         record = s.get_push(push)
         assert record is not None and record.run_id is None and record.status == "pushed"
         assert record.before == {"title": "old"} and record.after == {"title": "new"}
         run = s.begin_push_run(now=T0)
         assert s.begin_push("vid00000001", "manual", {}, now=T0, run_id=run) > push
+
+
+def test_v9_database_upgrades_to_v10_and_keeps_its_push_runs(tmp_path: Path) -> None:
+    path = tmp_path / "v9.sqlite"
+    with Store(path) as s:
+        run = s.begin_push_run(now=T0)
+        push = s.begin_push("vid00000001", "manual", {"title": "old"}, now=T0, run_id=run)
+    conn = sqlite3.connect(path)  # turn it back into a version 9 database
+    conn.executescript(BACK_TO_V9 + "PRAGMA user_version = 9;")
+    conn.close()
+    with Store(path) as s:
+        assert s.schema_version == 10
+        record = s.get_push(push)
+        assert record is not None and record.run_id == run
+        assert s.latest_copilot_chat_id() is None and s.next_copilot_chat_id() == 1
+
+
+def test_copilot_turns_and_proposals_round_trip(store: Store) -> None:
+    first = store.begin_copilot_turn(1, "What should I fix?", "muse-spark-1.3", now=T0)
+    turn = store.get_copilot_turn(first)
+    assert turn is not None and turn.status == "running" and turn.finished_at is None
+    assert turn.answer == "" and turn.refs == {} and turn.notes == [] and turn.log == []
+    store.finish_copilot_turn(first, "answered", "Fix V2 first.", {"V2": "vid00000002"},
+                              ["A sentence was removed."], [{"type": "tool", "name": "x"}],
+                              tokens=(900, 100, 50), now=T0)
+    second = store.begin_copilot_turn(1, "And then?", "muse-spark-1.3", now=T0)
+    other = store.begin_copilot_turn(2, "Other chat", "muse-spark-1.3", now=T0)
+    turn = store.get_copilot_turn(first)
+    assert turn is not None and turn.status == "answered" and turn.finished_at is not None
+    assert turn.answer == "Fix V2 first." and turn.refs == {"V2": "vid00000002"}
+    assert turn.notes == ["A sentence was removed."] and turn.log == [{"type": "tool", "name": "x"}]
+    assert (turn.input_tokens, turn.cached_tokens, turn.output_tokens) == (900, 100, 50)
+    assert [t.id for t in store.list_copilot_turns(1)] == [first, second]
+    assert [t.id for t in store.list_copilot_turns(2)] == [other]
+    assert store.latest_copilot_chat_id() == 2 and store.next_copilot_chat_id() == 3
+    assert store.get_copilot_turn(999) is None
+
+    p1 = store.add_copilot_proposal(first, "vid00000002", "New title", "New text", ["a", "b"],
+                                    "Shorter title", now=T0)
+    p2 = store.add_copilot_proposal(other, "vid00000003", "T", "D", [], "Why", now=T0)
+    proposal = store.get_copilot_proposal(p1)
+    assert proposal is not None and proposal.status == "open" and proposal.tags == ("a", "b")
+    assert (proposal.turn_id, proposal.video_id, proposal.reason) == (first, "vid00000002",
+                                                                     "Shorter title")
+    store.set_copilot_proposal_status(p1, "drafted")
+    assert store.get_copilot_proposal(p1).status == "drafted"  # type: ignore[union-attr]
+    assert [p.id for p in store.list_copilot_proposals([first, other])] == [p1, p2]
+    assert [p.id for p in store.list_copilot_proposals([second])] == []
+    assert store.list_copilot_proposals([]) == []
+    assert store.get_copilot_proposal(999) is None
 
 
 def test_agent_runs_round_trip_newest_first(store: Store) -> None:
@@ -445,7 +497,7 @@ def test_v5_database_upgrades_to_v6_and_keeps_its_data(tmp_path: Path) -> None:
                        "DROP TABLE subtitle_translations; " + BACK_TO_V8 + "PRAGMA user_version = 5;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 9
+        assert s.schema_version == 10
         assert s.get_video("vid00000001") is not None and s.get_draft("vid00000001") is not None
         transcript = s.latest_transcript("vid00000001")
         assert transcript is not None and transcript.segments[0]["text"] == "Hello"
@@ -515,7 +567,7 @@ def test_v6_database_upgrades_to_v7_and_keeps_its_data(tmp_path: Path) -> None:
                        "" + BACK_TO_V8 + "PRAGMA user_version = 6;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 9
+        assert s.schema_version == 10
         assert s.get_video("vid00000001") is not None
         assert len(s.list_subtitle_translations("vid00000001")) == 1
         assert s.latest_packaging_review("vid00000001") is None
@@ -562,7 +614,7 @@ def test_v7_database_upgrades_to_v8_and_keeps_its_data(tmp_path: Path) -> None:
     conn.executescript("DROP TABLE outlier_reports; " + BACK_TO_V8 + "PRAGMA user_version = 7;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 9
+        assert s.schema_version == 10
         assert s.get_video("vid00000001") is not None
         assert s.latest_packaging_review("vid00000001") is not None
         assert s.latest_outlier_report() is None
