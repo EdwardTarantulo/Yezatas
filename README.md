@@ -56,7 +56,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Transcribe** | Transcript | Transcripts of the creator's own video file, chapter starts chosen by segment number (code sets the times), SRT downloads. |
 | **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download and a feed preview. |
 | **Insights** | Outliers | Which videos beat the channel's own norm for their age, and what the winners share. |
-| **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first. |
+| **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first, or described in plain words. |
 | **Ad safety** | Video | An advertiser-friendly check of the title, description, tags and transcript; every quote is checked by code. Advice only. |
 | **Community** | Video, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy (nothing is posted), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
 
@@ -68,15 +68,15 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 
 | Model | Where it runs | What Yezatas uses it for |
 |---|---|---|
-| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule. |
+| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule, and a bulk change described in words into fixed steps. |
 | Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
 | SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
 | Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download (never uploaded). |
-| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs, and the comments, reply-template, affiliate-link and custom-check modules (with store v12) and their pages. |
-| Muse Wonder 1.0 | Inside Muse Code (build time only) | Orchestrated the Muse Code build of those four modules and their pages: planned, briefed Muse Spark 1.3 builders, reviewed their work and fixed what the audits found. |
+| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs, and the comments, reply-template, affiliate-link and custom-check modules (with store v12) and their pages, and bulk edit by asking. |
+| Muse Wonder 1.0 | Inside Muse Code (build time only) | Orchestrated the Muse Code build of those four modules, their pages and bulk edit by asking: planned, briefed Muse Spark 1.3 builders, reviewed their work and fixed what the audits found. |
 
 ---
 
@@ -142,6 +142,7 @@ src/yezatas/
   seo.py                     # the SEO scorecard
   validate.py, facts.py      # the edit validator and the fact guard
   edits.py, diffs.py, push.py, bulk.py   # drafts, diffs, approve and push, bulk edits
+  bulkask.py                 # bulk edit by asking: fixed steps from plain words
   agent.py, copilot.py       # the suggestion agent and the channel copilot (Muse Spark 1.3)
   translate.py, subtitle_translate.py    # verified translations (Muse Spark Open + Muse Glimmer)
   transcribe.py, chapters.py, subtitles.py   # transcripts, chapters, SRT
@@ -341,6 +342,13 @@ as it lands; the git history is the detailed record.
   placeholder links, so every affiliate row was blocked; a tagged link was reported as missing; the Checks page
   copied the core's validation instead of sharing it. Muse Code fixed all three. The pages now also say plainly that
   text sent to Meta's Model API is handled under the account's terms. Muse Wonder's part cost about $7.
+- **2026-11-01**: **bulk edit by asking** on the Bulk edit page: describe a change in plain words ("swap my old
+  invite for this new link and add this line after the first paragraph, only on videos from 2024"). **Muse Spark
+  1.3** turns it into at most three steps from a fixed list (find & replace, footer block, insert after the first
+  paragraph, remove a line) and which videos to change, seeing only the links and repeated lines of the catalog.
+  Code checks that every new text is copied from the creator's words, applies the steps and shows the usual
+  preview; ticked videos become drafts. No model-written code runs, and the app never needs Muse Code. Built by
+  Muse Code (Muse Wonder with Muse Spark 1.3 builders, about $5); in review its own tests had two bugs, fixed.
 
 ---
 
