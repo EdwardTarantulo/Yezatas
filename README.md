@@ -1,11 +1,199 @@
-# Yezatas
+<p align="center">
+  <h1 align="center">Yezatas</h1>
+  <p align="center">
+    A self-hosted AI assistant for small YouTube creators: optimize, translate, caption and manage the whole channel.
+    <br />
+    Nothing reaches YouTube until the creator approves it.
+  </p>
+  <p align="center">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+    <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+">
+    <img src="https://img.shields.io/badge/Meta_models-7-0866FF.svg" alt="7 Meta models">
+    <img src="https://img.shields.io/badge/runs-locally-2ea44f.svg" alt="Runs locally">
+    <img src="https://img.shields.io/badge/built_for-Meta_Global_AI_Developer_Hackathon-0866FF.svg" alt="Built for the Meta Global AI Developer Hackathon">
+  </p>
+</p>
 
-Self-hosted, open-source AI assistant that helps small YouTube creators optimize, translate, caption and manage their
-whole channel, with the creator approving every change before it reaches YouTube.
+---
+
+## Why This Exists
+
+A small channel builds up hundreds of videos, and their titles, descriptions, chapters, links and translations drift
+out of date. YouTube Studio fixes them **one video at a time**, and the AI tools that promise to help either want your
+channel's keys on their servers or **write numbers, timestamps and links that were never there**.
+
+Yezatas runs **on the creator's own machine**, talks to YouTube through the creator's own Google Cloud project, and
+follows one rule everywhere: **numbers come from code, models write words**. Every change is a draft the creator sees
+as a diff and approves before it is pushed, and YouTube's previous text is always kept for a restore.
 
 Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Your World").
 
-## Built during the hackathon
+---
+
+## Table of Contents
+
+- [What's Included](#whats-included)
+- [Meta Models Used](#meta-models-used)
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+- [Project Structure](#project-structure)
+- [How It Works](#how-it-works)
+- [Design Philosophy](#design-philosophy)
+- [Built During the Hackathon](#built-during-the-hackathon)
+- [License](#license)
+
+---
+
+## What's Included
+
+| Area | Pages | What it does |
+|---|---|---|
+| **Setup** | Setup | An 8-step guided connection to YouTube, a connection check with specific fixes, and a read-only catalog pull with its quota cost shown first. |
+| **Audit** | Dashboard, Content, Video | A 25-check SEO scorecard per video with a one-line fix for each, **Fix next** ranked by views × missing points, and a searchable, sortable content table. |
+| **Edit safely** | Changes, History | Drafts shown as diffs, approved one by one, pushed with a quota preview; a backup before every update, restore one video or undo a whole push. |
+| **Suggest** | Video, Copilot | A suggestion agent with read-only tools and a fact guard, and a channel copilot with the whole catalog in one context. Edits are only ever proposals. |
+| **Translate** | Translate, Subtitles | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. |
+| **Transcribe** | Transcript | Transcripts of the creator's own video file, chapter starts chosen by segment number (code sets the times), SRT downloads. |
+| **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download and a feed preview. |
+| **Insights** | Outliers | Which videos beat the channel's own norm for their age, and what the winners share. |
+| **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first. |
+
+---
+
+## Meta Models Used
+
+Only models that Yezatas really calls, or that really wrote part of it, are listed.
+
+| Model | Where it runs | What Yezatas uses it for |
+|---|---|---|
+| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. |
+| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
+| Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
+| Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
+| Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
+| SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
+| Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download (never uploaded). |
+| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs. |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- [Python](https://www.python.org/) 3.10 or newer
+- A Google account with a YouTube channel, and a free [Google Cloud](https://console.cloud.google.com/) project (the
+  setup screen walks you through it)
+- A [Meta Model API](https://dev.meta.ai/) key for the AI features
+- [ffmpeg](https://ffmpeg.org/) on your PATH, for transcripts
+- **Optional:** a [Baseten](https://www.baseten.co/) key for Muse Spark Open translations, and
+  [Ollama](https://ollama.com/) with Muse Glimmer for the independent translation check
+
+### Setup
+
+1. Install Yezatas:
+   ```bash
+   pip install -e .
+   ```
+2. Open the local web UI:
+   ```bash
+   python -m yezatas ui
+   ```
+   - It listens on 127.0.0.1 only and opens a one-time sign-in link in your browser.
+3. Follow the **Setup** page: 8 steps, about 10 minutes, free. It ends with a read-only pull of your catalog.
+
+The written version of the Google setup, with troubleshooting, is [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md).
+
+---
+
+## Configuration
+
+Everything works with the defaults; these environment variables change them.
+
+```bash
+MODEL_API_KEY=...             # Meta Model API key (or save it on the Setup page)
+BASETEN_API_KEY=...           # optional: translations on Muse Spark Open
+YEZATAS_HOME=...              # where the catalog and tokens live (default: your local app-data folder)
+YEZATAS_DAILY_QUOTA=10000     # the YouTube API units Yezatas may spend per day
+YEZATAS_MODEL=muse-spark-1.3  # standard models only; contributor models are refused
+YEZATAS_VERIFIER_URL=http://127.0.0.1:11434   # Ollama, for the Muse Glimmer check
+```
+
+The command line covers the basics without the web UI:
+
+```bash
+python -m yezatas signin   # sign in to YouTube (read-only)
+python -m yezatas pull     # pull the channel into the local catalog
+python -m yezatas quota    # today's YouTube API quota use
+```
+
+---
+
+## Project Structure
+
+```
+src/yezatas/
+  auth.py, youtube.py        # OAuth on the creator's own Cloud project, thin YouTube API wrappers
+  catalog.py, store.py       # the catalog pull and the local SQLite store (snapshots, drafts, backups)
+  quota.py                   # the daily quota ledger and cost previews
+  seo.py                     # the SEO scorecard
+  validate.py, facts.py      # the edit validator and the fact guard
+  edits.py, diffs.py, push.py, bulk.py   # drafts, diffs, approve and push, bulk edits
+  agent.py, copilot.py       # the suggestion agent and the channel copilot (Muse Spark 1.3)
+  translate.py, subtitle_translate.py    # verified translations (Muse Spark Open + Muse Glimmer)
+  transcribe.py, chapters.py, subtitles.py   # transcripts, chapters, SRT
+  packaging.py, outliers.py  # the packaging check, own-channel outliers
+  links.py, adcheck.py       # link inventory and dead-link check, advertiser-friendly check
+  web/                       # the local FastAPI app: pages, jobs, security
+tests/                       # pytest; every YouTube and model call is faked
+docs/SETUP_GOOGLE.md         # the Google Cloud setup guide
+```
+
+---
+
+## How It Works
+
+### Collaborative, Not Autonomous
+
+1. **Pull.** Yezatas reads the channel with the read-only scope into a local catalog, with a snapshot per pull.
+2. **Draft.** Every change, by hand, by a model or in bulk, becomes a local draft. Nothing is sent.
+3. **Review.** The **Changes** page shows each draft as a diff with its validation issues.
+4. **Approve.** The creator approves drafts one by one.
+5. **Push.** Pushing shows the quota cost first, asks for write access only then, and needs a ticked confirmation.
+6. **Restore.** YouTube's live text is backed up before every update; restore one video or undo a whole push.
+
+### Automated Safety
+
+| Guard | When | What it does |
+|---|---|---|
+| Quota guard | Before every YouTube call | Shows the cost in API units and refuses anything over the daily budget. |
+| Edit validator | Every draft | YouTube's length and byte limits, forbidden characters, placeholder links, tag and chapter rules; warns about removed links and changed chapter times. |
+| Fact guard | Every model-written edit | No new links unless a tool returned them; no new timestamps, @handles or emails. One repair round, then the suggestion is dropped. |
+| Number guard | Copilot answers, critiques, explanations | Every number must come from code, a tool or the question; otherwise the sentence is removed with a note. |
+| Translation checks | Every translation | Links, times, numbers, hashtags and handles must survive; Muse Glimmer back-translates blind and scores it. |
+| Studio check | Every push | Videos changed in YouTube Studio since the last pull are detected and skipped. |
+
+> **Note:** contributor models, which may train on the data, are refused for anything that touches channel data.
+
+### Never Invent Facts
+
+Chapter times are looked up by code from real transcript segments; the model only picks a segment number. Subtitle
+times are copied from the transcript, never written by a model. Quotes in the advertiser-friendly check must really
+be in the text they name.
+
+---
+
+## Design Philosophy
+
+- **Local first.** The catalog, OAuth token and every draft stay on the creator's machine.
+- **Read-only by default.** The write scope is requested only when the creator chooses to push.
+- **Numbers come from code, models write words.** Every model answer is checked by code before anyone sees it.
+- **Drafts, never direct edits.** AI suggestions and bulk edits go through the same diff and approval as a hand edit.
+- **Advice, not verdicts.** Checks explain what they found and why; YouTube and the creator decide.
+
+---
+
+## Built During the Hackathon
 
 Everything in this repository was written during the build window (Oct 27 – Nov 4, 2026). This log lists each feature
 as it lands; the git history is the detailed record.
@@ -117,46 +305,9 @@ as it lands; the git history is the detailed record.
     opening for one of them for $0.05, most of its input cached. The first run counted Shorts as "no chapters" and
     repeated each title next to its link; both are fixed.
 
-## Setup
+---
 
-Yezatas runs on your own machine and talks to YouTube through your own Google Cloud project, so no third party ever
-sees your channel data or credentials. It needs Python 3.10+.
-
-```
-pip install -e .
-python -m yezatas ui
-```
-
-The setup screen walks you through connecting your channel in 8 steps (about 10 minutes, free). The written version,
-with troubleshooting, is [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md).
-
-## Safety model
-
-- **Read-only by default.** Yezatas signs in with the read-only YouTube scope; the write scope is requested only when you
-  choose to push a change.
-- **Local first.** Your catalog, OAuth token and every draft stay on your machine. Each pull is kept as a snapshot, so
-  YouTube's previous text can always be restored.
-- **Diff, approve, push.** AI suggestions and bulk edits are drafts. You see each change as a diff and nothing is
-  published until you approve it.
-- **Quota guard.** A daily ledger of YouTube API units shows the cost before every action and refuses anything that
-  would go over your budget.
-- **Never invent facts.** Chapter timestamps come only from real transcripts, and every translation is validated and
-  checked by a second model before it can be published.
-
-## Meta models used
-
-Only models that Yezatas really calls, or that really wrote part of it, are listed.
-
-| Model | Where it runs | What Yezatas uses it for |
-|---|---|---|
-| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. |
-| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
-| Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
-| Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
-| Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
-| SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
-| Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download (never uploaded). |
-| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs. |
+<p align="center"><i>Your channel, your machine, your approval.</i></p>
 
 ## License
 
