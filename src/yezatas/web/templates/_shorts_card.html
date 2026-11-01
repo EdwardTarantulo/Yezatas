@@ -1,0 +1,54 @@
+{# The "Shorts finder" card of the video page. `sp` is the job state, `sr` the newest stored run. #}
+<section class="card sh-card" id="shorts" aria-labelledby="h-shorts">
+  <h2 id="h-shorts">Shorts finder</h2>
+  <p class="muted">{{ sp.model }} reads this video's transcript and picks moments that could stand alone as a Short. It only picks segment numbers: the times and the quotes come from the transcript.</p>
+
+  {% if sp.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="shorts-msg" role="status" aria-live="polite">{{ sp.message or 'Starting…' }}</span></p>
+  <p class="hint">This takes a minute or two. You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if sp.failed %}
+  <div class="flash error" role="alert" id="shorts-failed">{{ sp.failed }}</div>
+  <form class="inline" method="post" action="/shorts/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if sp.busy %}<p class="hint" id="shorts-busy">Shorts are being found for another video. Wait for it to finish.</p>{% endif %}
+  {% if not sp.has_key %}<p class="hint" id="shorts-no-key">There is no Baseten or Meta API key yet, so the Shorts finder cannot run. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  {% if not sp.has_transcript %}<p class="hint" id="shorts-no-transcript">Transcribe the video first. <a href="#transcript">Go to the transcript</a>.</p>{% endif %}
+  <form class="sh-form" method="post" action="/videos/{{ video.video_id|urlencode }}/shorts">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="hint">The transcript goes to {{ sp.model }}{% if sp.provider == 'baseten' %} on Baseten{% else %} on Meta's Model API{% endif %}. Nothing is sent to YouTube and nothing is changed.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if sp.busy or not sp.has_key or not sp.has_transcript %} disabled{% endif %}>{{ 'Try again' if sr.failed else ('Find again' if sr.find else 'Find Shorts') }}</button></div>
+  </form>
+  {% endif %}
+
+  {% if sr.find %}
+  <div id="shorts-result">
+    <h3 class="run-h">Last run{% if sr.when %}: {{ sr.when }}{% endif %}</h3>
+    {% if sr.failed %}
+    <div class="flash error" role="alert" id="shorts-error">{{ sr.error }}</div>
+    {% else %}
+    {% if sr.stale_line %}<p class="flash" id="shorts-stale">{{ sr.stale_line }}</p>{% endif %}
+    {% if sr.message %}<p id="shorts-msg-done">{{ sr.message }}</p>{% endif %}
+    {% if sr.clips %}
+    <ul class="sh-clips" id="shorts-clips">
+      {% for c in sr.clips %}
+      <li class="sh-clip">
+        <p class="sh-head"><strong>{{ c.title }}</strong> <span class="muted">&middot; {{ c.start }} – {{ c.end }} ({{ c.length }})</span></p>
+        <blockquote class="sh-quote">{{ c.quote }}</blockquote>
+        {% if c.why %}<p class="sh-why">{{ c.why }}</p>{% endif %}
+        <p><a href="{{ c.watch_url }}" target="_blank" rel="noopener">Open at {{ c.start }} on YouTube</a></p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if sr.notes %}
+    <ul class="sh-notes muted" id="shorts-notes">
+      {% for note in sr.notes %}<li>{{ note }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+    <p class="muted" id="shorts-cost">{{ sr.model }}{% if sr.tokens %} &middot; {{ sr.tokens }} tokens{% endif %}</p>
+  </div>
+  {% endif %}
+</section>

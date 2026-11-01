@@ -27,7 +27,7 @@ from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_T
 from ..push import PushItem
 from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, chapter_problem,
                    fix_priority, parse_chapters, parse_duration)
-from ..store import (AdCheck, AgentRun, CopilotProposal, CopilotTurn, DraftRow, OutlierReport,
+from ..store import (AdCheck, AgentRun, CopilotProposal, CopilotTurn, DraftRow, OutlierReport, ShortsFind,
                      PackagingReview, PushRecord, PushRun, SubtitleTranslationRecord,
                      ThumbnailVariant, TranscriptRecord, TranslationRecord, Video, Comment,
                      CommentReply, ReplyTemplate, Store)
@@ -2152,6 +2152,86 @@ def _ad_finding(item: Any) -> AdFindingView | None:
         quote=str(item.get("quote") or ""), why=str(item.get("why") or ""),
         fix=str(item.get("fix") or ""))
 
+
+SHORTS_STALE_LINE = "The transcript changed after this run. Find the Shorts again to use the new one."
+
+
+@dataclass(frozen=True)
+class ShortsClipView:
+    """A clip that could stand alone as a Short for the template."""
+
+    title: str
+    why: str
+    quote: str
+    start: str
+    end: str
+    length: str
+    watch_url: str
+
+
+@dataclass(frozen=True)
+class ShortsView:
+    """The newest Shorts run as plain text for the template."""
+
+    find: ShortsFind | None
+    failed: bool
+    error: str
+    message: str
+    clips: tuple[ShortsClipView, ...]
+    notes: tuple[str, ...]
+    stale_line: str
+    when: str
+    model: str
+    tokens: str
+
+
+def build_shorts_view(
+    video_id: str,
+    find: ShortsFind | None,
+    transcript_id: int,
+    when: Callable[[str], str] = lambda iso: iso,
+) -> ShortsView:
+    """The newest Shorts run as plain text for the template. Everything in it is escaped there."""
+    if find is None:
+        return ShortsView(None, False, "", "", (), (), "", "", "", "")
+    failed = find.status == "failed"
+    tokens_total = find.input_tokens + find.output_tokens
+    tokens = format_count(tokens_total) if tokens_total else ""
+    stale_line = SHORTS_STALE_LINE if find.transcript_id != transcript_id else ""
+    error = find.error or "The Shorts finder did not finish. Try again."
+    message = find.message or ""
+    clips: list[ShortsClipView] = []
+    if not failed:
+        for c in find.clips:
+            start_ms = int(c.get("start_ms", 0))
+            end_ms = int(c.get("end_ms", 0))
+            start = clock(start_ms)
+            end = clock(end_ms)
+            length = f"{round((end_ms - start_ms) / 1000)} s"
+            watch_url = f"https://www.youtube.com/watch?v={quote(video_id)}&t={start_ms // 1000}s"
+            clips.append(
+                ShortsClipView(
+                    title=str(c.get("title") or ""),
+                    why=str(c.get("why") or ""),
+                    quote=str(c.get("quote") or ""),
+                    start=start,
+                    end=end,
+                    length=length,
+                    watch_url=watch_url,
+                )
+            )
+    return ShortsView(
+        find=find,
+        failed=failed,
+        error=error,
+        message=message,
+        clips=tuple(clips),
+        notes=tuple(str(n) for n in find.notes),
+        stale_line=stale_line,
+        when=when(find.created_at),
+        model=find.model,
+        tokens=tokens,
+    )
 
 def build_adcheck_view(check: AdCheck | None, current_hash: str | None,
                        when: Callable[[str], str] = lambda iso: iso) -> AdCheckView:

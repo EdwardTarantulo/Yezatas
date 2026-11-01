@@ -31,6 +31,7 @@ from starlette.templating import Jinja2Templates
 from .. import agent, auth, bulk, edits, push, subtitle_translate
 from .. import chapters as chapters_mod
 from .. import adcheck as adcheck_mod
+from .. import shorts as shorts_mod
 from .. import copilot as copilot_mod
 from .. import strategy as strategy_mod
 from .. import links as links_mod
@@ -48,7 +49,7 @@ from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
 from ..quota import QuotaExceeded, QuotaGuard
 from ..seo import score_catalog
-from ..store import AdCheck, OutlierReport, Store, ThumbnailVariant
+from ..store import AdCheck, OutlierReport, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
                        GoogleYouTubeWriter, YouTubeReader, YouTubeWriter)
@@ -60,7 +61,7 @@ from .security import CSRF_FIELD, Sessions, install_security, load_session_key, 
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
 from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
-                    affiliate_apply_message, build_adcheck_view, build_affiliate_preview,
+                    affiliate_apply_message, build_adcheck_view, build_shorts_view, build_affiliate_preview,
                     build_bulk_preview, build_checks_view, build_comments_view, build_copilot_turns, build_glossary_rows, build_links_view, build_listing,
                     build_outlier_view, build_outdated_view, build_packaging_view, build_preview, build_strategy_view, build_subtitles_view,
                     build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
@@ -135,6 +136,11 @@ LINKS_TIMEOUT_MESSAGE = (
     "The link check took more than 10 minutes, so Yezatas stopped waiting. The links it "
     "finished are kept on the Links page."
 )
+SHORTS_TIMEOUT_SECONDS = 3 * 60.0
+SHORTS_TIMEOUT_MESSAGE = (
+    "Finding Shorts took more than 3 minutes, so Yezatas stopped waiting. Try again.")
+NO_SHORTS_KEY = (
+    "There is no Baseten or Meta API key yet, so the Shorts finder cannot run. Add one in Setup.")
 ADCHECK_TIMEOUT_SECONDS = 3 * 60.0
 ADCHECK_TIMEOUT_MESSAGE = (
     "The advertiser-friendly check took more than 3 minutes, so Yezatas stopped waiting. Try again."
@@ -169,6 +175,8 @@ ChaptersFn = Callable[[Store, str, Report], "chapters_mod.ChaptersResult"]
 CopilotFn = Callable[[Store, str, int, datetime, Report], int]
 # (store, video id, the time now, report) -> the stored check (a failed one included)
 AdcheckFn = Callable[[Store, str, datetime, Report], "AdCheck"]
+# (store, video id, the time now, report) -> the stored Shorts finder run (a failed one included)
+ShortsFn = Callable[[Store, str, datetime, Report], "ShortsFind"]
 # The three packaging clients (None without a Meta API key); the real one reads the key from the config.
 PackagingToolsFactory = Callable[[Config], "packaging_mod.PackagingTools | None"]
 CommentReaderFactory = Callable[[Any], CommentReader]
@@ -362,6 +370,24 @@ def map_adcheck_error(exc: BaseException) -> tuple[str, str]:
     if type(exc) is ValueError:  # the plain sentence of the check's own guard
         return "adcheck", str(exc)
     return "adcheck", f"The advertiser-friendly check stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def map_shorts_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, translate.TranslateError):
+        return exc.kind, str(exc)
+    if type(exc) is ValueError:
+        return "shorts", str(exc)
+    return "shorts", f"The Shorts finder stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def make_default_shorts(config: Config) -> ShortsFn:
+    def run(store: Store, video_id: str, now: datetime, report: Report) -> "ShortsFind":
+        client = translate.translator_from_config(config)
+        if client is None:
+            raise translate.TranslateError("auth", NO_SHORTS_KEY)
+        return shorts_mod.find_shorts(store, client, video_id, now=now, report=report)
+
+    return run
 
 
 def make_default_adcheck(config: Config) -> AdcheckFn:
@@ -571,6 +597,7 @@ class WebState:
         comments_assist: CommentsAssistFn | None = None,
         rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
         strategy_fn: StrategyFn | None = None,
+        shorts_fn: ShortsFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -590,6 +617,7 @@ class WebState:
         self._rule_maker = rule_maker or make_default_rule_maker(config)
         self._bulk_asker = bulk_asker or make_default_bulk_asker(config)
         self._strategy = strategy_fn or make_default_strategy(config)
+        self._shorts = shorts_fn or make_default_shorts(config)
         self._link_fetch = link_fetch  # None: the real visit, links_mod.fetch_url
         self.packaging_tools = packaging_tools
         # Whether a Meta key exists, asked on page loads without building any client. None: an
@@ -645,6 +673,9 @@ class WebState:
                                clock)
         self._adcheck_seen: JobSnapshot | None = None
         self._adcheck_video = ""
+        self.shorts_job = Job(map_shorts_error, SHORTS_TIMEOUT_SECONDS, SHORTS_TIMEOUT_MESSAGE, clock)
+        self._shorts_seen: JobSnapshot | None = None
+        self._shorts_video = ""
         self.variants_job = Job(map_variants_error, VARIANTS_TIMEOUT_SECONDS,
                                 VARIANTS_TIMEOUT_MESSAGE, clock)
         self._variants_seen: JobSnapshot | None = None
@@ -1217,6 +1248,32 @@ class WebState:
             with self._lock:
                 self._links_seen = snap
 
+    # --- Shorts finder (D5) ---
+    def start_shorts(self, video_id: str) -> bool:
+        if not self.shorts_job.start(lambda report: self._run_shorts(video_id, report)):
+            return False
+        with self._lock:
+            self._shorts_video = video_id
+        return True
+
+    def _run_shorts(self, video_id: str, report: Report) -> "ShortsFind":
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            return self._shorts(store, video_id, datetime.now(timezone.utc), report)
+
+    def shorts_state(self) -> tuple[JobSnapshot, str]:
+        snap = self.shorts_job.snapshot()
+        with self._lock:
+            if snap is self._shorts_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._shorts_video
+
+    def dismiss_shorts_result(self) -> None:
+        snap = self.shorts_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._shorts_seen = snap
+
     # --- advertiser-friendly check of one video --------------------------------------------------
     def start_adcheck(self, video_id: str) -> bool:
         """Check one video in the one adcheck job; the result is stored by the check itself."""
@@ -1357,6 +1414,7 @@ def create_app(
     comments_assist: CommentsAssistFn | None = None,
     rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
     strategy: StrategyFn | None = None,
+    shorts: ShortsFn | None = None, shorts_key: Callable[[Config], bool] | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1371,7 +1429,7 @@ def create_app(
                      packaging_fetch or packaging_mod.fetch_thumbnail,
                      packaging_key or (None if packaging_tools else has_meta_key), copilot,
                      link_fetch, adcheck, comment_reader, comments_assist, rule_maker, bulk_asker,
-                     strategy_fn=strategy)
+                     strategy_fn=strategy, shorts_fn=shorts)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -1628,6 +1686,17 @@ def create_app(
                 "vision": config.model, "segmenter": packaging_mod.SAM_MODEL,
                 "maker": packaging_mod.IMAGE_MODEL, "check": checking, "variants": making}
 
+    def has_shorts_key() -> bool:
+        if shorts_key is not None:
+            return bool(shorts_key(config))
+        return translate.translator_key_source(config) != ""
+
+    def shorts_panel(video_id: str, model: str, provider: str, has_transcript: bool) -> dict[str, Any]:
+        snap, job_video = state.shorts_state()
+        panel = job_panel(snap, job_video, video_id)
+        panel.update({"has_key": has_shorts_key(), "model": model, "provider": provider, "has_transcript": has_transcript})
+        return panel
+
     def adcheck_panel(video_id: str, has_key: bool) -> dict[str, Any]:
         """What the advertiser-friendly check job is doing, for one video page."""
         snap, job_video = state.adcheck_state()
@@ -1730,6 +1799,10 @@ def create_app(
         score = next((s for s in outlier_scores(data) if s.video_id == video_id), None)
         ac = adcheck_panel(video_id, pk["has_tools"])  # one key check per page load
         with Store(config.catalog_db) as store:
+            stored_shorts = store.latest_shorts_find(video_id)
+            transcript = store.latest_transcript(video_id)
+        sh = shorts_panel(video_id, tr["model"], tr["provider"], transcript is not None)
+        with Store(config.catalog_db) as store:
             all_comments = store.list_comments(video_id)
             open_replies = store.list_comment_replies(video_id, status="open")
             reply_templates = store.list_reply_templates()
@@ -1741,6 +1814,8 @@ def create_app(
             current_hash = adcheck_mod.current_source_hash(store, video_id)
         return render(request, "video.html", {
             "ac": ac, "av": build_adcheck_view(stored_check, current_hash, _local_time),
+            "sp": sh, "sr": build_shorts_view(video_id, stored_shorts, transcript.id if transcript else 0,
+                            _local_time),
             "cm": cm, "am": am, "cv": cv,
             "outlier_line": outlier_line(score),
             "change": card,
@@ -1765,6 +1840,7 @@ def create_app(
                      or pk["check"]["running"] or pk["check"]["busy"]
                      or pk["variants"]["running"] or pk["variants"]["busy"]
                      or ac["running"] or ac["busy"]
+                     or sh["running"] or sh["busy"]
                      or cm["running"] or cm["busy"] or am["running"] or am["busy"]),
         })
 
@@ -1974,6 +2050,7 @@ def create_app(
             "copilot": _job_json(state.copilot_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),
+            "shorts": _job_json(state.shorts_job.snapshot()),
             "comments": _job_json(state.comments_job.snapshot()),
             "assist": _job_json(state.assist_job.snapshot()),
             "variants": _job_json(state.variants_job.snapshot()),
@@ -3253,6 +3330,29 @@ def create_app(
             flash(request, "error", "An advertiser-friendly check is already running. Wait for it "
                                     "to finish.")
         return see_other(f"/videos/{quote(video_id)}#adcheck")
+
+    @app.post("/videos/{video_id}/shorts")
+    async def start_shorts(request: Request, video_id: str) -> Response:
+        await read_form(request)
+
+        def exists() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.get_video(video_id) is not None
+
+        if not await run_in_threadpool(exists):
+            return video_not_found(request)
+        if not await run_in_threadpool(has_shorts_key):
+            flash(request, "error", NO_SHORTS_KEY, "ai")
+        elif not state.start_shorts(video_id):
+            flash(request, "error", "A Shorts search is already running. Wait for it to finish.")
+        return see_other(f"/videos/{quote(video_id)}#shorts")
+
+    @app.post("/shorts/done")
+    async def dismiss_shorts(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_shorts_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#shorts" if video_id else "/")
 
     @app.post("/adcheck/done")
     async def dismiss_adcheck(request: Request) -> Response:
