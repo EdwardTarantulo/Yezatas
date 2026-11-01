@@ -120,6 +120,9 @@ def _check_spec(spec: BulkSpec) -> tuple[str, str, str]:
     return start, end, footer
 
 
+check_spec = _check_spec
+
+
 def _in_scope(video: Video, spec: BulkSpec, start: str, end: str, ids: frozenset[str]) -> bool:
     if ids and video.video_id not in ids:
         return False
@@ -144,6 +147,9 @@ def _footer_text(description: str, footer: str, marker: str) -> str:
     if body == footer or body.endswith("\n" + footer):
         return description
     return f"{body}\n\n{footer}" if body else footer
+
+
+footer_text = _footer_text
 
 
 def _changed(video: Video, spec: BulkSpec, footer: str) -> tuple[str, str, int] | None:
