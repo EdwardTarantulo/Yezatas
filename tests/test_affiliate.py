@@ -207,6 +207,25 @@ def test_plan_visibility_and_bad_visibility(store: Store) -> None:
         plan_affiliate(store, [RULE], visibility="private")
 
 
+def test_apply_visibility_all_drafts_private_video_that_default_reports_not_in_plan(
+    store: Store,
+) -> None:
+    fill(store, video(1, "Shop https://shop.example.com/a", privacy="private"))
+    assert [c.video_id for c in plan_affiliate(store, [RULE], visibility="all")] == [vid(1)]
+    assert plan_affiliate(store, [RULE]) == []
+    result = apply_affiliate(store, [RULE], [vid(1)], NOW, visibility="all")
+    assert (result.drafted, result.blocked, result.not_in_plan) == (1, 0, 0)
+    assert [(i.video_id, i.status, i.message) for i in result.items] == [
+        (vid(1), "drafted", "Draft made.")]
+    row = store.get_draft(vid(1))
+    assert row.description == "Shop https://shop.example.com/a?tag=partner123"
+    store.delete_draft(vid(1))
+    defaulted = apply_affiliate(store, [RULE], [vid(1)], NOW)
+    assert (defaulted.drafted, defaulted.blocked, defaulted.not_in_plan) == (0, 0, 1)
+    assert [(i.video_id, i.status) for i in defaulted.items] == [(vid(1), "not_in_plan")]
+    assert store.get_draft(vid(1)) is None
+
+
 def test_plan_blocks_a_video_that_already_has_a_draft(store: Store) -> None:
     fill(store, video(1, "Shop https://shop.example.com/a"), video(2, "Shop https://shop.example.com/b"))
     save_draft(store, vid(1), "Cactus tip 1", "something else", ["cactus"], now=NOW)

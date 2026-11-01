@@ -96,6 +96,20 @@ def test_the_request_schema_and_prompt() -> None:
     assert user == "every video links example.com"
 
 
+def test_the_draft_carries_the_model_cost_record() -> None:
+    client = FakeModelClient([reply(model_answer())])
+    made = rule_from_request(client, "every video links example.com")
+    assert made.model == "muse-spark-1.3"
+    assert (made.input_tokens, made.cached_tokens, made.output_tokens) == (300, 20, 15)
+
+
+def test_a_direct_draft_defaults_to_no_cost_record() -> None:
+    made = RuleDraft(rule={"kind": "must_link", "domain": "example.com", "visibility": "public"},
+                     explain="Every public video's description links example.com.")
+    assert made.model == ""
+    assert (made.input_tokens, made.cached_tokens, made.output_tokens) == (0, 0, 0)
+
+
 # --- each kind end to end: normalized rule + exact explain -----------------------------------------
 CASES: list[tuple[dict[str, Any], dict[str, Any], str, str]] = [
     ({"kind": "must_link", "domain": "  Example.COM  "},

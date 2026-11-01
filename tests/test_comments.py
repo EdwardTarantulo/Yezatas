@@ -11,7 +11,7 @@ from fakes import FakeModelClient, make_http_error
 from yezatas import comments as comments_mod
 from yezatas.agent import ModelError, ModelReply
 from yezatas.comments import ASSIST_FORMAT, CATEGORIES, CommentsError, assist, fetch_comments
-from yezatas.quota import QuotaGuard, quota_day
+from yezatas.quota import QuotaExceeded, QuotaGuard, quota_day
 from yezatas.store import Comment, Store, Video
 
 NOW = datetime(2026, 6, 2, 9, 0, tzinfo=timezone.utc)
@@ -166,6 +166,29 @@ def test_fetch_unknown_video_raises_before_any_call(store: Store) -> None:
     assert str(excinfo.value) == "This video is not in your catalog. Pull your videos first."
     assert reader.calls == []
     assert store.quota_used(quota_day(NOW)) == 0
+
+
+def test_fetch_quota_stop_keeps_the_pages_already_read(store: Store) -> None:
+    reader = FakeCommentReader({
+        None: {"items": [comment_item("cmt00000001", "First page.", "2026-06-02T10:00:00Z")],
+               "nextPageToken": "page2"},
+        "page2": {"items": [comment_item("cmt00000002", "Second page.", "2026-06-01T10:00:00Z")]},
+    })
+    guard = QuotaGuard(store, 1, clock=lambda: NOW)
+    with pytest.raises(QuotaExceeded):
+        fetch_comments(store, reader, VID, guard=guard, now=NOW)
+    assert [c.comment_id for c in store.list_comments(VID)] == ["cmt00000001"]
+
+
+def test_fetch_api_failure_keeps_the_pages_already_read(store: Store) -> None:
+    reader = FakeCommentReader({
+        None: {"items": [comment_item("cmt00000001", "First page.", "2026-06-02T10:00:00Z")],
+               "nextPageToken": "page2"},
+        "page2": RuntimeError("boom"),
+    })
+    with pytest.raises(RuntimeError, match="boom"):
+        fetch_comments(store, reader, VID, guard=None, now=NOW)
+    assert [c.comment_id for c in store.list_comments(VID)] == ["cmt00000001"]
 
 
 # --- assist: the good path -------------------------------------------------------------------------
@@ -345,6 +368,42 @@ def test_public_constants() -> None:
     assert CATEGORIES == {"question": "Question", "feedback": "Feedback", "praise": "Praise",
                           "spam": "Spam", "other": "Other"}
     assert comments_mod.MAX_REPLIES == 20
+
+
+def test_assist_second_run_dismisses_leftover_open_drafts(store: Store) -> None:
+    seed_three(store)
+    first = assist(store, FakeModelClient([reply(good_answer())]), VID, now=NOW)
+    assert first.drafts == 3
+    drafts = store.list_comment_replies(VID)
+    store.set_comment_reply_status(drafts[0].id, "used")
+    second_answer = good_answer(
+        replies=[{"ref": "C1", "text": "Water only when the soil is dry."},
+                 {"ref": "C2", "text": "The guide mix is worth another try."}],
+        pinned="Welcome to the comments.")
+    second = assist(store, FakeModelClient([reply(second_answer)]), VID, now=NOW)
+    assert second.drafts == 3
+    by_text = {d.text: d.status for d in store.list_comment_replies(VID)}
+    assert by_text == {
+        "Water when the soil is dry.": "used",
+        "Try the mix at https://example.com/guide .": "dismissed",
+        "Thanks for watching. See https://example.com/guide .": "dismissed",
+        "Water only when the soil is dry.": "open",
+        "The guide mix is worth another try.": "open",
+        "Welcome to the comments.": "open",
+    }
+
+
+@pytest.mark.parametrize("bad", [
+    ModelError("rate_limit", "Slow down, then try again."),
+    reply("not json at all"),
+])
+def test_assist_failed_second_run_keeps_first_run_drafts_open(
+        store: Store, bad: Any) -> None:
+    seed_three(store)
+    assist(store, FakeModelClient([reply(good_answer())]), VID, now=NOW)
+    with pytest.raises(CommentsError):
+        assist(store, FakeModelClient([bad]), VID, now=NOW)
+    assert [d.status for d in store.list_comment_replies(VID)] == ["open"] * 3
 
 
 def test_assist_with_no_comments_makes_no_call(store: Store) -> None:

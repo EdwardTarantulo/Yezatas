@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 from . import facts, links, seo
 from .agent import ModelClient, ModelError
-from .packaging import _BadAnswer, _format, _object, _parse_object
+from .packaging import _BadAnswer, _format, _object, _parse_object, _Tally
 from .store import CustomRule, Store, Video
 
 # The fixed rules the model may pick: kind -> the parameter names that kind takes. Every rule dict
@@ -79,6 +79,10 @@ class RuleDraft:
 
     rule: dict[str, Any]  # only the kind's keys, plus "kind" and "visibility"
     explain: str  # written by code, never by the model
+    model: str = ""
+    input_tokens: int = 0
+    cached_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -174,8 +178,9 @@ def rule_from_request(client: ModelClient, request: str) -> RuleDraft:
         raise RuleError(f"Describe the check in at most {REQUEST_MAX} characters.")
     messages = [{"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": request.strip()}]
+    tally = _Tally()
     try:
-        data = _parse_object(client.complete(messages, response_format=RULE_FORMAT).content)
+        data = _parse_object(tally.complete(client, messages, RULE_FORMAT).content)
     except (ModelError, _BadAnswer) as exc:
         raise RuleError(str(exc)) from exc
     kind = data.get("kind")
@@ -196,7 +201,9 @@ def rule_from_request(client: ModelClient, request: str) -> RuleDraft:
         rule["count"] = _clean_whole(data.get("count"), "tag count", MAX_TAG_COUNT)
     rule["visibility"] = visibility
     _check_from_request(rule, request)
-    return RuleDraft(rule=rule, explain=_explain(rule))
+    return RuleDraft(rule=rule, explain=_explain(rule), model=client.model,
+                     input_tokens=tally.input, cached_tokens=tally.cached,
+                     output_tokens=tally.output)
 
 
 def _check_from_request(rule: dict[str, Any], request: str) -> None:

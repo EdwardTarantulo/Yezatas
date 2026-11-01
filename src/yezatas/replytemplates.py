@@ -3,15 +3,17 @@
 Templates are plain text saved through the store. ``check_template`` is what a caller runs before
 ``Store.save_reply_template``: it trims the name and body and refuses the ones that cannot be used.
 ``fill`` puts the commenter's name into a body. ``suggest`` ranks templates for one comment by the
-words they share — pure code, no model and no network. Nothing here talks to YouTube.
+words they share — pure code, no model and no network. ``save_template`` cleans a template and
+refuses a name that another template already has. Nothing here talks to YouTube.
 """
 
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Sequence
 
-from .store import ReplyTemplate
+from .store import ReplyTemplate, Store
 
 NAME_MAX = 60
 BODY_MAX = 2000
@@ -52,6 +54,16 @@ def check_template(name: str, body: str) -> tuple[str, str]:
     if body == "{name}":
         raise TemplateError("The reply text must say more than just {name}.")
     return name, body
+
+
+def save_template(store: Store, name: str, body: str, now: datetime | None = None,
+                  template_id: int | None = None) -> int:
+    """Clean a template and save it, refusing a name that another template already has."""
+    cleaned_name, cleaned_body = check_template(name, body)
+    for template in store.list_reply_templates():
+        if template.id != template_id and template.name.casefold() == cleaned_name.casefold():
+            raise TemplateError(f'There is already a template called "{cleaned_name}".')
+    return store.save_reply_template(cleaned_name, cleaned_body, now=now, template_id=template_id)
 
 
 def fill(body: str, author: str) -> str:

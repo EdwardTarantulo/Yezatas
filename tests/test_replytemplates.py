@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from yezatas.replytemplates import BODY_MAX, NAME_MAX, TemplateError, check_template, fill, suggest
+from yezatas.replytemplates import BODY_MAX, NAME_MAX, TemplateError, check_template, fill, save_template, suggest
 from yezatas.store import ReplyTemplate, Store
 
 T0 = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
@@ -218,3 +218,63 @@ def test_templates_round_trip_through_the_store(tmp_path: Path) -> None:
         assert store.delete_reply_template(schedule) is True
         assert store.delete_reply_template(schedule) is False
         assert [t.id for t in store.list_reply_templates()] == [thanks]
+
+
+# --- save_template ---------------------------------------------------------------------------------
+
+
+def test_save_template_stores_the_cleaned_name_and_body(tmp_path: Path) -> None:
+    with Store(tmp_path / "templates.sqlite") as store:
+        template_id = save_template(store, "  Thanks  ", "  Thanks, {name}!  \n", now=T0)
+        stored = {t.id: t for t in store.list_reply_templates()}
+        assert (stored[template_id].name, stored[template_id].body) == ("Thanks", "Thanks, {name}!")
+
+
+def test_save_template_refuses_a_duplicate_name(tmp_path: Path) -> None:
+    with Store(tmp_path / "templates.sqlite") as store:
+        first = save_template(store, "Thanks", "Thanks, {name}!", now=T0)
+        with pytest.raises(TemplateError) as caught:
+            save_template(store, "Thanks", "Something else.", now=T0)
+        assert str(caught.value) == 'There is already a template called "Thanks".'
+        stored = store.list_reply_templates()
+        assert [t.id for t in stored] == [first]
+        assert stored[0].body == "Thanks, {name}!"
+
+
+def test_save_template_refuses_a_duplicate_name_in_another_case(tmp_path: Path) -> None:
+    with Store(tmp_path / "templates.sqlite") as store:
+        save_template(store, "Thanks", "Thanks, {name}!", now=T0)
+        with pytest.raises(TemplateError) as caught:
+            save_template(store, "thanks", "Something else.", now=T0)
+        assert str(caught.value) == 'There is already a template called "thanks".'
+        assert [t.name for t in store.list_reply_templates()] == ["Thanks"]
+
+
+def test_save_template_refuses_renaming_onto_another_template(tmp_path: Path) -> None:
+    with Store(tmp_path / "templates.sqlite") as store:
+        save_template(store, "Thanks", "Thanks, {name}!", now=T0)
+        other = save_template(store, "Schedule", "New videos every week.", now=T0)
+        with pytest.raises(TemplateError) as caught:
+            save_template(store, "Thanks", "New videos every week.", now=T0, template_id=other)
+        assert str(caught.value) == 'There is already a template called "Thanks".'
+        assert {t.id: t.name for t in store.list_reply_templates()}[other] == "Schedule"
+
+
+def test_save_template_allows_keeping_the_same_name(tmp_path: Path) -> None:
+    with Store(tmp_path / "templates.sqlite") as store:
+        thanks = save_template(store, "Thanks", "Thanks, {name}!", now=T0)
+        assert save_template(store, "Thanks", "Thank you, {name}!", now=T0, template_id=thanks) == thanks
+        assert save_template(store, "THANKS", "Thank you, {name}!", now=T0, template_id=thanks) == thanks
+        stored = {t.id: t for t in store.list_reply_templates()}
+        assert (stored[thanks].name, stored[thanks].body) == ("THANKS", "Thank you, {name}!")
+
+
+def test_save_template_refuses_an_invalid_name_or_body(tmp_path: Path) -> None:
+    with Store(tmp_path / "templates.sqlite") as store:
+        with pytest.raises(TemplateError) as caught:
+            save_template(store, "   ", "Thanks, {name}!", now=T0)
+        assert str(caught.value) == "Enter a template name."
+        with pytest.raises(TemplateError) as caught:
+            save_template(store, "Thanks", "   ", now=T0)
+        assert str(caught.value) == "Enter a reply text."
+        assert store.list_reply_templates() == []

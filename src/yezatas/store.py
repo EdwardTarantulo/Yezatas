@@ -1819,6 +1819,14 @@ class Store:
             self._conn.execute(
                 "UPDATE comment_replies SET status = ? WHERE id = ?", (status, id))
 
+    def dismiss_open_comment_replies(self, video_id: str) -> int:
+        """Dismiss a video's open reply drafts; returns how many were dismissed."""
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE comment_replies SET status = 'dismissed' "
+                "WHERE video_id = ? AND status = 'open'", (video_id,))
+        return cur.rowcount
+
     @staticmethod
     def _row_to_reply_template(row: sqlite3.Row) -> ReplyTemplate:
         return ReplyTemplate(

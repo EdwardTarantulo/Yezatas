@@ -737,6 +737,25 @@ def test_comment_replies_round_trip_and_status(store: Store) -> None:
     assert store.list_comment_replies("vid00000001", "used")[0].status == "used"
 
 
+def test_dismiss_open_comment_replies_only_open_of_one_video(store: Store) -> None:
+    first = store.add_comment_reply("vid00000001", "cmt00000001", "First.", "muse-spark-1.3",
+                                    [], now=T0)
+    second = store.add_comment_reply("vid00000001", "cmt00000002", "Second.", "muse-spark-1.3",
+                                     [], now=T0)
+    used = store.add_comment_reply("vid00000001", "cmt00000003", "Used.", "muse-spark-1.3",
+                                   [], now=T0)
+    store.set_comment_reply_status(used, "used")
+    already = store.add_comment_reply("vid00000001", "", "Pinned.", "muse-spark-1.3", [], now=T0)
+    store.set_comment_reply_status(already, "dismissed")
+    store.add_comment_reply("vid00000002", "", "Other video.", "muse-spark-1.3", [], now=T0)
+    assert store.dismiss_open_comment_replies("vid00000001") == 2
+    by_id = {d.id: d.status for d in store.list_comment_replies("vid00000001")}
+    assert by_id == {first: "dismissed", second: "dismissed", used: "used",
+                     already: "dismissed"}
+    assert store.list_comment_replies("vid00000002")[0].status == "open"
+    assert store.dismiss_open_comment_replies("vid00000001") == 0
+
+
 def test_reply_templates_round_trip_by_name(store: Store) -> None:
     assert store.list_reply_templates() == []
     thanks = store.save_reply_template("Thanks", "Thanks, {name}!", now=T0)

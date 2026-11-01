@@ -141,6 +141,8 @@ def fetch_comments(store: Store, reader: CommentReader, video_id: str, *,
     An unknown video raises ValueError before any API or quota call. Each page is charged to
     the quota guard before it is made. When YouTube says comments are turned off, a
     CommentsError with a plain sentence is raised; any other API failure is raised as it came.
+    When a quota or API failure happens after some pages were read, those comments are stored
+    before the error is raised.
     """
     if store.get_video(video_id) is None:
         raise ValueError("This video is not in your catalog. Pull your videos first.")
@@ -150,10 +152,17 @@ def fetch_comments(store: Store, reader: CommentReader, video_id: str, *,
     page_token: str | None = None
     while len(comments) < max_comments:
         if guard is not None:
-            guard.charge("commentThreads.list", note="fetch comments")
+            try:
+                guard.charge("commentThreads.list", note="fetch comments")
+            except Exception:
+                if comments:
+                    store.upsert_comments(comments[:max_comments], now=now)
+                raise
         try:
             page = reader.comment_threads(video_id, page_token)
         except Exception as exc:
+            if comments:
+                store.upsert_comments(comments[:max_comments], now=now)
             info = api_error_info(exc)
             if info.status == 403 and "commentsDisabled" in info.reasons:
                 raise CommentsError("Comments are turned off on this video.") from exc
@@ -325,6 +334,7 @@ def assist(store: Store, client: ModelClient, video_id: str, *,
             data, video.title, video.description, comments)
     except (ModelError, _BadAnswer) as exc:
         raise CommentsError(str(exc)) from exc
+    store.dismiss_open_comment_replies(video_id)
     store.set_comment_categories(saved, now=now)
     drafts = 0
     for comment_id, text in kept:
