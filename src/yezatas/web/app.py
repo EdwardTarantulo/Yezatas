@@ -28,6 +28,7 @@ from starlette.templating import Jinja2Templates
 
 from .. import agent, auth, bulk, edits, push, subtitle_translate
 from .. import chapters as chapters_mod
+from .. import copilot as copilot_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
 from .. import transcribe as transcribe_mod
@@ -46,14 +47,15 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem, build_bulk_preview,
-                    build_listing, build_outlier_view, build_packaging_view, build_preview,
-                    build_subtitles_view, build_transcript_view, build_translate_view,
-                    bulk_apply_message, change_cards, chapters_blocker, dashboard_model,
-                    format_cost, format_count, format_date, group_checks, history_groups, lang_name,
-                    make_entries, outlier_count, outlier_line, parse_bulk_form, plan_lines,
-                    preview_card, pull_moment, push_results, run_restore_summary, run_view,
-                    stops_batch, thumb_url, top_other_videos)
+from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
+                    build_bulk_preview, build_copilot_turns, build_listing, build_outlier_view,
+                    build_packaging_view, build_preview, build_subtitles_view,
+                    build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
+                    chapters_blocker, dashboard_model, format_cost, format_count, format_date,
+                    group_checks, history_groups, lang_name, make_entries, outlier_count,
+                    outlier_line, parse_bulk_form, plan_lines, preview_card, pull_moment,
+                    push_results, run_restore_summary, run_view, stops_batch, thumb_url,
+                    top_other_videos)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -106,6 +108,10 @@ OUTLIERS_TIMEOUT_SECONDS = 10 * 60.0
 OUTLIERS_TIMEOUT_MESSAGE = (
     "Explaining the outliers took more than 10 minutes, so Yezatas stopped waiting. Try again."
 )
+COPILOT_TIMEOUT_SECONDS = 5 * 60.0
+COPILOT_TIMEOUT_MESSAGE = (
+    "The answer took more than 5 minutes, so Yezatas stopped waiting. Try a shorter question."
+)
 NO_PACKAGING_KEY = "There is no Meta API key. Add one in Setup. Nothing was sent."
 MAX_ID_DIGITS = 12  # a variant id in a URL; longer is never a real one
 MAX_PATH_CHARS = 1000
@@ -124,6 +130,8 @@ TranslateTools = Callable[[Config], "tuple[translate.Translator | None, translat
 # (store, video id, media path, language, report); `keywords=` is added only when the creator typed some.
 TranscribeFn = Callable[..., "transcribe_mod.TranscribeResult"]
 ChaptersFn = Callable[[Store, str, Report], "chapters_mod.ChaptersResult"]
+# (store, question, chat id, the time of the views, report) -> the id of the new copilot turn
+CopilotFn = Callable[[Store, str, int, datetime, Report], int]
 # The three packaging clients (None without a Meta API key); the real one reads the key from the config.
 PackagingToolsFactory = Callable[[Config], "packaging_mod.PackagingTools | None"]
 
@@ -247,6 +255,30 @@ def map_chapters_error(exc: BaseException) -> tuple[str, str]:
     return "chapters", f"Making the chapters stopped unexpectedly ({exc.__class__.__name__})."
 
 
+def map_copilot_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if isinstance(exc, copilot_mod.CopilotError) or type(exc) is ValueError:
+        return "copilot", str(exc)  # the plain sentences of the copilot's own checks
+    return "copilot", f"The answer stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def make_default_copilot(config: Config) -> CopilotFn:
+    """The real copilot function: Muse Spark through Meta's Model API, one client per question."""
+
+    def run(store: Store, question: str, chat_id: int, as_of: datetime, report: Report) -> int:
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        return copilot_mod.ask(store, client, question, chat_id=chat_id, as_of=as_of,
+                               report=report)
+
+    return run
+
+
 def make_default_transcribe(config: Config) -> TranscribeFn:
     """The real transcribe function: Muse Voice Transcribe through Meta's Model API."""
 
@@ -363,6 +395,7 @@ class WebState:
         packaging_tools: PackagingToolsFactory = packaging_mod.packaging_tools_from_config,
         packaging_fetch: Callable[[str], bytes] = packaging_mod.fetch_thumbnail,
         packaging_key: Callable[[Config], bool] | None = None,
+        copilot_fn: CopilotFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -375,6 +408,7 @@ class WebState:
         self._translate_tools = translate_tools
         self._transcribe = transcribe_fn or make_default_transcribe(config)
         self._chapters = chapters_fn or make_default_chapters(config)
+        self._copilot = copilot_fn or make_default_copilot(config)
         self.packaging_tools = packaging_tools
         # Whether a Meta key exists, asked on page loads without building any client. None: an
         # injected packaging_tools factory (tests) answers instead.
@@ -416,6 +450,10 @@ class WebState:
         self.outliers_job = Job(map_outliers_error, OUTLIERS_TIMEOUT_SECONDS,
                                 OUTLIERS_TIMEOUT_MESSAGE, clock)
         self._outliers_seen: JobSnapshot | None = None
+        self.copilot_job = Job(map_copilot_error, COPILOT_TIMEOUT_SECONDS,
+                               COPILOT_TIMEOUT_MESSAGE, clock)
+        self._copilot_seen: JobSnapshot | None = None
+        self._copilot_chat: int | None = None  # None: the chat of the newest turn
         self.variants_job = Job(map_variants_error, VARIANTS_TIMEOUT_SECONDS,
                                 VARIANTS_TIMEOUT_MESSAGE, clock)
         self._variants_seen: JobSnapshot | None = None
@@ -868,6 +906,41 @@ class WebState:
             with self._lock:
                 self._outliers_seen = snap
 
+    # --- copilot: questions about the channel ----------------------------------------------------
+    def copilot_chat(self, store: Store) -> int | None:
+        """The chat on screen: the one picked with "New chat", else the newest (None: no turns)."""
+        with self._lock:
+            chosen = self._copilot_chat
+        return chosen if chosen is not None else store.latest_copilot_chat_id()
+
+    def new_copilot_chat(self, store: Store) -> None:
+        with self._lock:
+            self._copilot_chat = store.next_copilot_chat_id()
+
+    def start_copilot(self, question: str, chat_id: int) -> bool:
+        """Answer one question in the one copilot job."""
+        return self.copilot_job.start(lambda report: self._run_copilot(question, chat_id, report))
+
+    def _run_copilot(self, question: str, chat_id: int, report: Report) -> int:
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            pull = store.latest_pull()
+            if pull is None:
+                raise ValueError("There is no pulled catalog yet. Pull it in Setup first.")
+            return self._copilot(store, question, chat_id, pull_moment(pull), report)
+
+    def copilot_state(self) -> JobSnapshot:
+        """The job snapshot. A finished job the page already showed is idle."""
+        snap = self.copilot_job.snapshot()
+        with self._lock:
+            return JobSnapshot("idle") if snap is self._copilot_seen else snap
+
+    def dismiss_copilot_result(self) -> None:
+        snap = self.copilot_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._copilot_seen = snap
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -903,6 +976,7 @@ def create_app(
     packaging_tools: PackagingToolsFactory | None = None,
     packaging_fetch: Callable[[str], bytes] | None = None,
     packaging_key: Callable[[Config], bool] | None = None,
+    copilot: CopilotFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -915,7 +989,7 @@ def create_app(
                      tools, transcribe, chapters,
                      packaging_tools or packaging_mod.packaging_tools_from_config,
                      packaging_fetch or packaging_mod.fetch_thumbnail,
-                     packaging_key or (None if packaging_tools else has_meta_key))
+                     packaging_key or (None if packaging_tools else has_meta_key), copilot)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -1354,6 +1428,32 @@ def create_app(
             "poll": snap.running,
         })
 
+    @app.get("/copilot")
+    def copilot_page(request: Request) -> Response:
+        """The chat about the channel. Showing it calls no model."""
+        with Store(config.catalog_db) as store:
+            pull = store.latest_pull()
+            if pull is None:
+                return back_to_setup()
+            chat_id = state.copilot_chat(store)
+            turns = store.list_copilot_turns(chat_id) if chat_id is not None else []
+            proposals = store.list_copilot_proposals([t.id for t in turns])
+            videos = {v.video_id: v for v in store.list_videos()}
+            drafts = frozenset(row.video_id for row in store.list_drafts())
+        snap = state.copilot_state()
+        failed = snap.message if snap.status == "failed" else ""
+        if snap.status == "failed":
+            state.dismiss_copilot_result()  # shown once
+        return render(request, "copilot.html", {
+            "active": "copilot",
+            "turns": build_copilot_turns(turns, proposals, videos, drafts, snap.running,
+                                         _local_time),
+            "as_of": _local_time(pull_moment(pull).isoformat()), "model": config.model,
+            "has_key": has_packaging_key(), "starters": STARTER_QUESTIONS,
+            "limit": copilot_mod.MAX_QUESTION_CHARS, "running": snap.running,
+            "message": snap.message, "failed": failed, "poll": snap.running,
+        })
+
     @app.get("/setup")
     def setup(request: Request) -> Response:
         data = page_data()
@@ -1384,6 +1484,7 @@ def create_app(
             "chapters": _job_json(state.chapters_job.snapshot()),
             "packaging": _job_json(state.packaging_job.snapshot()),
             "outliers": _job_json(state.outliers_job.snapshot()),
+            "copilot": _job_json(state.copilot_job.snapshot()),
             "variants": _job_json(state.variants_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
@@ -2220,6 +2321,95 @@ def create_app(
         await read_form(request)
         state.dismiss_outliers_result()
         return see_other("/outliers#why")
+
+    # --- copilot: questions about the channel -----------------------------------------------------
+    @app.post("/copilot/ask")
+    async def ask_copilot(request: Request) -> Response:
+        form = await read_form(request)
+        question = str(form.get("question") or "").strip()
+        limit = copilot_mod.MAX_QUESTION_CHARS
+
+        def has_pull() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.latest_pull() is not None
+
+        def chat() -> int:
+            with Store(config.catalog_db) as store:
+                found = state.copilot_chat(store)
+                return found if found is not None else store.next_copilot_chat_id()
+
+        if not await run_in_threadpool(has_pull):
+            return back_to_setup()
+        if not question:
+            flash(request, "error", "Type a question first. Nothing was sent.")
+        elif len(question) > limit:
+            flash(request, "error", f"The question has {len(question):,} characters; at most "
+                  f"{limit:,} are allowed. Nothing was sent.")
+        elif not await run_in_threadpool(has_packaging_key):
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif not state.start_copilot(question, await run_in_threadpool(chat)):
+            flash(request, "error", "An answer is already being written. Wait for it to finish.")
+        return see_other("/copilot")
+
+    @app.post("/copilot/new")
+    async def new_copilot_chat(request: Request) -> Response:
+        await read_form(request)
+
+        def start() -> None:
+            with Store(config.catalog_db) as store:
+                state.new_copilot_chat(store)
+
+        if state.copilot_job.snapshot().running:
+            flash(request, "error", "An answer is being written. Wait for it to finish.")
+        else:
+            await run_in_threadpool(start)
+        return see_other("/copilot")
+
+    def proposal_turn(raw: str) -> tuple[int, int] | None:
+        """(proposal id, id of its turn) for a posted id that names a stored proposal, else None."""
+        if not raw.isascii() or not raw.isdigit() or len(raw) > MAX_ID_DIGITS:
+            return None
+        with Store(config.catalog_db) as store:
+            found = store.get_copilot_proposal(int(raw))
+        return (found.id, found.turn_id) if found is not None else None
+
+    @app.post("/copilot/proposals/{proposal_id}/draft")
+    async def draft_copilot_proposal(request: Request, proposal_id: str) -> Response:
+        await read_form(request)
+        found = await run_in_threadpool(proposal_turn, proposal_id)
+        if found is None:
+            flash(request, "error", "This proposal does not exist.")
+            return see_other("/copilot")
+
+        def make() -> tuple[str, str]:
+            with Store(config.catalog_db) as store:
+                try:
+                    video_id = copilot_mod.make_draft(store, found[0])
+                except copilot_mod.CopilotError as exc:
+                    return "error", str(exc)
+                video = store.get_video(video_id)
+            name = video.title if video else video_id
+            return "ok", (f"Draft saved for \"{name}\". Review it on the Changes page; nothing "
+                          "changes on YouTube until you approve and push.")
+
+        kind, text = await run_in_threadpool(make)
+        flash(request, kind, text)
+        return see_other(f"/copilot#turn-{found[1]}")
+
+    @app.post("/copilot/proposals/{proposal_id}/dismiss")
+    async def dismiss_copilot_proposal(request: Request, proposal_id: str) -> Response:
+        await read_form(request)
+        found = await run_in_threadpool(proposal_turn, proposal_id)
+        if found is None:
+            flash(request, "error", "This proposal does not exist.")
+            return see_other("/copilot")
+
+        def dismiss() -> None:
+            with Store(config.catalog_db) as store:
+                copilot_mod.dismiss_proposal(store, found[0])
+
+        await run_in_threadpool(dismiss)
+        return see_other(f"/copilot#turn-{found[1]}")
 
     @app.post("/videos/{video_id}/packaging/variants")
     async def make_video_variants(request: Request, video_id: str) -> Response:

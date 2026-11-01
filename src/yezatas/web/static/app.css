@@ -748,3 +748,20 @@ button.gbtn { cursor: pointer; }
 .bulk-blocked { color: var(--bad); }
 .bulk-warning { padding: 4px 8px; }
 .bulk-excerpt { overflow-wrap: anywhere; }
+
+/* --- copilot --- */
+.cp-top { margin: 0 0 12px; }
+.cp-turn { overflow-wrap: anywhere; }
+.cp-q { margin: 0 0 12px; white-space: pre-wrap; font-weight: 500; }
+.cp-who { display: inline-block; margin-right: 10px; padding: 0 10px; border-radius: 12px; background: var(--hover); color: var(--muted); font-size: 12px; font-weight: 600; line-height: 22px; }
+.cp-a p, .cp-a ul, .cp-a ol { margin: 0 0 10px; }
+.cp-a ul, .cp-a ol { padding-left: 24px; }
+.cp-ref { color: var(--muted); font-size: 12px; }
+.cp-notes { margin: 0 0 12px; font-size: 13px; }
+.cp-proposal { margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.cp-proposal p { margin: 0 0 6px; }
+.cp-old { color: var(--diff-del-text); }
+.cp-new { color: var(--diff-add-text); }
+.cp-foot { margin: 8px 0 0; font-size: 13px; }
+.cp-starters { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.cp-starter { height: auto; min-height: 36px; padding: 6px 16px; white-space: normal; text-align: left; }

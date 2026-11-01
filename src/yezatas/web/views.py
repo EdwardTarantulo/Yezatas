@@ -7,23 +7,27 @@ nothing here touches the disk or YouTube. Formatting (view counts, dates) lives 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 from urllib.parse import quote, urlencode
 
+from markupsafe import Markup, escape
+
 from .. import edits
 from ..agent import estimate_cost
 from ..bulk import MAX_BULK, BulkChange, BulkResult, BulkSpec
+from ..copilot import REF
 from ..diffs import DraftDiff, diff_row
 from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_TYPICAL, MIN_AGE_DAYS,
                         OUTLIER_THRESHOLD, PEERS, OutlierScore, below_norm, outliers, ratio_label)
 from ..push import PushItem
 from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, chapter_problem,
                    fix_priority, parse_chapters, parse_duration)
-from ..store import (AgentRun, DraftRow, OutlierReport, PackagingReview, PushRecord, PushRun,
-                     SubtitleTranslationRecord, ThumbnailVariant, TranscriptRecord, TranslationRecord,
-                     Video)
+from ..store import (AgentRun, CopilotProposal, CopilotTurn, DraftRow, OutlierReport,
+                     PackagingReview, PushRecord, PushRun, SubtitleTranslationRecord,
+                     ThumbnailVariant, TranscriptRecord, TranslationRecord, Video)
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
 from ..validate import Issue, has_errors
@@ -1672,3 +1676,189 @@ def bulk_apply_message(result: BulkResult) -> str:
         text += (" Review them on the Changes page; nothing changes on YouTube until you "
                  "approve and push.")
     return text
+
+
+# --- the copilot chat -----------------------------------------------------------------------------
+STARTER_QUESTIONS = (
+    "What should I fix this week?",
+    "Which of my popular videos have no chapters?",
+    "What do my best videos have in common?",
+)
+_BOLD = re.compile(r"\*\*(.+?)\*\*")
+_BULLET = re.compile(r"^\s*[-*]\s+(.*)$")
+_NUMBERED = re.compile(r"^\s*\d{1,2}\.\s+(.*)$")
+
+
+def _inline(text: str, refs: Mapping[str, str], titles: Mapping[str, str]) -> str:
+    """One line of an answer as safe HTML: escaped first, then **bold** and ref links."""
+    safe = _BOLD.sub(lambda m: f"<strong>{m.group(1)}</strong>", str(escape(text)))
+
+    def link(found: "re.Match[str]") -> str:
+        ref = found.group(0)
+        video_id = refs.get(ref)
+        title = titles.get(video_id) if isinstance(video_id, str) else None
+        if not title or not isinstance(video_id, str):
+            return ref  # a ref the turn does not know, or a video that is gone, stays text
+        return (f'<a href="/videos/{escape(quote(video_id))}">{escape(title)}</a> '
+                f'<small class="cp-ref">{ref}</small>')
+
+    return REF.sub(link, safe)
+
+
+def render_answer(answer: str, refs: Mapping[str, str], titles: Mapping[str, str]) -> Markup:
+    """A model answer as safe HTML.
+
+    Everything is escaped first. Then: paragraphs on blank lines, "- " or "* " bullets, "1." lists
+    and **bold**. A ref like V12 that is in `refs` and whose video is in `titles` (video id -> its
+    current title) becomes a link to the video page; any other ref stays plain text.
+    """
+    out: list[str] = []
+    paragraph: list[str] = []
+    items: list[str] = []
+    tag = ""
+
+    def close() -> None:
+        nonlocal tag
+        if paragraph:
+            out.append("<p>" + "<br>".join(paragraph) + "</p>")
+            paragraph.clear()
+        if items:
+            out.append(f"<{tag}>" + "".join(f"<li>{i}</li>" for i in items) + f"</{tag}>")
+            items.clear()
+        tag = ""
+
+    for line in answer.splitlines():
+        if not line.strip():
+            close()
+            continue
+        bullet = _BULLET.match(line)
+        marker = bullet or _NUMBERED.match(line)
+        if marker:
+            kind = "ul" if bullet else "ol"
+            if paragraph or (tag and tag != kind):
+                close()
+            tag = kind
+            items.append(_inline(marker.group(1), refs, titles))
+        elif items and line[0].isspace():
+            items[-1] += "<br>" + _inline(line.strip(), refs, titles)  # a wrapped list item
+        else:
+            if items:
+                close()
+            paragraph.append(_inline(line.strip(), refs, titles))
+    close()
+    return Markup("".join(out))
+
+
+@dataclass(frozen=True)
+class CopilotProposalView:
+    """An edit the copilot offered, next to the video's current text."""
+
+    id: int
+    video_id: str
+    ref: str
+    video_title: str  # the video's current title ("" when it is gone)
+    title_after: str
+    excerpt: tuple[str, str, str] | None  # (label, before, after) of the first changed line
+    tags_note: str
+    reason: str
+    status: str  # "open" | "drafted" | "dismissed"
+    gone: bool
+    has_draft: bool  # the video already has a draft, so Make draft would be refused
+
+
+@dataclass(frozen=True)
+class CopilotToolCall:
+    name: str
+    arguments: str
+    result_chars: int
+
+
+@dataclass(frozen=True)
+class CopilotTurnView:
+    """One question and answer of the chat, ready for the page."""
+
+    id: int
+    question: str
+    when: str
+    status: str  # "answered" | "failed" | "running" | "interrupted"
+    answer: Markup
+    failed: str  # the plain sentence when the turn failed
+    notes: tuple[str, ...]
+    proposals: tuple[CopilotProposalView, ...]
+    model: str
+    tokens: str
+    cost: str
+    tool_calls: tuple[CopilotToolCall, ...]
+    events: tuple[str, ...]  # the other log lines (checks, errors)
+
+
+def _tags_note(old: Sequence[str], new: Sequence[str]) -> str:
+    before = {t.casefold() for t in old}
+    after = {t.casefold() for t in new}
+    added, removed = len(after - before), len(before - after)
+    if not added and not removed:
+        return "The order of the tags changes." if list(old) != list(new) else ""
+    parts = ([f"{added} added"] if added else []) + ([f"{removed} removed"] if removed else [])
+    return "Tags: " + ", ".join(parts)
+
+
+def _proposal_view(proposal: CopilotProposal, turn: CopilotTurn, videos: Mapping[str, Video],
+                   drafts: Collection[str]) -> CopilotProposalView:
+    video = videos.get(proposal.video_id)
+    ref = next((r for r, v in turn.refs.items() if v == proposal.video_id), "")
+    if video is None:
+        return CopilotProposalView(proposal.id, proposal.video_id, ref, "", proposal.title, None,
+                                   "", proposal.reason, proposal.status, True, False)
+    old = video.description.replace("\r\n", "\n").replace("\r", "\n")
+    new = proposal.description.replace("\r\n", "\n").replace("\r", "\n")
+    return CopilotProposalView(
+        proposal.id, proposal.video_id, ref, video.title, proposal.title,
+        _excerpt("Description", old, new), _tags_note(video.tags, proposal.tags), proposal.reason,
+        proposal.status, False, proposal.video_id in drafts)
+
+
+def _turn_view(turn: CopilotTurn, proposals: Sequence[CopilotProposal],
+               videos: Mapping[str, Video], drafts: Collection[str], running: bool,
+               when: Callable[[str], str]) -> CopilotTurnView:
+    status = "interrupted" if turn.status == "running" and not running else turn.status
+    tool_calls: list[CopilotToolCall] = []
+    events: list[str] = []
+    for event in _dicts(turn.log):
+        kind = event.get("type")
+        if kind == "tool":
+            args = event.get("arguments")
+            text = args if isinstance(args, str) else json.dumps(
+                args if args is not None else {}, separators=(",", ":"), ensure_ascii=False)
+            chars = event.get("result_chars")
+            tool_calls.append(CopilotToolCall(str(event.get("name") or ""), text,
+                                              chars if isinstance(chars, int) else 0))
+        elif kind == "problems":
+            events.extend(str(p) for p in (event.get("problems") or []))
+        elif kind == "guard" and isinstance(event.get("numbers"), list):
+            numbers = ", ".join(str(n) for n in event["numbers"])
+            events.append(f"Number check: {numbers} came from no tool; "
+                          + ("the model was asked to fix it." if event.get("round") == 1
+                             else "the sentence was removed."))
+        elif isinstance(event.get("message"), str):
+            events.append(event["message"])
+    titles = {v.video_id: v.title for v in videos.values()}
+    cost = estimate_cost(turn.model, turn.input_tokens, turn.cached_tokens, turn.output_tokens)
+    return CopilotTurnView(
+        id=turn.id, question=turn.question, when=when(turn.asked_at), status=status,
+        answer=(render_answer(turn.answer, turn.refs, titles) if status == "answered"
+                else Markup("")),
+        failed=turn.answer if status == "failed" else "", notes=tuple(turn.notes),
+        proposals=tuple(_proposal_view(p, turn, videos, drafts) for p in proposals),
+        model=turn.model,
+        tokens=(f"{turn.input_tokens:,} tokens in ({turn.cached_tokens:,} cached), "
+                f"{turn.output_tokens:,} out"),
+        cost=format_cost(cost), tool_calls=tuple(tool_calls), events=tuple(events))
+
+
+def build_copilot_turns(turns: Sequence[CopilotTurn], proposals: Sequence[CopilotProposal],
+                        videos: Mapping[str, Video], drafts: Collection[str], running: bool,
+                        when: Callable[[str], str] = lambda iso: iso) -> list[CopilotTurnView]:
+    """The turns of one chat, oldest first, each with its proposals. `running`: a copilot job is
+    running, so a turn that still says "running" is not an interrupted one."""
+    return [_turn_view(t, [p for p in proposals if p.turn_id == t.id], videos, drafts, running,
+                       when) for t in turns]
