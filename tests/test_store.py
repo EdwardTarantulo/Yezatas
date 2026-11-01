@@ -12,7 +12,8 @@ from yezatas.store import (MIGRATIONS, AdCheck, Comment, CommentReply, CustomRul
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 # undo the newest migrations, for tests that turn a database back into an older version
-BACK_TO_V11 = "DROP TABLE comments; DROP TABLE comment_replies; DROP TABLE reply_templates; DROP TABLE custom_rules; "
+BACK_TO_V12 = "DROP TABLE shorts_finds; "
+BACK_TO_V11 = BACK_TO_V12 + "DROP TABLE comments; DROP TABLE comment_replies; DROP TABLE reply_templates; DROP TABLE custom_rules; "
 BACK_TO_V10 = BACK_TO_V11 + "DROP TABLE link_checks; DROP TABLE ad_checks; "
 BACK_TO_V9 = BACK_TO_V10 + "DROP TABLE copilot_proposals; DROP TABLE copilot_turns; "
 BACK_TO_V8 = BACK_TO_V9 + ("DROP INDEX idx_pushes_run; ALTER TABLE pushes DROP COLUMN run_id; "
@@ -49,7 +50,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 12
+        assert s.schema_version == len(MIGRATIONS) == 13
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -59,7 +60,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 12
+        assert s.schema_version == 13
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -160,7 +161,7 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
                        "DROP TABLE push_runs; " + BACK_TO_V9 + "PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 12
+        assert s.schema_version == 13
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -314,7 +315,7 @@ def test_v8_database_upgrades_and_keeps_its_pushes(tmp_path: Path) -> None:
     conn.executescript(BACK_TO_V8 + "PRAGMA user_version = 8;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 12
+        assert s.schema_version == 13
         record = s.get_push(push)
         assert record is not None and record.run_id is None and record.status == "pushed"
         assert record.before == {"title": "old"} and record.after == {"title": "new"}
@@ -331,7 +332,7 @@ def test_v9_database_upgrades_and_keeps_its_push_runs(tmp_path: Path) -> None:
     conn.executescript(BACK_TO_V9 + "PRAGMA user_version = 9;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 12
+        assert s.schema_version == 13
         record = s.get_push(push)
         assert record is not None and record.run_id == run
         assert s.latest_copilot_chat_id() is None and s.next_copilot_chat_id() == 1
@@ -380,7 +381,7 @@ def test_v10_database_upgrades_to_v11_and_keeps_its_copilot_turns(tmp_path: Path
     conn.executescript(BACK_TO_V10 + "PRAGMA user_version = 10;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 12
+        assert s.schema_version == 13
         assert s.get_copilot_turn(turn) is not None
         assert s.latest_link_checks() == {} and s.latest_ad_check("vid00000001") is None
 
@@ -545,7 +546,7 @@ def test_v5_database_upgrades_to_v6_and_keeps_its_data(tmp_path: Path) -> None:
                        "DROP TABLE subtitle_translations; " + BACK_TO_V8 + "PRAGMA user_version = 5;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 12
+        assert s.schema_version == 13
         assert s.get_video("vid00000001") is not None and s.get_draft("vid00000001") is not None
         transcript = s.latest_transcript("vid00000001")
         assert transcript is not None and transcript.segments[0]["text"] == "Hello"
@@ -615,7 +616,7 @@ def test_v6_database_upgrades_to_v7_and_keeps_its_data(tmp_path: Path) -> None:
                        "" + BACK_TO_V8 + "PRAGMA user_version = 6;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 12
+        assert s.schema_version == 13
         assert s.get_video("vid00000001") is not None
         assert len(s.list_subtitle_translations("vid00000001")) == 1
         assert s.latest_packaging_review("vid00000001") is None
@@ -662,7 +663,7 @@ def test_v7_database_upgrades_to_v8_and_keeps_its_data(tmp_path: Path) -> None:
     conn.executescript("DROP TABLE outlier_reports; " + BACK_TO_V8 + "PRAGMA user_version = 7;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 12
+        assert s.schema_version == 13
         assert s.get_video("vid00000001") is not None
         assert s.latest_packaging_review("vid00000001") is not None
         assert s.latest_outlier_report() is None
@@ -795,6 +796,24 @@ def test_custom_rules_round_trip(store: Store) -> None:
     assert [r.id for r in store.list_custom_rules()] == [second]
 
 
+def test_v12_database_upgrades_to_v13_and_keeps_its_data(tmp_path: Path) -> None:
+    path = tmp_path / "v12.sqlite"
+    with Store(path) as s:
+        rule = {"kind": "must_link", "domain": "example.com", "visibility": "public"}
+        s.add_custom_rule("Newsletter link", "every public video must link it", rule, now=T0)
+    conn = sqlite3.connect(path)
+    conn.executescript(BACK_TO_V12 + "PRAGMA user_version = 12;")
+    conn.close()
+    with Store(path) as s:
+        assert s.schema_version == 13
+        assert s.list_custom_rules()[0].name == "Newsletter link"
+        assert s.latest_shorts_find("vid00000001") is None
+        from yezatas.store import ShortsFind
+
+        rec = ShortsFind(0, "vid00000001", 1, "", "m", "found", "msg", [], [], "", 0, 0)
+        assert s.save_shorts_find(rec, now=T0) > 0
+
+
 def test_v11_database_upgrades_to_v12_and_keeps_its_data(tmp_path: Path) -> None:
     path = tmp_path / "v11.sqlite"
     with Store(path) as s:
@@ -804,7 +823,7 @@ def test_v11_database_upgrades_to_v12_and_keeps_its_data(tmp_path: Path) -> None
     conn.executescript(BACK_TO_V11 + "PRAGMA user_version = 11;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 12
+        assert s.schema_version == 13
         assert s.get_copilot_turn(turn) is not None
         assert set(s.latest_link_checks()) == {"https://example.com/page"}
         assert s.list_comments("vid00000001") == [] and s.list_reply_templates() == []

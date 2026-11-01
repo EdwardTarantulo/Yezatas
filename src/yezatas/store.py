@@ -371,10 +371,29 @@ _SCHEMA_V12: tuple[str, ...] = (
     )""",
 )
 
+# v13: Shorts finder runs (D5).
+_SCHEMA_V13: tuple[str, ...] = (
+    """CREATE TABLE shorts_finds (
+        id INTEGER PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        transcript_id INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        model TEXT NOT NULL,
+        status TEXT NOT NULL,
+        message TEXT NOT NULL DEFAULT '',
+        clips_json TEXT NOT NULL DEFAULT '[]',
+        notes_json TEXT NOT NULL DEFAULT '[]',
+        error TEXT NOT NULL DEFAULT '',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX idx_shorts_finds_video ON shorts_finds(video_id, id)",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
     _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
-    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11, _SCHEMA_V12,
+    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11, _SCHEMA_V12, _SCHEMA_V13,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -568,6 +587,24 @@ class AdCheck:
     error: str
     input_tokens: int
     cached_tokens: int
+    output_tokens: int
+
+
+@dataclass(frozen=True)
+class ShortsFind:
+    """One Shorts finder run on one video: moments picked by segment number, times and quotes from the transcript."""
+
+    id: int
+    video_id: str
+    transcript_id: int
+    created_at: str
+    model: str
+    status: str  # "found" | "none" | "failed"
+    message: str
+    clips: list[dict[str, Any]]
+    notes: list[str]
+    error: str
+    input_tokens: int
     output_tokens: int
 
 
@@ -1419,6 +1456,43 @@ class Store:
             "SELECT * FROM ad_checks WHERE video_id = ? ORDER BY id DESC LIMIT 1", (video_id,)
         ).fetchone()
         return self._row_to_ad_check(row) if row else None
+
+    # --- Shorts finder (D5) ---
+    @staticmethod
+    def _row_to_shorts_find(row: sqlite3.Row) -> ShortsFind:
+        return ShortsFind(
+            id=row["id"],
+            video_id=row["video_id"],
+            transcript_id=row["transcript_id"],
+            created_at=row["created_at"],
+            model=row["model"],
+            status=row["status"],
+            message=row["message"],
+            clips=json.loads(row["clips_json"]),
+            notes=json.loads(row["notes_json"]),
+            error=row["error"],
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output_tokens"],
+        )
+
+    def save_shorts_find(self, record: ShortsFind, now: datetime | None = None) -> int:
+        """Store a Shorts finder run (id and created_at are ignored); returns the new id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO shorts_finds (video_id, transcript_id, created_at, model, status, message, "
+                "clips_json, notes_json, error, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record.video_id, record.transcript_id, _iso(now), record.model, record.status,
+                 record.message, _dumps(record.clips), _dumps(record.notes), record.error,
+                 record.input_tokens, record.output_tokens),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def latest_shorts_find(self, video_id: str) -> ShortsFind | None:
+        """The video's newest Shorts finder run, or None."""
+        row = self._conn.execute(
+            "SELECT * FROM shorts_finds WHERE video_id = ? ORDER BY id DESC LIMIT 1", (video_id,)
+        ).fetchone()
+        return self._row_to_shorts_find(row) if row else None
 
     # --- translations ----------------------------------------------------
     @staticmethod
