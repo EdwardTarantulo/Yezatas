@@ -44,7 +44,7 @@
           {{ thumb(e.thumb, 'sm') }}
           <span class="fix-main">
             <span class="fix-title">{{ e.video.title }}</span>
-            <span class="fix-meta">{{ e.views_text }} views{% if e.top_failed %} &middot; {{ e.top_failed }}{% endif %}</span>
+            <span class="fix-meta">{{ e.views_text }} views{% if e.top_failed %} &middot; To fix: {{ e.top_failed }}{% endif %}{% if e.card.missing %} &middot; +{{ e.card.missing }} points possible{% endif %}</span>
           </span>
           {{ score_badge(e.card.score, e.band) }}
         </a>
@@ -60,7 +60,7 @@
       <label for="sg-count">Suggest fixes for the top</label>
       <select id="sg-count" name="count">{% for n in sg.counts %}<option value="{{ n }}"{% if n == 3 %} selected{% endif %}>{{ n }}</option>{% endfor %}</select>
       <span>videos</span>
-      <button type="submit" class="button secondary"{% if sg.running %} disabled{% endif %}>Suggest fixes</button>
+      <button type="submit" class="button primary"{% if sg.running %} disabled{% endif %}>Suggest fixes</button>
       <p class="hint">{{ privacy_note(sg.model) }} Each suggestion becomes a draft you review.</p>
     </form>
     {% else %}
@@ -88,7 +88,7 @@
     <p class="muted">{{ totals.public }} public &middot; {{ totals.unlisted }} unlisted &middot; {{ totals.private }} private</p>
     <p>{{ latest_pull.videos }} videos were pulled on {{ latest_pull.when }}.</p>
     <p id="dash-outliers"><a href="/outliers">{{ outlier_count }} outlier{{ '' if outlier_count == 1 else 's' }}</a> <span class="muted">({{ outlier_high }} or more above your channel's norm)</span></p>
-    <p>Quota today: {{ quota.used }} used, {{ quota.remaining }} left of {{ quota.budget }}.</p>
+    <p>Quota today: {{ quota.used|num }} used, {{ quota.remaining|num }} left of {{ quota.budget|num }}.</p>
     <p><a class="button secondary" href="/setup#step-pull">Pull again</a></p>
   </section>
 </div>

@@ -134,7 +134,7 @@ def test_page_reflects_each_state(tmp_path: Path) -> None:
 def test_footer_shows_quota_and_data_location(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
     html = ui.setup_html()
-    assert "0 used, 10000 remaining of 10000" in html
+    assert "0 used, 10,000 remaining of 10,000" in html
     assert str(ui.config.home) in html
     assert "Nothing is changed on YouTube" in html
 

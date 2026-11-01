@@ -235,6 +235,11 @@ def _local_time(iso_utc: str) -> str:
         return iso_utc
 
 
+def _num(value: int) -> str:
+    """A whole number with thousands separators: 9979 -> "9,979"."""
+    return f"{value:,}"
+
+
 def sign_in_with_write_access(config: Config) -> Any:
     """The default write sign-in: the same browser flow as setup, asking to edit videos."""
     return auth.sign_in(config, scopes=(auth.WRITE,))
@@ -1435,6 +1440,7 @@ def create_app(
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
     templates.env.undefined = StrictUndefined
     templates.env.filters["lang_name"] = lang_name
+    templates.env.filters["num"] = _num
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

@@ -307,8 +307,8 @@ form.inline { display: inline; }
 .dash-grid {
   display: grid; gap: 16px; align-items: start;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
-  grid-template-areas: "seo fix" "catalog fix" "problems problems";
-  grid-template-rows: auto 1fr auto; /* the tall Fix next card stretches the catalog row, not the SEO one */
+  grid-template-areas: "seo fix" "catalog fix" "problems fix";
+  grid-template-rows: auto auto 1fr; /* the tall Fix next card stretches the last row, under Most common problems */
 }
 .dash-grid .card { margin: 0; }
 .area-seo { grid-area: seo; }
@@ -317,7 +317,7 @@ form.inline { display: inline; }
 .area-catalog { grid-area: catalog; }
 .card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .bands { list-style: none; padding: 0; margin: 12px 0 0; }
-.band-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) 36px; gap: 12px; align-items: center; margin-bottom: 10px; }
+.band-row { display: grid; grid-template-columns: 170px minmax(0, 1fr) 40px; gap: 12px; align-items: center; margin-bottom: 10px; }
 .band-count { text-align: right; font-weight: 500; }
 .fix-list, .problem-list { list-style: none; padding: 0; margin: 8px 0 0; }
 .fix-list li, .problem-list li { margin: 0; }
@@ -346,6 +346,8 @@ form.inline { display: inline; }
 .thumb { display: block; flex: none; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--thumb-bg); }
 .thumb.sm { width: 96px; height: auto; }
 .thumb.lg { width: 100%; height: auto; }
+.thumb.empty.lg { display: grid; place-items: center; }
+.thumb.empty.lg::after { content: "No thumbnail saved"; color: var(--muted); font-size: 13px; }
 
 /* --- content table --- */
 .filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
@@ -465,8 +467,8 @@ button.gbtn { cursor: pointer; }
 .slider-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 12px; }
 .slider-nav .gbtn { border-radius: 16px; background: var(--hover); border-color: var(--hover); color: var(--text); }
 .slider-nav .gbtn:disabled { opacity: 0.35; cursor: default; }
-.dots { display: flex; gap: 8px; }
-.dot { width: 10px; height: 10px; padding: 0; border: 0; border-radius: 50%; background: var(--line); cursor: pointer; }
+.dots { display: flex; gap: 0; }
+.dot { width: 24px; height: 24px; padding: 7px; border: 0; border-radius: 50%; background: var(--line); background-clip: content-box; cursor: pointer; }
 .dot.active { background: var(--text); }
 .gempty { text-align: center; padding: 28px 18px; }
 .gfolder { width: 72px; height: 54px; fill: var(--g-blue-bg); stroke: var(--g-blue); stroke-width: 2; margin-bottom: 10px; }

@@ -83,6 +83,8 @@ def test_fix_next_follows_fix_priority_and_is_capped(tmp_path: Path) -> None:
     assert " views" in row and 'class="badge ' in row
     first = cards[shown[0]]
     assert str(escape(first.failed[0].title)) in row
+    assert "To fix: " + str(escape(first.failed[0].title)) in row
+    assert f"+{first.missing} points possible" in row
 
 
 def test_common_problems_link_to_the_filtered_list(tmp_path: Path) -> None:
@@ -115,7 +117,15 @@ def test_catalog_card_counts_pull_time_and_quota(tmp_path: Path) -> None:
     assert f"{pub} public" in html and f"{unl} unlisted" in html and f"{prv} private" in html
     assert f"{len(videos)} videos were pulled on " in html
     budget = ui.config.daily_quota_budget
-    assert f"Quota today: 0 used, {budget} left of {budget}." in html
+    assert f"Quota today: 0 used, {budget:,} left of {budget:,}." in html
+
+
+def test_setup_has_ai_data_anchor(tmp_path: Path) -> None:
+    ui, _ = seeded_ui(tmp_path)
+    html = ui.client.get("/setup").text
+    assert 'id="ai-data"' in html
+    assert "on free credits Meta may use it to improve its products." in html
+
 
 
 def test_thumbnail_and_placeholder(tmp_path: Path) -> None:

@@ -181,7 +181,7 @@ def test_an_empty_chat_shows_the_intro_the_starters_and_the_safety_line(tmp_path
     assert "Numbers come from Yezatas, not the model" in html
     assert "nothing reaches YouTube until you approve and push it on the Changes page" in html
     assert 'id="copilot-new"' not in html  # nothing to start over yet
-    assert "Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products." in html and "Nothing is sent to YouTube." in html
+    assert "Meta's terms apply (<a href=\"/setup#ai-data\">what Meta may do with it</a>)." in html and "Nothing is sent to YouTube." in html
 
 
 def test_the_nav_has_a_copilot_item_after_checks(tmp_path: Path) -> None:

@@ -38,7 +38,7 @@ def test_check_shows_channel_and_charges_one_unit(tmp_path: Path) -> None:
     assert "120 public videos" in resp.text and "uploads playlist found" in resp.text
     assert ui.reader.calls == [("channels_mine", "snippet,statistics,contentDetails")]
     assert ledger(ui) == [("channels.list", 1)]
-    assert "1 used, 9999 remaining of 10000" in resp.text
+    assert "1 used, 9,999 remaining of 10,000" in resp.text
     assert "done" in step_class(resp.text, "check") and "done" in step_class(resp.text, "api")
 
 

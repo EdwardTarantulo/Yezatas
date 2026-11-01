@@ -117,8 +117,8 @@ def test_video_page_has_the_card_button_and_privacy_sentence(tmp_path: Path) -> 
     html = ui.client.get(f"/videos/{V1}").text
     assert "Suggestions from Muse Spark" in html and "Suggest improvements" in html
     assert (f"This video's title, description, tags, stats and scorecard go to Meta's Model API "
-            f"({MODEL}). Meta handles them under your Meta account's terms; "
-            "on free credits Meta may use them to improve its products.") in html
+            f"({MODEL}). Meta's terms apply (<a href=\"/setup#ai-data\">what Meta may do with it</a>).") in html
+
     assert f'action="/videos/{V1}/suggest"' in html
     assert 'id="suggest-no-key"' not in html and "latest-run" not in html
     assert "<script>" not in html and "style=" not in html
@@ -392,7 +392,7 @@ def test_setup_shows_the_ai_section_without_a_key(tmp_path: Path) -> None:
     assert "AI suggestions (optional)" in section and "No key" in section
     assert 'action="/setup/model-key"' in section and 'type="password"' in section
     assert "Create an API key in Meta's developer dashboard under API keys." in section
-    assert "Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products." in section
+    assert "on free credits Meta may use it to improve its products." in section
     assert "/setup/model-key/delete" not in section
 
 

@@ -1,5 +1,5 @@
 {% extends "shell.html" %}
-{% from "_macros.html" import privacy_note %}
+
 {% block title %}Set up - Yezatas{% endblock %}
 
 {% macro card(step) %}
@@ -381,7 +381,7 @@
     {% set batches = (check.video_count + 49) // 50 %}
     <p>Estimated cost: <strong>{{ estimate.units }}</strong> quota units
       (1 for the channel, {{ [1, batches]|max }} for the video list, {{ batches }} for video details).
-      Left today: <strong>{{ quota.remaining }}</strong> of {{ quota.budget }}.
+      Left today: <strong>{{ quota.remaining|num }}</strong> of {{ quota.budget|num }}.
       <span class="hint">Private videos are not in the count above, so the real cost can be a little higher.</span></p>
     {% if pull_result %}
     <p class="result">Done: <strong>{{ pull_result.video_count }}</strong> videos stored,
@@ -405,7 +405,7 @@
   </header>
   <p>With a Meta API key, <strong>{{ model }}</strong> can suggest better titles, descriptions and tags for your videos.
     Every suggestion becomes a draft that you review. Nothing is sent to YouTube without your approval.</p>
-  <p class="hint">{{ privacy_note(model) }}</p>
+  <p class="hint" id="ai-data">Each AI feature says, next to its button, what it sends. Text sent to Meta's Model API is handled under your Meta account's terms; on free credits Meta may use it to improve its products.</p>
   {% if model_key == 'environment' %}
   <p class="result" id="model-key-status">The key comes from the <code>{{ key_env }}</code> environment variable. To change it, change the variable and restart Yezatas.</p>
   {% else %}
