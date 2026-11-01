@@ -8,7 +8,7 @@
   <p align="center">
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
     <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+">
-    <img src="https://img.shields.io/badge/Meta_models-7-0866FF.svg" alt="7 Meta models">
+    <img src="https://img.shields.io/badge/Meta_models-8-0866FF.svg" alt="8 Meta models">
     <img src="https://img.shields.io/badge/runs-locally-2ea44f.svg" alt="Runs locally">
     <img src="https://img.shields.io/badge/built_for-Meta_Global_AI_Developer_Hackathon-0866FF.svg" alt="Built for the Meta Global AI Developer Hackathon">
   </p>
@@ -57,6 +57,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download and a feed preview. |
 | **Insights** | Outliers | Which videos beat the channel's own norm for their age, and what the winners share. |
 | **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first. |
+| **Ad safety** | Video | An advertiser-friendly check of the title, description, tags and transcript; every quote is checked by code. Advice only. |
 
 ---
 
@@ -66,14 +67,15 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 
 | Model | Where it runs | What Yezatas uses it for |
 |---|---|---|
-| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. |
+| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. |
 | Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
 | SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
 | Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download (never uploaded). |
-| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs. |
+| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs, and the comments, reply-template, affiliate-link and custom-check modules (with store v12). |
+| Muse Wonder 1.0 | Inside Muse Code (build time only) | Orchestrated the Muse Code build of those four modules: planned, briefed four Muse Spark 1.3 builders, reviewed their work and ran the tests. |
 
 ---
 
@@ -144,6 +146,8 @@ src/yezatas/
   transcribe.py, chapters.py, subtitles.py   # transcripts, chapters, SRT
   packaging.py, outliers.py  # the packaging check, own-channel outliers
   links.py, adcheck.py       # link inventory and dead-link check, advertiser-friendly check
+  comments.py, replytemplates.py   # comments assistant (drafts only) and reply templates
+  affiliate.py, customchecks.py    # affiliate tagging as drafts, custom checks by asking
   web/                       # the local FastAPI app: pages, jobs, security
 tests/                       # pytest; every YouTube and model call is faked
 docs/SETUP_GOOGLE.md         # the Google Cloud setup guide
@@ -304,6 +308,31 @@ as it lands; the git history is the detailed record.
     outliers of 4 minutes or more without chapters) for about $0.06; a follow-up proposed a new title and description
     opening for one of them for $0.05, most of its input cached. The first run counted Shorts as "no chapters" and
     repeated each title next to its link; both are fixed.
+- **2026-11-01**: **link inventory and dead-link check** on a **Links** page: every link in the descriptions, ranked
+  by the views of the videos that carry it. Links to the creator's own videos are checked against the catalog
+  (private or unknown videos are flagged); other links are visited once each (HEAD, then GET) on request, and the
+  result says broken, moved or could not be checked in plain words. Filters, paging, and **Replace everywhere**,
+  which opens Bulk edit with the link filled in. No model is used.
+- **2026-11-01**: **advertiser-friendly check** on the video page: **Muse Spark 1.3** reads the title, description,
+  tags and transcript and names what may limit ads under YouTube's advertiser-friendly guidelines, by category,
+  with a quote, why and a suggested change. Code drops a finding whose quote is not really in the text it names,
+  looks up transcript times itself and fixes a verdict that contradicts the findings. The card says when the text
+  changed since the check. Advice only: YouTube's own review decides.
+- **2026-11-01**: **Meta's models built part of Yezatas themselves**: **Muse Code**, running **Muse Wonder** as the
+  orchestrator with four **Muse Spark 1.3** builders, wrote the cores of four features from one written spec, each
+  builder on its own files. The work was then reviewed, fixed where needed and tested before it was committed. The
+  pages for these features come next:
+  - **Comments assistant.** Comments are only read. One Muse Spark call sorts them (question, feedback, praise,
+    spam) and drafts replies and a pinned comment for the creator to post themself. Code drops a draft with a link
+    that is not in the description, or a number that is in neither the comment nor the video's text.
+  - **Reply templates** with `{name}`, suggested for a comment by the words they share. No model.
+  - **Affiliate links.** The creator's own rules (domain, parameter, value) tag matching links, as drafts through
+    the usual review; nothing is built in.
+  - **Custom checks by asking.** The creator describes a check in plain words; Muse Spark only picks one rule from
+    a fixed list and its values, which must be in the creator's words. Code runs the check; no model-written code
+    ever runs.
+  - In review: the comments assistant called the model with no comments, tagging re-encoded a link's other
+    parameters, and Make drafts lost an "all videos" preview; all fixed. Muse Wonder's part of the run cost about $4.
 
 ---
 
