@@ -294,10 +294,43 @@ _SCHEMA_V10: tuple[str, ...] = (
     "CREATE INDEX idx_copilot_proposals_turn ON copilot_proposals(turn_id, id)",
 )
 
+# v11: link checks (G1: is each description link still alive) and advertiser-friendly checks (C9:
+# advice from Muse Spark, with every quote checked against the video's own text).
+_SCHEMA_V11: tuple[str, ...] = (
+    """CREATE TABLE link_checks (
+        id INTEGER PRIMARY KEY,
+        url TEXT NOT NULL,
+        checked_at TEXT NOT NULL,
+        status TEXT NOT NULL,
+        http_status INTEGER,
+        final_url TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL DEFAULT ''
+    )""",
+    "CREATE INDEX idx_link_checks_url ON link_checks(url, id)",
+    """CREATE TABLE ad_checks (
+        id INTEGER PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        model TEXT NOT NULL,
+        status TEXT NOT NULL,
+        verdict TEXT NOT NULL DEFAULT '',
+        summary TEXT NOT NULL DEFAULT '',
+        findings_json TEXT NOT NULL DEFAULT '[]',
+        notes_json TEXT NOT NULL DEFAULT '[]',
+        source_hash TEXT NOT NULL DEFAULT '',
+        had_transcript INTEGER NOT NULL DEFAULT 0,
+        error TEXT NOT NULL DEFAULT '',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX idx_ad_checks_video ON ad_checks(video_id, id)",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
     _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
-    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10,
+    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -458,6 +491,40 @@ class CopilotProposal:
     reason: str
     status: str  # "open" | "drafted" | "dismissed"
     created_at: str
+
+
+@dataclass(frozen=True)
+class LinkCheck:
+    """One check of one link: whether it still answers, as of `checked_at`."""
+
+    id: int
+    url: str
+    checked_at: str
+    status: str  # "ok" | "redirected" | "broken" | "error" | "skipped"
+    http_status: int | None
+    final_url: str  # where a redirect ended ("" when it did not move)
+    message: str  # a plain sentence for the creator ("Not found (404).")
+
+
+@dataclass(frozen=True)
+class AdCheck:
+    """One advertiser-friendly check of one video: advice only, with quotes checked by code."""
+
+    id: int  # 0 before it is stored
+    video_id: str
+    created_at: str
+    model: str
+    status: str  # "done" | "failed"
+    verdict: str  # "no_concerns" | "worth_a_look" | "likely_limited" ("" when failed)
+    summary: str
+    findings: list[dict[str, Any]]  # each with category, source, quote, (time), why, fix
+    notes: list[str]  # what the checks dropped ("A finding was dropped: its quote is not in ...")
+    source_hash: str  # the text it read (title, description, tags, transcript id)
+    had_transcript: bool
+    error: str
+    input_tokens: int
+    cached_tokens: int
+    output_tokens: int
 
 
 @dataclass(frozen=True)
@@ -1189,6 +1256,71 @@ class Store:
         with self._conn:
             self._conn.execute("UPDATE copilot_proposals SET status = ? WHERE id = ?",
                                (status, proposal_id))
+
+    # --- link checks -------------------------------------------------------
+    def save_link_check(self, url: str, status: str, http_status: int | None = None,
+                        final_url: str = "", message: str = "",
+                        now: datetime | None = None) -> int:
+        """Record one check of one link; returns its id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO link_checks (url, checked_at, status, http_status, final_url, message) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (url, _iso(now), status, http_status, final_url, message),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def latest_link_checks(self) -> dict[str, LinkCheck]:
+        """url -> its newest check, for every link ever checked."""
+        rows = self._conn.execute(
+            "SELECT * FROM link_checks WHERE id IN (SELECT MAX(id) FROM link_checks GROUP BY url)"
+        ).fetchall()
+        return {r["url"]: LinkCheck(id=r["id"], url=r["url"], checked_at=r["checked_at"],
+                                    status=r["status"], http_status=r["http_status"],
+                                    final_url=r["final_url"], message=r["message"])
+                for r in rows}
+
+    # --- advertiser-friendly checks ----------------------------------------
+    @staticmethod
+    def _row_to_ad_check(row: sqlite3.Row) -> AdCheck:
+        return AdCheck(
+            id=row["id"],
+            video_id=row["video_id"],
+            created_at=row["created_at"],
+            model=row["model"],
+            status=row["status"],
+            verdict=row["verdict"],
+            summary=row["summary"],
+            findings=json.loads(row["findings_json"]),
+            notes=json.loads(row["notes_json"]),
+            source_hash=row["source_hash"],
+            had_transcript=bool(row["had_transcript"]),
+            error=row["error"],
+            input_tokens=row["input_tokens"],
+            cached_tokens=row["cached_tokens"],
+            output_tokens=row["output_tokens"],
+        )
+
+    def save_ad_check(self, record: AdCheck, now: datetime | None = None) -> int:
+        """Store a check (`id` and `created_at` are ignored); returns the new id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO ad_checks (video_id, created_at, model, status, verdict, summary, "
+                "findings_json, notes_json, source_hash, had_transcript, error, input_tokens, "
+                "cached_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record.video_id, _iso(now), record.model, record.status, record.verdict,
+                 record.summary, _dumps(record.findings), _dumps(record.notes), record.source_hash,
+                 int(record.had_transcript), record.error, record.input_tokens,
+                 record.cached_tokens, record.output_tokens),
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def latest_ad_check(self, video_id: str) -> AdCheck | None:
+        """The video's newest check, or None."""
+        row = self._conn.execute(
+            "SELECT * FROM ad_checks WHERE video_id = ? ORDER BY id DESC LIMIT 1", (video_id,)
+        ).fetchone()
+        return self._row_to_ad_check(row) if row else None
 
     # --- translations ----------------------------------------------------
     @staticmethod
