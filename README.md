@@ -52,7 +52,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Audit** | Dashboard, Content, Video | A 25-check SEO scorecard per video with a one-line fix for each, **Fix next** ranked by views × missing points, and a searchable, sortable content table. |
 | **Edit safely** | Changes, History | Drafts shown as diffs, approved one by one, pushed with a quota preview; a backup before every update, restore one video or undo a whole push. |
 | **Suggest** | Video, Copilot | A suggestion agent with read-only tools and a fact guard, and a channel copilot with the whole catalog in one context. Edits are only ever proposals. |
-| **Translate** | Translate, Subtitles | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. |
+| **Translate** | Translate, Subtitles, Translations | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. A glossary of the creator's terms (kept as they are or with a fixed translation), checked by code, and a list of every translation made from older text. |
 | **Transcribe** | Transcript | Transcripts of the creator's own video file, chapter starts chosen by segment number (code sets the times), SRT downloads. |
 | **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download and a feed preview. |
 | **Insights** | Outliers, Strategy | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos. |
@@ -70,7 +70,7 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 |---|---|---|
 | Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule, and a bulk change described in words into fixed steps. |
 | Muse Wonder 1.0 | Meta's Model API | The strategy report: what works on the channel, the gaps and next video ideas, from tables made by code (every ref and number is checked by code). |
-| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
+| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. At build time it also wrote the glossary and the Translations page (see the log). |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
@@ -149,6 +149,7 @@ src/yezatas/
   transcribe.py, chapters.py, subtitles.py   # transcripts, chapters, SRT
   packaging.py, outliers.py  # the packaging check, own-channel outliers
   strategy.py                # the strategy report (Muse Wonder 1.0)
+  glossary.py                # the translation glossary, checked by code
   links.py, adcheck.py       # link inventory and dead-link check, advertiser-friendly check
   comments.py, replytemplates.py   # comments assistant (drafts only) and reply templates
   affiliate.py, customchecks.py    # affiliate tagging as drafts, custom checks by asking
@@ -360,6 +361,18 @@ as it lands; the git history is the detailed record.
   orchestrator and as its two builders (this run's spawn tool took no model choice); in review, three of its tests
   failed, the report was stamped with the pull time, and a second report in the same second was hidden. One fix
   round, also by Muse Code, fixed all of it.
+- **2026-11-01**: **a block built on Baseten**: **Muse Spark Open**, the model Yezatas translates with, also
+  built the **translation glossary** and a **Translations** page. The creator lists terms to keep as they are in
+  every language (a product or place name) or with a fixed translation per language. The terms found in a text go
+  to the translator with every title, description and subtitle translation, and code checks each translation for
+  them, so a broken term flags it like a missing link. The same page lists every translation, channel-wide, that
+  was made from an older title, description or transcript (pure code; nothing is changed). `glossary.py` came from
+  Muse Code running on Spark Open. On that connection Muse Code's edit calls did not come through, so the rest came
+  from direct Baseten API calls. Spark Open got a written brief with the code it needed and answered with whole
+  files or exact edits, which were then reviewed and tested. In review it skipped an edit in the chat translator,
+  left out two imports, copied the translate call into an error branch, added a broken import line and left a
+  case untested. Six fix rounds, all by Spark Open, fixed them. About 190,000 tokens in 11 calls, from the event's
+  Baseten credits.
 
 ---
 
