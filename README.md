@@ -92,6 +92,16 @@ as it lands; the git history is the detailed record.
   - **Where.** An Outliers page, a line on each video page ("4.2× the channel norm for its age"), a count on the dashboard, and a "vs norm" column, sort and filter on the Content table.
   - On the real channel (381 scored videos): 66 outliers, the top one 1,191× its peers. One explanation took about 40 seconds and cost $0.026; its 3 patterns (task-style "How to" titles, a two-banner thumbnail style, quick-repair topics) each cited 4 to 6 outliers.
 - **2026-10-31**: **demo run-through on the real channel**: the chapter check now names the chapters YouTube would not show (each must be at least 10 seconds) instead of a general rule. On the demo video it found two 9-second chapters, which can stop YouTube from showing any chapters at all.
+- **2026-11-01**: **undo a whole push**: every push of several drafts is now one run, and History groups its videos
+  under it with an **Undo this push** button. Undo makes drafts with each video's text from before the push, so it goes
+  through Changes, approve and push like any edit. A video that has a draft, was not changed by that push, or was
+  pushed again later is skipped and named, so an undo never throws away a later change. No model is used.
+- **2026-11-01**: **bulk edits**: one find & replace (title and/or description, exact text) or one footer block (added
+  at the end, or replacing an existing block from its first line) over many videos, filtered by visibility and
+  publish dates. A **Preview** lists every affected video with the change and its validation issues and writes
+  nothing; **Make drafts** saves only the ticked videos, re-checked first. Videos that already have a draft or would
+  break YouTube's limits are blocked. No model is used. A preview on the real channel (`http://` to `https://` in
+  public descriptions) found 213 videos; it showed that an upgraded link was reported as "removed", which is fixed.
 
 ## Setup
 
