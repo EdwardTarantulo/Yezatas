@@ -423,6 +423,17 @@ as it lands; the git history is the detailed record.
   skipped auth edit, datetimes saved where text was needed, a dropped pick that blocked a later good pick of the
   same gap, a Dismiss button that did nothing after a failed sign-in, and a nav place that broke other pages'
   tests. Six fix rounds, all by Spark Open.
+- **2026-11-01**: **A video page you can use, and the new look**, both built by **Muse Spark Open** on Baseten
+  (about 35K tokens, five rounds). The audit's biggest finding was the video page: about 5,800 px tall, with the
+  edit form ninth of thirteen cards and ten black primary buttons. It now opens with the header, a short "What to
+  fix" card (the failed checks, their fixes and the points each gains) and the edit form, whose Save as draft is
+  the one primary button. The seven AI tools fold into one-line rows that open when a link points into them or a
+  job runs, and stay open across the page reload that follows a finished job. The page is about 2,100 px tall.
+  Then the redesign mock-up was ported: softer neutrals with a teal accent in both themes, the sidebar grouped
+  into Channel, Assist, Research and Review, and on phones a one-line scrolling menu (53 px instead of 233 px).
+  Checked in the browser on the real catalog in light and dark (no contrast or click-target problems) and at
+  phone width. In review: blank lines left by the move, a link that opened its tool but scrolled to the wrong
+  place, four tests that still expected the old order, and two theme rules the new tokens broke.
 
 ---
 
