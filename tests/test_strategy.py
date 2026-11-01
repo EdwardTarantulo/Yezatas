@@ -162,7 +162,7 @@ def test_context_holds_questions_newest_first_and_cut(store: Store) -> None:
 
 # --- the report ----------------------------------------------------------------------------------
 def test_make_report_happy_path(store: Store) -> None:
-    assert STRATEGY_MODEL == "muse-wonder-1.0"
+    assert STRATEGY_MODEL == "muse-spark-1.3"
     lines: list[str] = []
     client = FakeModelClient([reply(good_answer())], model=STRATEGY_MODEL)
     report = make_report(store, client, as_of=AS_OF, now=NOW, report=lines.append)

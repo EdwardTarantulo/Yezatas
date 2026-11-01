@@ -22,7 +22,7 @@ PULLED = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 START = datetime(2025, 1, 1, tzinfo=timezone.utc)
 HIGH, LOW = 5, 20  # indexes of the made-up videos far above and far below the norm
 SENT_LINE = ("The video table, the outlier findings and up to 30 viewer questions go to Meta's "
-             "Model API (muse-wonder-1.0). Meta handles them under your Meta account's terms; "
+             "Model API (muse-spark-1.3). Meta handles them under your Meta account's terms; "
              "on free credits Meta may use them to improve its products. Nothing is sent to YouTube.")
 
 
@@ -147,7 +147,7 @@ def test_a_run_shows_the_saved_report(tmp_path: Path) -> None:
     assert "Next video ideas" in ideas
     assert "A bigger cactus promise" in ideas and "It builds on the big hit." in ideas
     assert 'id="strategy-notes"' in html and "One note kept by code." in html
-    assert "muse-wonder-1.0" in html and "Cost $" in html
+    assert "muse-spark-1.3" in html and "Cost $" in html
     assert "2,000 in, 300 out" in html
     assert f"Made {web_app._local_time(PULLED.isoformat())}" in html
     assert 'id="strategy-stale"' not in html

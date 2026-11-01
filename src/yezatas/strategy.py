@@ -1,7 +1,7 @@
 """Channel strategy: what works, what is missing and what to make next, in one report.
 
 Code builds the facts (the catalog table, the outlier scores, the SEO scores, the saved
-outlier report and the viewer questions) and one Muse Wonder call writes the words.
+outlier report and the viewer questions) and one Muse Spark 1.3 call writes the words.
 Every point and idea must name videos of this channel by their ref, and a text that uses
 a number that was not in the tables is dropped, and so is a text that shares no word with
 the titles of the videos it names. The report is saved as a JSON file;
@@ -24,7 +24,7 @@ from .copilot import Catalog, catalog_refs, numbers_in, unsupported_numbers
 from .packaging import _BadAnswer, _Tally, _format, _object, _parse_object, clean_line
 from .store import Store
 
-STRATEGY_MODEL = "muse-wonder-1.0"
+STRATEGY_MODEL = "muse-spark-1.3"
 MAX_IDEAS = 5
 MAX_POINTS = 5  # per section
 TEXT_MAX = 400  # characters per text field

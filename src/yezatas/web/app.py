@@ -337,7 +337,7 @@ def map_strategy_error(exc: BaseException) -> tuple[str, str]:
 
 
 def make_default_strategy(config: Config) -> StrategyFn:
-    """The real strategy report: Muse Wonder through Meta's Model API, one client per report."""
+    """The real strategy report: Muse Spark 1.3 through Meta's Model API, one client per report."""
 
     def run(store: Store, home: Path, as_of: datetime, report: Report) -> "strategy_mod.StrategyReport":
         key = agent.load_api_key(config)
