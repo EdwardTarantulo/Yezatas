@@ -37,6 +37,7 @@
 
 {% if view %}
 <div id="strategy-report">
+  {% if failed %}<p class="flash" id="strategy-older">This is the older report from {{ view.when }}: the last run failed, so it was not replaced.</p>{% endif %}
   {% if view.stale %}<p class="flash" id="strategy-stale">This report was made before your last pull, so it may not match your videos now.</p>{% endif %}
   <section class="card" id="strategy-works" aria-labelledby="h-strategy-works">
     <h2 id="h-strategy-works">What works</h2>

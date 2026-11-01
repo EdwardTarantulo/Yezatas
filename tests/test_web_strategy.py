@@ -203,6 +203,44 @@ def test_model_text_is_escaped(tmp_path: Path) -> None:
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
 
 
+def test_refs_in_the_text_show_as_titles(tmp_path: Path) -> None:
+    def fake(store: Any, home: Path, as_of: datetime, report: Any) -> StrategyReport:
+        made = canned(as_of, works=(StrategyPoint("V6 promises a big result, unlike V21.", (vid(HIGH),)),))
+        strategy.save_report(home, made)
+        return made
+
+    ui = make_strategy_ui(tmp_path, fake=fake)
+    run(ui)
+    works = section(page(ui), 'id="strategy-works"')
+    assert "&#34;Big cactus hit&#34; promises a big result, unlike V21." in works
+    assert "V6 promises" not in works
+
+
+def test_after_a_failed_run_the_older_report_is_labelled(tmp_path: Path) -> None:
+    calls: list[int] = []
+
+    def fake(store: Any, home: Path, as_of: datetime, report: Any) -> StrategyReport:
+        calls.append(1)
+        if len(calls) == 1:
+            made = canned(as_of)
+            strategy.save_report(home, made)
+            return made
+        raise strategy.StrategyError("The model gave nothing that could be kept. Try again.")
+
+    ui = make_strategy_ui(tmp_path, fake=fake)
+    run(ui)
+    assert 'id="strategy-older"' not in page(ui)
+    run(ui)
+    html = page(ui)
+    assert 'id="strategy-failed"' in html
+    assert 'id="strategy-older"' in html
+    assert f"older report from {web_app._local_time(PULLED.isoformat())}" in html
+    ui.post("/strategy/done", follow_redirects=False)
+    html = page(ui)
+    assert 'id="strategy-failed"' not in html
+    assert 'id="strategy-older"' not in html
+
+
 def test_a_report_from_before_the_last_pull_is_marked_stale(tmp_path: Path) -> None:
     ui = make_strategy_ui(tmp_path)
     run(ui)

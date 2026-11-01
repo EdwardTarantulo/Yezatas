@@ -19,7 +19,7 @@ from .. import adcheck as adcheck_mod
 from .. import edits
 from ..agent import estimate_cost
 from ..bulk import MAX_BULK, BulkChange, BulkResult, BulkSpec
-from ..copilot import REF
+from ..copilot import REF, catalog_refs
 from ..diffs import DraftDiff, diff_row
 from ..links import SKIPPED_MESSAGE, LinkCheckSummary, LinkEntry
 from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_TYPICAL, MIN_AGE_DAYS,
@@ -2669,13 +2669,23 @@ def build_strategy_view(report: StrategyReport | None, videos: Sequence[Video],
     """The saved strategy report with current titles and code-made ratio labels.
 
     A video that left the catalog shows its id as its title. The ratio shows only for
-    outliers and videos below the norm, and every number in it comes from code.
+    outliers and videos below the norm, and every number in it comes from code. Refs like V12
+    in the model's text become the title of that video when the point names it.
     """
     if report is None:
         return None
     titles = {v.video_id: v.title for v in videos}
     score_by_id = {s.video_id: s for s in scores}
     marked = {s.video_id for s in outliers(scores)} | {s.video_id for s in below_norm(scores)}
+    ref_ids = catalog_refs(videos)
+
+    def named(text: str, ids: Sequence[str]) -> str:
+        def title_of(m: re.Match[str]) -> str:
+            vid_id = ref_ids.get(m.group(0))
+            if vid_id is not None and vid_id in ids:
+                return f'"{titles.get(vid_id) or vid_id}"'
+            return m.group(0)
+        return REF.sub(title_of, text)
 
     def ref_for(video_id: str) -> StrategyRef:
         score = score_by_id.get(video_id)
@@ -2698,8 +2708,12 @@ def build_strategy_view(report: StrategyReport | None, videos: Sequence[Video],
     cost = format_cost(estimate_cost(report.model, report.input_tokens,
                                      report.cached_tokens, report.output_tokens))
     return StrategyReportView(
-        works=tuple(StrategyPointView(p.text, refs_of(p.video_ids)) for p in report.works),
-        gaps=tuple(StrategyPointView(p.text, refs_of(p.video_ids)) for p in report.gaps),
-        ideas=tuple(StrategyIdeaView(i.title, i.why, refs_of(i.video_ids)) for i in report.ideas),
+        works=tuple(StrategyPointView(named(p.text, p.video_ids), refs_of(p.video_ids))
+                   for p in report.works),
+        gaps=tuple(StrategyPointView(named(p.text, p.video_ids), refs_of(p.video_ids))
+                   for p in report.gaps),
+        ideas=tuple(StrategyIdeaView(named(i.title, i.video_ids), named(i.why, i.video_ids),
+                                    refs_of(i.video_ids))
+                   for i in report.ideas),
         notes=tuple(report.notes), model=report.model, tokens=tokens, cost=cost,
         when=when(report.created_at), stale=stale)
