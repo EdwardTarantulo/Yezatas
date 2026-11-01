@@ -9,6 +9,7 @@ threads.
 
 from __future__ import annotations
 
+import json
 import secrets
 import threading
 import time
@@ -38,11 +39,16 @@ from .. import transcribe as transcribe_mod
 from .. import translate
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
-from ..quota import QuotaGuard
+from .. import affiliate as affiliate_mod
+from .. import comments as comments_mod
+from .. import customchecks as customchecks_mod
+from .. import replytemplates as replytemplates_mod
+from ..quota import QuotaExceeded, QuotaGuard
 from ..seo import score_catalog
 from ..store import AdCheck, OutlierReport, Store, ThumbnailVariant
 from ..subtitles import to_srt
-from ..youtube import GoogleYouTubeReader, GoogleYouTubeWriter, YouTubeReader, YouTubeWriter
+from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
+                       GoogleYouTubeWriter, YouTubeReader, YouTubeWriter)
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
                          parse_client_file, read_saved_client, save_client_file)
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
@@ -51,12 +57,14 @@ from .security import CSRF_FIELD, Sessions, install_security, load_session_key, 
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
 from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
-                    build_adcheck_view, build_bulk_preview, build_copilot_turns, build_links_view, build_listing,
+                    affiliate_apply_message, build_adcheck_view, build_affiliate_preview,
+                    build_bulk_preview, build_checks_view, build_comments_view, build_copilot_turns, build_links_view, build_listing,
                     build_outlier_view, build_packaging_view, build_preview, build_subtitles_view,
                     build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
                     chapters_blocker, dashboard_model, format_cost, format_count, format_date,
                     group_checks, history_groups, lang_name, links_check_line, make_entries,
-                    outlier_count, outlier_line, parse_bulk_form, plan_lines, preview_card,
+                    outlier_count, outlier_line, parse_affiliate_rule_form, parse_bulk_form,
+                    parse_rule_proposal, plan_lines, preview_card,
                     pull_moment, push_results, run_restore_summary, run_view, stops_batch,
                     thumb_url, top_other_videos)
 
@@ -124,6 +132,14 @@ ADCHECK_TIMEOUT_SECONDS = 3 * 60.0
 ADCHECK_TIMEOUT_MESSAGE = (
     "The advertiser-friendly check took more than 3 minutes, so Yezatas stopped waiting. Try again."
 )
+COMMENTS_TIMEOUT_SECONDS = 120.0
+COMMENTS_TIMEOUT_MESSAGE = (
+    "Reading the comments took more than 2 minutes, so Yezatas stopped waiting. Try again."
+)
+ASSIST_TIMEOUT_SECONDS = 180.0
+ASSIST_TIMEOUT_MESSAGE = (
+    "Sorting the comments took more than 3 minutes, so Yezatas stopped waiting. Try again."
+)
 NO_PACKAGING_KEY = "There is no Meta API key. Add one in Setup. Nothing was sent."
 MAX_ID_DIGITS = 12  # a variant id in a URL; longer is never a real one
 MAX_PATH_CHARS = 1000
@@ -148,6 +164,11 @@ CopilotFn = Callable[[Store, str, int, datetime, Report], int]
 AdcheckFn = Callable[[Store, str, datetime, Report], "AdCheck"]
 # The three packaging clients (None without a Meta API key); the real one reads the key from the config.
 PackagingToolsFactory = Callable[[Config], "packaging_mod.PackagingTools | None"]
+CommentReaderFactory = Callable[[Any], CommentReader]
+# (store, video id, the time now, report) -> what the sort did
+CommentsAssistFn = Callable[[Store, str, datetime, Report], "comments_mod.AssistResult"]
+# (the creator's words) -> the proposed fixed rule
+RuleMakerFn = Callable[[str], "customchecks_mod.RuleDraft"]
 
 
 def default_translate_tools(config: Config) -> "tuple[translate.Translator | None, translate.Verifier]":
@@ -322,6 +343,60 @@ def make_default_adcheck(config: Config) -> AdcheckFn:
     return run
 
 
+def map_comments_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, comments_mod.CommentsError):
+        return "comments", str(exc)
+    if isinstance(exc, QuotaExceeded):
+        return "comments", str(exc)
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if type(exc) is ValueError:
+        return "comments", str(exc)
+    return "comments", f"Reading the comments stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def map_assist_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if isinstance(exc, comments_mod.CommentsError):
+        return "comments", str(exc)
+    if isinstance(exc, QuotaExceeded):
+        return "comments", str(exc)
+    if type(exc) is ValueError:
+        return "assist", str(exc)
+    return "assist", f"Sorting the comments stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def make_default_comments_assist(config: Config) -> CommentsAssistFn:
+    """The real sort: Muse Spark through Meta's Model API, one client per sort."""
+
+    def run(store: Store, video_id: str, now: datetime, report: Report) -> "comments_mod.AssistResult":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        return comments_mod.assist(store, client, video_id, now=now, report=report)
+
+    return run
+
+
+def make_default_rule_maker(config: Config) -> RuleMakerFn:
+    """The real rule maker: Muse Spark through Meta's Model API, one client per ask."""
+
+    def run(request: str) -> "customchecks_mod.RuleDraft":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        return customchecks_mod.rule_from_request(client, request)
+
+    return run
+
+
 def make_default_transcribe(config: Config) -> TranscribeFn:
     """The real transcribe function: Muse Voice Transcribe through Meta's Model API."""
 
@@ -441,6 +516,9 @@ class WebState:
         copilot_fn: CopilotFn | None = None,
         link_fetch: links_mod.Fetch | None = None,
         adcheck_fn: AdcheckFn | None = None,
+        comment_reader: CommentReaderFactory | None = None,
+        comments_assist: CommentsAssistFn | None = None,
+        rule_maker: RuleMakerFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -455,6 +533,9 @@ class WebState:
         self._chapters = chapters_fn or make_default_chapters(config)
         self._copilot = copilot_fn or make_default_copilot(config)
         self._adcheck = adcheck_fn or make_default_adcheck(config)
+        self._comment_reader_factory = comment_reader
+        self._comments_assist = comments_assist or make_default_comments_assist(config)
+        self._rule_maker = rule_maker or make_default_rule_maker(config)
         self._link_fetch = link_fetch  # None: the real visit, links_mod.fetch_url
         self.packaging_tools = packaging_tools
         # Whether a Meta key exists, asked on page loads without building any client. None: an
@@ -511,6 +592,12 @@ class WebState:
                                 VARIANTS_TIMEOUT_MESSAGE, clock)
         self._variants_seen: JobSnapshot | None = None
         self._variants_video = ""
+        self.comments_job = Job(map_comments_error, COMMENTS_TIMEOUT_SECONDS, COMMENTS_TIMEOUT_MESSAGE, clock)
+        self._comments_seen: JobSnapshot | None = None
+        self._comments_video = ""
+        self.assist_job = Job(map_assist_error, ASSIST_TIMEOUT_SECONDS, ASSIST_TIMEOUT_MESSAGE, clock)
+        self._assist_seen: JobSnapshot | None = None
+        self._assist_video = ""
         self._lock = threading.Lock()
         self._check_lock = threading.Lock()
         self._check: CheckState | None = None
@@ -1047,6 +1134,72 @@ class WebState:
             with self._lock:
                 self._adcheck_seen = snap
 
+    # --- comments on one video (G4, G5) -----------------------------------------------------------
+    def _make_comment_reader(self, creds: Any) -> CommentReader:
+        factory = self._comment_reader_factory
+        if factory is None:
+            return GoogleCommentReader(creds)
+        return factory(creds)
+
+    def start_comments(self, video_id: str, creds: Any) -> bool:
+        """Read one video's comments in the one comments job."""
+        if not self.comments_job.start(lambda report: self._run_comments(video_id, creds, report)):
+            return False
+        with self._lock:
+            self._comments_video = video_id
+        return True
+
+    def _run_comments(self, video_id: str, creds: Any, report: Report) -> int:
+        report("Starting…")
+        reader = self._make_comment_reader(creds)
+        with Store(self.config.catalog_db) as store:
+            guard = QuotaGuard(store, self.config.daily_quota_budget)
+            return comments_mod.fetch_comments(store, reader, video_id, guard=guard, report=report)
+
+    def comments_state(self) -> tuple[JobSnapshot, str]:
+        snap = self.comments_job.snapshot()
+        with self._lock:
+            if snap is self._comments_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._comments_video
+
+    def dismiss_comments_result(self) -> None:
+        snap = self.comments_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._comments_seen = snap
+
+    def start_assist(self, video_id: str) -> bool:
+        """Sort one video's comments and draft replies in the one assist job."""
+        if not self.assist_job.start(lambda report: self._run_assist(video_id, report)):
+            return False
+        with self._lock:
+            self._assist_video = video_id
+        return True
+
+    def _run_assist(self, video_id: str, report: Report) -> "comments_mod.AssistResult":
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            return self._comments_assist(store, video_id, datetime.now(timezone.utc), report)
+
+    def assist_state(self) -> tuple[JobSnapshot, str]:
+        snap = self.assist_job.snapshot()
+        with self._lock:
+            if snap is self._assist_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._assist_video
+
+    def dismiss_assist_result(self) -> None:
+        snap = self.assist_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._assist_seen = snap
+
+    # --- custom checks: turn words into one fixed rule (G7) --------------------------------------
+    def propose_rule(self, request: str) -> "customchecks_mod.RuleDraft":
+        """Turn the creator's words into a proposed rule. Short: callers use a worker thread."""
+        return self._rule_maker(request)
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -1085,6 +1238,9 @@ def create_app(
     copilot: CopilotFn | None = None,
     link_fetch: links_mod.Fetch | None = None,
     adcheck: AdcheckFn | None = None,
+    comment_reader: CommentReaderFactory | None = None,
+    comments_assist: CommentsAssistFn | None = None,
+    rule_maker: RuleMakerFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1098,7 +1254,7 @@ def create_app(
                      packaging_tools or packaging_mod.packaging_tools_from_config,
                      packaging_fetch or packaging_mod.fetch_thumbnail,
                      packaging_key or (None if packaging_tools else has_meta_key), copilot,
-                     link_fetch, adcheck)
+                     link_fetch, adcheck, comment_reader, comments_assist, rule_maker)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -1362,6 +1518,29 @@ def create_app(
         panel.update({"has_key": has_key, "model": config.model})
         return panel
 
+    def comments_panel(video_id: str, has_write: bool) -> dict[str, Any]:
+        snap, job_video = state.comments_state()
+        panel = job_panel(snap, job_video, video_id)
+        panel.update({"has_write": has_write, "model": config.model})
+        return panel
+
+    def assist_panel(video_id: str, has_key: bool, has_comments: bool) -> dict[str, Any]:
+        snap, job_video = state.assist_state()
+        panel = job_panel(snap, job_video, video_id)
+        result = None
+        if snap.status == "done" and job_video == video_id and isinstance(snap.result, comments_mod.AssistResult):
+            found = snap.result
+            total = found.input_tokens + found.output_tokens
+            cost = agent.estimate_cost(found.model, found.input_tokens, found.cached_tokens, found.output_tokens)
+            result = {
+                "counts": [(comments_mod.CATEGORIES[key], found.counts.get(key, 0))
+                           for key in comments_mod.CATEGORIES],
+                "drafts": found.drafts, "notes": list(found.notes), "model": found.model,
+                "tokens": f"{total:,}", "cost": format_cost(cost),
+            }
+        panel.update({"has_key": has_key, "has_comments": has_comments, "model": config.model, "result": result})
+        return panel
+
     def video_not_found(request: Request) -> Response:
         return render(request, "error.html", {
             "layout": "shell.html", "active": "content",
@@ -1434,10 +1613,18 @@ def create_app(
         score = next((s for s in outlier_scores(data) if s.video_id == video_id), None)
         ac = adcheck_panel(video_id, pk["has_tools"])  # one key check per page load
         with Store(config.catalog_db) as store:
+            all_comments = store.list_comments(video_id)
+            open_replies = store.list_comment_replies(video_id, status="open")
+            reply_templates = store.list_reply_templates()
+        cv = build_comments_view(video_id, all_comments, open_replies, reply_templates, dict(request.query_params))
+        cm = comments_panel(video_id, state.write_credentials() is not None)
+        am = assist_panel(video_id, pk["has_tools"], bool(all_comments))
+        with Store(config.catalog_db) as store:
             stored_check = store.latest_ad_check(video_id)
             current_hash = adcheck_mod.current_source_hash(store, video_id)
         return render(request, "video.html", {
             "ac": ac, "av": build_adcheck_view(stored_check, current_hash, _local_time),
+            "cm": cm, "am": am, "cv": cv,
             "outlier_line": outlier_line(score),
             "change": card,
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
@@ -1460,7 +1647,8 @@ def create_app(
                      or sb["running"] or sb["busy"]
                      or pk["check"]["running"] or pk["check"]["busy"]
                      or pk["variants"]["running"] or pk["variants"]["busy"]
-                     or ac["running"] or ac["busy"]),
+                     or ac["running"] or ac["busy"]
+                     or cm["running"] or cm["busy"] or am["running"] or am["busy"]),
         })
 
     def usable_variant(video_id: str, raw: str) -> ThumbnailVariant | None:
@@ -1633,6 +1821,8 @@ def create_app(
             "copilot": _job_json(state.copilot_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),
+            "comments": _job_json(state.comments_job.snapshot()),
+            "assist": _job_json(state.assist_job.snapshot()),
             "variants": _job_json(state.variants_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
@@ -2048,6 +2238,280 @@ def create_app(
         kind, message, target = await run_in_threadpool(work)
         flash(request, kind, message)
         return see_other(target)
+
+    # --- reply templates (G5) -------------------------------------------------------------------
+    @app.get("/replies")
+    def replies_page(request: Request) -> Response:
+        with Store(config.catalog_db) as store:
+            templates = store.list_reply_templates()
+        return render(request, "replies.html", {"active": "replies", "templates": templates})
+
+    def _template_id(raw: str) -> int | None:
+        if not raw.isascii() or not raw.isdigit() or len(raw) > MAX_ID_DIGITS:
+            return None
+        return int(raw)
+
+    @app.post("/replies/add")
+    async def add_reply_template(request: Request) -> Response:
+        form = await read_form(request)
+        name, body = str(form.get("name") or ""), str(form.get("body") or "")
+
+        def work() -> tuple[str, str]:
+            with Store(config.catalog_db) as store:
+                try:
+                    replytemplates_mod.save_template(store, name, body)
+                except replytemplates_mod.TemplateError as exc:
+                    return "error", str(exc)
+            return "ok", "Template saved."
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/replies")
+
+    @app.post("/replies/{template_id}/edit")
+    async def edit_reply_template(request: Request, template_id: str) -> Response:
+        form = await read_form(request)
+        name, body = str(form.get("name") or ""), str(form.get("body") or "")
+        wanted = _template_id(template_id)
+
+        def work() -> tuple[str, str]:
+            if wanted is None:
+                return "error", "This template does not exist."
+            with Store(config.catalog_db) as store:
+                if all(t.id != wanted for t in store.list_reply_templates()):
+                    return "error", "This template does not exist."
+                try:
+                    replytemplates_mod.save_template(store, name, body, template_id=wanted)
+                except replytemplates_mod.TemplateError as exc:
+                    return "error", str(exc)
+            return "ok", "Template saved."
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/replies")
+
+    @app.post("/replies/{template_id}/delete")
+    async def delete_reply_template(request: Request, template_id: str) -> Response:
+        await read_form(request)
+        wanted = _template_id(template_id)
+
+        def work() -> tuple[str, str]:
+            if wanted is None:
+                return "error", "This template does not exist."
+            with Store(config.catalog_db) as store:
+                if not store.delete_reply_template(wanted):
+                    return "error", "This template does not exist."
+            return "ok", "Template deleted."
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/replies")
+
+    # --- affiliate links (G2) ---------------------------------------------------------------------
+    def affiliate_path() -> Path:
+        return config.home / "affiliate.json"
+
+    def load_affiliate_rules() -> "tuple[list[affiliate_mod.AffiliateRule], str]":
+        try:
+            return affiliate_mod.load_rules(affiliate_path()), ""
+        except affiliate_mod.AffiliateError as exc:
+            return [], str(exc)
+
+    def affiliate_preview_url(visibility: str) -> str:
+        return "/affiliate?" + urlencode([("visibility", visibility), ("preview", "1")])
+
+    @app.get("/affiliate")
+    def affiliate_page(request: Request) -> Response:
+        rules, rules_error = load_affiliate_rules()
+        params = request.query_params
+        visibility = params.get("visibility") if params.get("visibility") in ("public", "all") else "public"
+        preview = None
+        if "preview" in params and not rules_error:
+            with Store(config.catalog_db) as store:
+                plan = affiliate_mod.plan_affiliate(store, rules, visibility)
+                videos = {v.video_id: v for v in store.list_videos()}
+            preview = build_affiliate_preview(plan, videos)
+        return render(request, "affiliate.html", {
+            "active": "affiliate", "rules": rules, "rules_error": rules_error,
+            "preview": preview, "visibility": visibility})
+
+    @app.post("/affiliate/rules/add")
+    async def add_affiliate_rule(request: Request) -> Response:
+        form = await read_form(request)
+
+        def work() -> tuple[str, str]:
+            rules, error = load_affiliate_rules()
+            if error:
+                return "error", error
+            try:
+                rule = parse_affiliate_rule_form(form)
+            except affiliate_mod.AffiliateError as exc:
+                return "error", str(exc)
+            affiliate_mod.save_rules(affiliate_path(), [*rules, rule])
+            return "ok", "Rule saved."
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/affiliate")
+
+    @app.post("/affiliate/rules/delete")
+    async def delete_affiliate_rule(request: Request) -> Response:
+        form = await read_form(request)
+        raw = str(form.get("index") or "")
+
+        def work() -> tuple[str, str]:
+            rules, error = load_affiliate_rules()
+            if error:
+                return "error", error
+            if not raw.isascii() or not raw.isdigit() or int(raw) >= len(rules):
+                return "error", "This rule does not exist."
+            del rules[int(raw)]
+            affiliate_mod.save_rules(affiliate_path(), rules)
+            return "ok", "Rule deleted."
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/affiliate")
+
+    @app.post("/affiliate/apply")
+    async def affiliate_apply(request: Request) -> Response:
+        posted = await read_form(request)
+        visibility = str(posted.get("visibility") or "public")
+        ids = [str(i) for i in posted.getlist("video_id") if str(i)]
+        back = affiliate_preview_url(visibility if visibility in ("public", "all") else "public")
+
+        def work() -> tuple[str, str, str]:
+            if visibility not in ("public", "all"):
+                return "error", "Choose which videos to change: public only, or all.", "/affiliate"
+            if not ids:
+                return "error", "Tick at least one video to make drafts.", back
+            rules, error = load_affiliate_rules()
+            if error:
+                return "error", error, "/affiliate"
+            with Store(config.catalog_db) as store:
+                try:
+                    result = affiliate_mod.apply_affiliate(store, rules, ids, visibility=visibility)
+                except ValueError as exc:
+                    return "error", str(exc), back
+            message = affiliate_apply_message(result)
+            if result.drafted:
+                return "ok", message, "/changes"
+            return "info", message, back
+
+        kind, message, target = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other(target)
+
+    # --- custom checks (G7) -----------------------------------------------------------------------
+    def checks_data(proposal: dict[str, Any] | None = None) -> dict[str, Any]:
+        with Store(config.catalog_db) as store:
+            rules = store.list_custom_rules()
+            titles = {v.video_id: v.title for v in store.list_videos()}
+            results: dict[int, Any] = {}
+            results_error = ""
+            enabled = [rule for rule in rules if rule.enabled]
+            if enabled:
+                try:
+                    results = {found.rule.id: found
+                               for found in customchecks_mod.run_rules(store, enabled)}
+                except customchecks_mod.RuleError as exc:
+                    results_error = str(exc)
+        return {"active": "checks", "has_key": has_packaging_key(), "model": config.model,
+                "request_max": customchecks_mod.REQUEST_MAX, "proposal": proposal,
+                "checks": build_checks_view(rules, results, titles),
+                "results_error": results_error}
+
+    @app.get("/checks")
+    def checks_page(request: Request) -> Response:
+        return render(request, "checks.html", checks_data())
+
+    @app.post("/checks/ask")
+    async def ask_custom_check(request: Request) -> Response:
+        form = await read_form(request)
+        text = str(form.get("request") or "")
+        if not await run_in_threadpool(has_packaging_key):
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+            return see_other("/checks")
+        try:
+            draft = await run_in_threadpool(state.propose_rule, text)
+        except (customchecks_mod.RuleError, agent.ModelError) as exc:
+            flash(request, "error", str(exc))
+            return see_other("/checks")
+        total = draft.input_tokens + draft.output_tokens
+        cost = agent.estimate_cost(draft.model, draft.input_tokens, draft.cached_tokens,
+                                   draft.output_tokens)
+        proposal = {"explain": draft.explain, "model": draft.model,
+                    "tokens": f"{total:,}", "cost": format_cost(cost),
+                    "name": draft.explain, "request": text.strip(),
+                    "rule_json": json.dumps(draft.rule, ensure_ascii=False, sort_keys=True)}
+        return render(request, "checks.html",
+                      await run_in_threadpool(checks_data, proposal))
+
+    @app.post("/checks/save")
+    async def save_custom_check(request: Request) -> Response:
+        form = await read_form(request)
+        name_raw = str(form.get("name") or "").strip()
+        request_text = str(form.get("request") or "").strip()
+        rule_raw = str(form.get("rule") or "")
+
+        def work() -> tuple[str, str]:
+            try:
+                rule, explain = parse_rule_proposal(rule_raw, request_text)
+            except customchecks_mod.RuleError as exc:
+                return "error", str(exc)
+            with Store(config.catalog_db) as store:
+                store.add_custom_rule(name_raw or explain, request_text, rule)
+            return "ok", "Check saved."
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/checks")
+
+    @app.post("/checks/discard")
+    async def discard_custom_check(request: Request) -> Response:
+        await read_form(request)
+        return see_other("/checks")
+
+    def _custom_rule_id(raw: str) -> int | None:
+        if not raw.isascii() or not raw.isdigit() or len(raw) > MAX_ID_DIGITS:
+            return None
+        return int(raw)
+
+    @app.post("/checks/{rule_id}/toggle")
+    async def toggle_custom_check(request: Request, rule_id: str) -> Response:
+        form = await read_form(request)
+        wanted = _custom_rule_id(rule_id)
+        enabled = str(form.get("enabled") or "") in ("1", "true")
+
+        def work() -> tuple[str, str]:
+            if wanted is None:
+                return "error", "This check does not exist."
+            with Store(config.catalog_db) as store:
+                if all(rule.id != wanted for rule in store.list_custom_rules()):
+                    return "error", "This check does not exist."
+                store.set_custom_rule_enabled(wanted, enabled)
+            return "ok", "Check turned on." if enabled else "Check turned off."
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/checks")
+
+    @app.post("/checks/{rule_id}/delete")
+    async def delete_custom_check(request: Request, rule_id: str) -> Response:
+        await read_form(request)
+        wanted = _custom_rule_id(rule_id)
+
+        def work() -> tuple[str, str]:
+            if wanted is None:
+                return "error", "This check does not exist."
+            with Store(config.catalog_db) as store:
+                if not store.delete_custom_rule(wanted):
+                    return "error", "This check does not exist."
+            return "ok", "Check deleted."
+
+        kind, message = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other("/checks")
 
     # --- AI suggestions ---------------------------------------------------------------------
     @app.post("/videos/{video_id}/suggest")
@@ -2474,6 +2938,93 @@ def create_app(
         state.dismiss_adcheck_result()
         video_id = str(form.get("video_id") or "")
         return see_other(f"/videos/{quote(video_id)}#adcheck" if video_id else "/")
+
+    # --- comments on one video (G4, G5) ---------------------------------------------------------
+    @app.post("/videos/{video_id}/comments/fetch")
+    async def fetch_video_comments(request: Request, video_id: str) -> Response:
+        await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#comments")
+
+        def exists() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.get_video(video_id) is not None
+
+        if not await run_in_threadpool(exists):
+            return video_not_found(request)
+        creds = await run_in_threadpool(state.write_credentials)
+        if creds is None:
+            flash(request, "error", "Reading comments needs the YouTube permission that pushing uses. Nothing is posted.")
+        elif not state.start_comments(video_id, creds):
+            flash(request, "error", "The comments are already being read. Wait for it to finish.")
+        return back
+
+    @app.post("/comments/fetch/done")
+    async def dismiss_comments_fetch(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_comments_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#comments" if video_id else "/")
+
+    @app.post("/videos/{video_id}/comments/assist")
+    async def assist_video_comments(request: Request, video_id: str) -> Response:
+        await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#comments")
+
+        def lookup() -> tuple[bool, bool]:
+            with Store(config.catalog_db) as store:
+                if store.get_video(video_id) is None:
+                    return False, False
+                return True, bool(store.list_comments(video_id))
+
+        found, has_stored = await run_in_threadpool(lookup)
+        if not found:
+            return video_not_found(request)
+        if not await run_in_threadpool(has_packaging_key):
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif not has_stored:
+            flash(request, "error", "There are no comments to sort yet. Fetch the comments first.")
+        elif not state.start_assist(video_id):
+            flash(request, "error", "The comments are already being sorted. Wait for it to finish.")
+        return back
+
+    @app.post("/comments/assist/done")
+    async def dismiss_comments_assist(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_assist_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#comments" if video_id else "/")
+
+    async def set_reply_status(request: Request, video_id: str, reply_id: str, status: str) -> Response:
+        await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#comments")
+
+        def work() -> str:
+            with Store(config.catalog_db) as store:
+                if store.get_video(video_id) is None:
+                    return "missing_video"
+                if not reply_id.isascii() or not reply_id.isdigit() or len(reply_id) > MAX_ID_DIGITS:
+                    return "missing_reply"
+                wanted = int(reply_id)
+                found = next((r for r in store.list_comment_replies(video_id) if r.id == wanted), None)
+                if found is None:
+                    return "missing_reply"
+                store.set_comment_reply_status(found.id, status)
+                return "ok"
+
+        outcome = await run_in_threadpool(work)
+        if outcome == "missing_video":
+            return video_not_found(request)
+        if outcome == "missing_reply":
+            flash(request, "error", "This draft does not exist.")
+        return back
+
+    @app.post("/videos/{video_id}/comments/replies/{reply_id}/used")
+    async def mark_reply_used(request: Request, video_id: str, reply_id: str) -> Response:
+        return await set_reply_status(request, video_id, reply_id, "used")
+
+    @app.post("/videos/{video_id}/comments/replies/{reply_id}/dismiss")
+    async def dismiss_reply(request: Request, video_id: str, reply_id: str) -> Response:
+        return await set_reply_status(request, video_id, reply_id, "dismissed")
 
     # --- outliers: what the best videos share ------------------------------------------------------
     @app.post("/outliers/explain")

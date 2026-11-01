@@ -112,7 +112,7 @@ def test_the_privacy_sentence_names_baseten_or_metas_api(tmp_path: Path) -> None
     translate.delete_translator_key(ui.config)
     agent.save_api_key(ui.config, "FAKE-META-KEY")
     section = card(ui.client.get(f"/videos/{V1}").text)
-    assert "through Meta's Model API (Standard mode: Meta does not use them for training)" in section
+    assert "through Meta's Model API to be translated. Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products." in section
     assert "FAKE-META-KEY" not in section
 
 

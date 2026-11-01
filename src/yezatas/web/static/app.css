@@ -793,3 +793,27 @@ button.gbtn { cursor: pointer; }
 .ac-quote { margin: 0 0 6px; padding: 4px 0 4px 12px; border-left: 3px solid var(--line); overflow-wrap: anywhere; }
 .ac-why, .ac-fix { margin: 4px 0 0; overflow-wrap: anywhere; }
 .ac-notes { margin: 12px 0 8px; font-size: 13px; }
+
+/* Comments card on the video page */
+.cm-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; }
+.cm-item { margin: 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.cm-head { margin: 0 0 6px; overflow-wrap: anywhere; }
+.cm-text, .cm-draft-text, .cm-template-text { overflow-wrap: anywhere; white-space: pre-wrap; }
+.cm-draft { margin: 8px 0 0; padding: 8px 12px; border-left: 3px solid var(--line); }
+.cm-draft-label { margin: 0 0 4px; font-weight: 500; }
+.cm-pinned { margin: 12px 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; }
+.cm-template-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 8px; }
+.cm-template { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cm-template-name { font-weight: 500; }
+
+/* Replies, Affiliate and Checks pages */
+.rp-body, .ck-explain { overflow-wrap: anywhere; white-space: pre-wrap; }
+.rp-template { margin-bottom: 16px; }
+.aff-domains { overflow-wrap: anywhere; }
+.aff-issue { margin: 4px 0 0; overflow-wrap: anywhere; }
+.aff-table .col-num { text-align: right; }
+.ck-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; }
+.ck-item { margin: 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.ck-counts { margin: 6px 0 0; }
+.ck-failing { margin: 6px 0 0; }
+.ck-failing li { overflow-wrap: anywhere; }

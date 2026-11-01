@@ -123,7 +123,7 @@
         <label class="check-label lang"><input type="checkbox" name="targets" value="{{ t.code }}"{% if t.ticked %} checked{% endif %}> <span>{{ t.name }}</span></label>
         {% endfor %}
       </fieldset>
-      <p class="hint">The text of the transcript goes to {{ sb.model }}{% if sb.provider == 'baseten' %} on Baseten{% elif sb.provider == 'meta' %} through Meta's Model API (Standard mode: Meta does not use it for training){% endif %}. Translating a language again replaces its earlier result below.</p>
+      <p class="hint">The text of the transcript goes to {{ sb.model }}{% if sb.provider == 'baseten' %} on Baseten{% elif sb.provider == 'meta' %} through Meta's Model API. Meta handles it under your Meta account's terms; on free credits Meta may use it to improve its products{% endif %}. Translating a language again replaces its earlier result below.</p>
       <div class="actions"><button type="submit" class="button primary"{% if sb.busy or tj.running or not sb.has_translator %} disabled{% endif %}>Translate subtitles</button></div>
     </form>
     {% endif %}

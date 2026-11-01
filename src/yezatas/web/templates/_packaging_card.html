@@ -34,7 +34,7 @@
   {% if not pk.has_tools %}<p class="hint" id="packaging-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
   <form class="packaging-form" method="post" action="/videos/{{ video.video_id|urlencode }}/packaging">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <p class="hint">The thumbnail picture, the title and the start of the description go to Meta's Model API ({{ pk.vision }} and {{ pk.segmenter }}, Standard mode: Meta does not use them for training). Nothing is sent to YouTube.</p>
+    <p class="hint">The thumbnail picture, the title and the start of the description go to Meta's Model API ({{ pk.vision }} and {{ pk.segmenter }}). Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products. Nothing is sent to YouTube.</p>
     <div class="actions"><button type="submit" class="button primary"{% if cj.busy or not pk.has_tools %} disabled{% endif %}>Check packaging</button></div>
   </form>
   {% endif %}

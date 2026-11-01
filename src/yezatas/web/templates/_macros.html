@@ -7,6 +7,9 @@
 {%- elif name == 'content' -%}<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 14h8M8 17h5"/>
 {%- elif name == 'links' -%}<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>
 {%- elif name == 'outliers' -%}<path d="M4 20h16M7 20v-5M12 20V9M17 20v-8"/><path d="M9.5 5.5l2.5-2.5 2.5 2.5"/>
+{%- elif name == 'affiliate' -%}<path d="M4 4h8l8 8-8 8-8-8z"/><circle cx="8.5" cy="8.5" r="1.6"/>
+{%- elif name == 'checks' -%}<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M9 12l2 2 4-4M9 17.5h6"/>
+{%- elif name == 'replies' -%}<path d="M4 6.5h16M4 12h11M4 17.5h7"/><path d="M18.5 14.5l3 2-3 2z"/>
 {%- elif name == 'copilot' -%}<path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5h-8l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M8 10h8M8 13h5"/>
 {%- elif name == 'setup' -%}<path d="M4 7h9M17 7h3M4 17h3M11 17h9M4 12h3M11 12h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/><circle cx="9" cy="12" r="0.1"/>
 {%- elif name == 'search' -%}<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/>
@@ -110,7 +113,7 @@
 
 
 {# The privacy sentence that goes next to every button that sends a video to the model. #}
-{% macro privacy_note(model) %}This video's title, description, tags, stats and scorecard go to Meta's Model API ({{ model }}, Standard mode: Meta does not use them for training).{% endmacro %}
+{% macro privacy_note(model) %}This video's title, description, tags, stats and scorecard go to Meta's Model API ({{ model }}). Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products.{% endmacro %}
 
 {# What a run changed and what it left for the creator. `r` is a RunView. #}
 {% macro run_changes(r) %}

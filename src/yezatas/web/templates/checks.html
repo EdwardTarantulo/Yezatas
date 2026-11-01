@@ -1,0 +1,77 @@
+{% extends "shell.html" %}
+{% block title %}Custom checks - Yezatas{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Custom checks</h1>
+
+<p class="intro" id="checks-about">Describe a rule for your videos in plain words. The model only picks a rule from a fixed list; the check itself is code. Yezatas runs that code over your pulled catalog, and nothing is sent to YouTube.</p>
+
+<section class="card" id="checks-ask" aria-labelledby="h-checks-ask">
+  <h2 id="h-checks-ask">Ask for a check</h2>
+  {% if not has_key %}<p class="hint" id="checks-no-key">There is no Meta API key yet, so Yezatas cannot turn your words into a check. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  <form class="edit-form" method="post" action="/checks/ask" id="checks-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field">
+      <label for="ck-request">Your check</label>
+      <textarea id="ck-request" name="request" rows="3" maxlength="{{ request_max }}" data-count-limit="{{ request_max }}" data-count-unit="characters" data-count-for="ck-count" placeholder="For example: every public video links example.com"></textarea>
+      <p class="hint counter" id="ck-count" aria-live="off">Up to {{ request_max }} characters.</p>
+    </div>
+    <p class="hint">Your words go to Meta's Model API ({{ model }}). Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products. The model only picks a rule from the fixed list; Yezatas code checks every video. Nothing is sent to YouTube.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if not has_key %} disabled{% endif %}>Make the check</button></div>
+  </form>
+</section>
+
+{% if proposal %}
+<section class="card" id="checks-proposal" aria-labelledby="h-checks-proposal">
+  <h2 id="h-checks-proposal">Proposed check</h2>
+  <p id="ck-explain">{{ proposal.explain }}</p>
+  <p class="muted" id="ck-cost">{{ proposal.model }} &middot; {{ proposal.tokens }} tokens &middot; cost {{ proposal.cost }}</p>
+  <form class="edit-form" method="post" action="/checks/save">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="request" value="{{ proposal.request }}">
+    <input type="hidden" name="rule" value="{{ proposal.rule_json }}">
+    <div class="field">
+      <label for="ck-name">Name</label>
+      <input id="ck-name" name="name" value="{{ proposal.name }}">
+    </div>
+    <div class="actions"><button type="submit" class="button primary">Save this check</button></div>
+  </form>
+  <form method="post" action="/checks/discard">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="actions"><button type="submit" class="button secondary">Discard</button></div>
+  </form>
+</section>
+{% endif %}
+
+<section class="card" id="checks-list" aria-labelledby="h-checks-list">
+  <h2 id="h-checks-list">Your checks</h2>
+  {% if results_error %}<div class="flash error" role="alert" id="checks-error">{{ results_error }}</div>{% endif %}
+  {% if checks %}
+  <ul class="run-list">
+    {% for row in checks %}
+    <li id="check-{{ row.rule.id }}">
+      <p><strong>{{ row.rule.name }}</strong>{% if not row.rule.enabled %} <span class="pill">Off</span>{% endif %}</p>
+      <p>{{ row.explain }}</p>
+      {% if row.has_result %}
+      <p class="ck-counts">{{ row.passing }} passing, {{ row.not_applicable }} not applicable</p>
+      {% if row.failing or row.more %}
+      <ul class="ck-failing">
+        {% for f in row.failing %}<li><a href="/videos/{{ f.video_id|urlencode }}">{{ f.title }}</a></li>{% endfor %}
+      </ul>
+      {% if row.more %}<p class="muted">and {{ row.more }} more</p>{% endif %}
+      {% endif %}
+      {% elif not row.rule.enabled %}
+      <p class="muted">Turned off.</p>
+      {% endif %}
+      <div class="actions">
+        <form class="inline" method="post" action="/checks/{{ row.rule.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="enabled" value="{{ '0' if row.rule.enabled else '1' }}"><button type="submit" class="button secondary">{{ 'Turn off' if row.rule.enabled else 'Turn on' }}</button></form>
+        <form class="inline" method="post" action="/checks/{{ row.rule.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Delete</button></form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted" id="checks-empty">No checks yet. Ask for one above.</p>
+  {% endif %}
+</section>
+{% endblock %}

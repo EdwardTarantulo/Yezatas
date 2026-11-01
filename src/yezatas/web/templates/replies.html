@@ -1,0 +1,52 @@
+{% extends "shell.html" %}
+{% block title %}Replies - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Reply templates</h1>
+
+<p class="intro" id="replies-about">Write {name} where the name of the person who commented should go. Yezatas fills it with that person's name on the video page.</p>
+
+{% if templates %}
+{% for t in templates %}
+<section class="card" id="template-{{ t.id }}">
+  <h2>{{ t.name }}</h2>
+  <p>{{ t.body }}</p>
+  <form class="edit-form" method="post" action="/replies/{{ t.id }}/edit">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field">
+      <label for="edit-name-{{ t.id }}">Name</label>
+      <input type="text" id="edit-name-{{ t.id }}" name="name" value="{{ t.name }}" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="edit-body-{{ t.id }}">Reply text</label>
+      <textarea id="edit-body-{{ t.id }}" name="body" rows="4">{{ t.body }}</textarea>
+      <p class="hint">Write {name} where the name of the person who commented should go.</p>
+    </div>
+    <div class="actions"><button type="submit" class="button primary">Save</button></div>
+  </form>
+  <form method="post" action="/replies/{{ t.id }}/delete">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="actions"><button type="submit" class="button secondary">Delete</button></div>
+  </form>
+</section>
+{% endfor %}
+{% else %}
+<p class="muted" id="replies-empty">No templates yet. Add one below.</p>
+{% endif %}
+
+<section class="card" id="reply-add" aria-labelledby="h-reply-add">
+  <h2 id="h-reply-add">Add a template</h2>
+  <form class="edit-form" method="post" action="/replies/add">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field">
+      <label for="reply-name">Name</label>
+      <input type="text" id="reply-name" name="name" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="reply-body">Reply text</label>
+      <textarea id="reply-body" name="body" rows="4"></textarea>
+      <p class="hint">Write {name} where the name of the person who commented should go.</p>
+    </div>
+    <div class="actions"><button type="submit" class="button primary">Add template</button></div>
+  </form>
+</section>
+{% endblock %}

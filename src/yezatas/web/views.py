@@ -29,7 +29,12 @@ from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, ch
                    fix_priority, parse_chapters, parse_duration)
 from ..store import (AdCheck, AgentRun, CopilotProposal, CopilotTurn, DraftRow, OutlierReport,
                      PackagingReview, PushRecord, PushRun, SubtitleTranslationRecord,
-                     ThumbnailVariant, TranscriptRecord, TranslationRecord, Video)
+                     ThumbnailVariant, TranscriptRecord, TranslationRecord, Video, Comment,
+                     CommentReply, ReplyTemplate)
+from ..comments import CATEGORIES as COMMENT_CATEGORIES
+from .. import affiliate as affiliate_mod
+from .. import customchecks as customchecks_mod
+from .. import replytemplates as replytemplates_mod
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
 from ..validate import Issue, has_errors
@@ -2151,3 +2156,243 @@ def build_adcheck_view(check: AdCheck | None, current_hash: str | None,
         when=when(check.created_at), model=check.model,
         tokens=f"{tokens:,}" if tokens else "", cost=format_cost(cost) if tokens else "",
         advice=advice)
+
+
+# --- the comments card (G4, G5) -------------------------------------------------------------------
+COMMENTS_LIMIT = 100
+NOT_SORTED_KEY = "not_sorted"
+NOT_SORTED_LABEL = "Not sorted"
+
+
+@dataclass(frozen=True)
+class CommentChipView:
+    key: str
+    label: str
+    count: int
+    href: str
+    active: bool
+
+
+@dataclass(frozen=True)
+class CommentTemplateView:
+    name: str
+    text: str
+
+
+@dataclass(frozen=True)
+class CommentRowView:
+    comment: Comment
+    category_label: str
+    date_text: str
+    likes_text: str
+    draft: CommentReply | None
+    templates: tuple[CommentTemplateView, ...]
+    youtube_url: str
+
+
+@dataclass(frozen=True)
+class CommentsView:
+    video_id: str
+    chips: tuple[CommentChipView, ...]
+    pinned: CommentReply | None
+    rows: tuple[CommentRowView, ...]
+    total: int
+    filtered_total: int
+    filter_key: str
+
+
+def build_comments_view(video_id: str, comments: Sequence[Comment], replies: Sequence[CommentReply], templates: Sequence[ReplyTemplate], params: Mapping[str, str] | None = None) -> CommentsView:
+    ordered = sorted(comments, key=lambda c: (c.published_at or "", c.comment_id), reverse=True)
+    raw = str((params or {}).get("c") or "").strip()
+    if raw in ("", "all"):
+        selected = "all"
+    elif raw in COMMENT_CATEGORIES:
+        selected = raw
+    elif raw in (NOT_SORTED_KEY, "unsorted", "not-sorted"):
+        selected = NOT_SORTED_KEY
+    else:
+        selected = "all"
+    counts: dict[str, int] = {key: 0 for key in COMMENT_CATEGORIES}
+    not_sorted = 0
+    for comment in ordered:
+        if comment.category in counts:
+            counts[comment.category] += 1
+        else:
+            not_sorted += 1
+    base = f"/videos/{quote(video_id)}"
+    chips = [CommentChipView("all", "All", len(ordered), f"{base}#comments", selected == "all")]
+    chips += [CommentChipView(key, label, counts[key], f"{base}?c={key}#comments", selected == key)
+                for key, label in COMMENT_CATEGORIES.items()]
+    chips.append(CommentChipView(NOT_SORTED_KEY, NOT_SORTED_LABEL, not_sorted, f"{base}?c={NOT_SORTED_KEY}#comments", selected == NOT_SORTED_KEY))
+    if selected == "all":
+        filtered = ordered
+    elif selected == NOT_SORTED_KEY:
+        filtered = [c for c in ordered if c.category not in COMMENT_CATEGORIES]
+    else:
+        filtered = [c for c in ordered if c.category == selected]
+    open_replies = [r for r in replies if r.status == "open"]
+    pinned = next((r for r in open_replies if r.comment_id == ""), None)
+    drafts: dict[str, CommentReply] = {}
+    for reply in open_replies:
+        if reply.comment_id and reply.comment_id not in drafts:
+            drafts[reply.comment_id] = reply
+    rows: list[CommentRowView] = []
+    for comment in filtered[:COMMENTS_LIMIT]:
+        matched: tuple[CommentTemplateView, ...] = ()
+        if comment.category in ("question", "feedback"):
+            matched = tuple(
+                CommentTemplateView(t.name, replytemplates_mod.fill(t.body, comment.author))
+                for t in replytemplates_mod.suggest(comment.text, templates)[:3])
+        rows.append(CommentRowView(
+            comment=comment,
+            category_label=COMMENT_CATEGORIES.get(
+                comment.category,
+                NOT_SORTED_LABEL if not comment.category else comment.category),
+            date_text=format_date(comment.published_at),
+            likes_text=format_count(comment.like_count),
+            draft=drafts.get(comment.comment_id), templates=matched,
+            youtube_url="https://www.youtube.com/watch?"
+            + urlencode({"v": video_id, "lc": comment.comment_id})))
+    return CommentsView(video_id=video_id, chips=tuple(chips), pinned=pinned, rows=tuple(rows), total=len(ordered), filtered_total=len(filtered), filter_key=selected)
+
+
+# --- affiliate links (G2) -------------------------------------------------------------------------
+def _clean_rule_domain(domain: str) -> str:
+    """A rule domain as the core stores it: lowercase, no leading "www.", no trailing dot."""
+    key = domain.strip().lower()
+    if key.startswith("www."):
+        key = key[4:]
+    return key.rstrip(".")
+
+
+def parse_affiliate_rule_form(params: Mapping[str, Any]) -> "affiliate_mod.AffiliateRule":
+    """One rule from the add-rule form, or AffiliateError with a plain sentence."""
+    name = str(params.get("name") or "").strip()
+    if not name:
+        raise affiliate_mod.AffiliateError("Give the rule a name.")
+    domains: list[str] = []
+    for part in str(params.get("domains") or "").split(","):
+        cleaned = _clean_rule_domain(part)
+        if cleaned and cleaned not in domains:
+            domains.append(cleaned)
+    if not domains:
+        raise affiliate_mod.AffiliateError(
+            "List at least one domain, separated by commas, like example.com.")
+    param = str(params.get("param") or "").strip()
+    if not param:
+        raise affiliate_mod.AffiliateError("Give the rule a parameter, like tag.")
+    return affiliate_mod.AffiliateRule(name, tuple(domains), param,
+                                       str(params.get("value") or ""))
+
+
+@dataclass(frozen=True)
+class AffiliateRow:
+    video_id: str
+    title: str
+    tagged: int
+    issues: tuple[str, ...]
+    blocked: str
+
+
+@dataclass(frozen=True)
+class AffiliatePreview:
+    rows: tuple[AffiliateRow, ...]
+    ready: int
+    blocked: int
+    summary: str
+
+
+def build_affiliate_preview(plan: Sequence["affiliate_mod.AffiliateChange"],
+                            videos: Mapping[str, Video]) -> AffiliatePreview:
+    rows = tuple(AffiliateRow(
+        video_id=change.video_id,
+        title=(videos[change.video_id].title if change.video_id in videos
+               else change.video_id),
+        tagged=change.tagged,
+        issues=tuple(issue.message for issue in change.issues),
+        blocked=change.blocked) for change in plan)
+    blocked = sum(1 for row in rows if row.blocked)
+    ready = len(rows) - blocked
+    if not rows:
+        summary = "No video matches: nothing would change."
+    else:
+        summary = (f"{_videos(ready)} would change"
+                   + (f", {blocked} blocked" if blocked else "") + ".")
+    return AffiliatePreview(rows, ready, blocked, summary)
+
+
+def affiliate_apply_message(result: BulkResult) -> str:
+    """The flash text after Make drafts on the Affiliate page."""
+    text = (f"Drafts made for {_videos(result.drafted)}." if result.drafted
+            else "No drafts were made.")
+    if result.blocked:
+        text += f" {_videos(result.blocked)} blocked."
+    if result.not_in_plan:
+        text += f" {_videos(result.not_in_plan)} no longer matched."
+    if result.drafted:
+        text += (" Review them on the Changes page; nothing changes on YouTube until you "
+                 "approve and push.")
+    return text
+
+
+# --- custom checks (G7) -----------------------------------------------------------------------------
+FAILING_LIMIT = 20
+
+
+def explain_rule(rule: Any) -> str:
+    """What a stored rule means, in the core's own sentence (never model text)."""
+    data = rule.rule if not isinstance(rule, dict) else rule
+    if not isinstance(data, dict) or data.get("kind") not in customchecks_mod.KINDS:
+        return "This check cannot be run."
+    return customchecks_mod.explain(data)
+
+
+def parse_rule_proposal(raw: str, request: str) -> tuple[dict[str, Any], str]:
+    """(clean rule, explain) re-validated from the posted proposal, or RuleError.
+
+    The page never trusts the hidden fields: the rule is checked again in the
+    core, and the domain, text or number must still be in the creator's words,
+    exactly as `rule_from_request` checks them.
+    """
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        raise customchecks_mod.RuleError(
+            "That check cannot be saved. Ask for it again.") from None
+    if not isinstance(data, dict):
+        raise customchecks_mod.RuleError("That check cannot be saved. Ask for it again.")
+    return customchecks_mod.validate_rule(data, request)
+
+
+@dataclass(frozen=True)
+class CheckFailing:
+    video_id: str
+    title: str
+
+
+@dataclass(frozen=True)
+class CheckRowView:
+    rule: Any  # a store CustomRule
+    explain: str
+    has_result: bool
+    passing: int
+    not_applicable: int
+    failing: tuple[CheckFailing, ...]
+    more: int
+
+
+def build_checks_view(rules: Sequence[Any], results: Mapping[int, Any],
+                      titles: Mapping[str, str]) -> tuple[CheckRowView, ...]:
+    """Every stored rule with its result. `results` maps rule id -> RuleResult (enabled only)."""
+    rows: list[CheckRowView] = []
+    for rule in rules:
+        result = results.get(rule.id)
+        if result is None:
+            rows.append(CheckRowView(rule, explain_rule(rule), False, 0, 0, (), 0))
+            continue
+        failing = tuple(CheckFailing(video_id, titles.get(video_id) or video_id)
+                        for video_id in result.failing[:FAILING_LIMIT])
+        rows.append(CheckRowView(
+            rule, explain_rule(rule), True, result.passing, result.not_applicable,
+            failing, max(0, len(result.failing) - FAILING_LIMIT)))
+    return tuple(rows)

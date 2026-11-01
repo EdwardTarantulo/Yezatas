@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Mapping
 
 DEFAULT_DAILY_QUOTA = 10000
-# Standard mode: Meta does not train on the prompts. Contributor models (`*-contributor`) may, so
-# Yezatas never sends channel data to them.
+# Contributor models (`*-contributor`) are meant for training, so Yezatas never sends
+# channel data to them.
 DEFAULT_MODEL = "muse-spark-1.3"
 # Translations: Muse Spark Open through Baseten (OpenAI-compatible); checked by Muse Glimmer on
 # the creator's own machine through Ollama.

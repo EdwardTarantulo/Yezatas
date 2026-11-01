@@ -1,0 +1,124 @@
+{# The "Comments" card of the video page. `cm` is the fetch job state, `am` the sort job state, `cv` the stored comments. Drafts only: nothing is posted. #}
+<section class="card comments-card" id="comments" aria-labelledby="h-comments">
+  <h2 id="h-comments">Comments</h2>
+  <p class="muted">Yezatas reads the newest comments on this video. {{ am.model }} can sort them and draft replies. Every draft is yours to copy and post yourself. Nothing is posted to YouTube.</p>
+
+  {% if cm.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="comments-msg" role="status" aria-live="polite">{{ cm.message or 'Starting…' }}</span></p>
+  <p class="hint">You can leave this page. The comments show here.</p>
+  {% else %}
+  {% if cm.failed %}
+  <div class="flash error" role="alert" id="comments-failed">{{ cm.failed }}</div>
+  <form class="inline" method="post" action="/comments/fetch/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if cm.busy %}<p class="hint" id="comments-busy">Comments are being read for another video. Wait for it to finish.</p>{% endif %}
+  {% if not cm.has_write %}
+  <p id="comments-no-write">Reading comments needs the YouTube permission that pushing uses. Nothing is posted.</p>
+  <form method="post" action="/changes/allow-edits">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="actions"><button type="submit" class="button primary">Allow Yezatas to edit your videos</button></div>
+  </form>
+  {% else %}
+  <form method="post" action="/videos/{{ video.video_id|urlencode }}/comments/fetch">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="actions"><button type="submit" class="button primary"{% if cm.busy %} disabled{% endif %}>Fetch comments</button></div>
+  </form>
+  {% endif %}
+  {% endif %}
+
+  <h3 class="run-h">Sort and draft replies</h3>
+  <p class="muted">One sort sorts the stored comments and drafts replies for questions and feedback, plus a pinned comment draft. Code drops a draft that uses a link or a number that is not in the comment or the video text.</p>
+  {% if am.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span>
+    <span id="assist-msg" role="status" aria-live="polite">{{ am.message or 'Starting…' }}</span></p>
+  <p class="hint">You can leave this page. The drafts show here.</p>
+  {% else %}
+  {% if am.failed %}
+  <div class="flash error" role="alert" id="assist-failed">{{ am.failed }}</div>
+  <form class="inline" method="post" action="/comments/assist/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if am.result %}
+  {% set res = am.result %}
+  <div id="assist-result">
+    <h4 class="run-h">Last sort</h4>
+    <p id="assist-counts">{% for label, count in res.counts %}{{ label }}: {{ count }}{% if not loop.last %} &middot; {% endif %}{% endfor %}</p>
+    <p id="assist-drafts">{{ res.drafts }} draft{{ '' if res.drafts == 1 else 's' }} made.</p>
+    {% if res.notes %}
+    <ul class="ac-notes muted" id="assist-notes">
+      {% for note in res.notes %}<li>{{ note }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    <p class="muted" id="assist-cost">{{ res.model }} &middot; {{ res.tokens }} tokens &middot; cost {{ res.cost }}</p>
+    <form class="inline" method="post" action="/comments/assist/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  </div>
+  {% endif %}
+  {% if am.busy %}<p class="hint" id="assist-busy">Another video is being sorted. Wait for it to finish.</p>{% endif %}
+  {% if not am.has_key %}<p class="hint" id="assist-no-key">There is no Meta API key yet, so the sort cannot run. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  {% if not am.has_comments %}<p class="hint" id="assist-no-comments">There are no comments to sort yet. Fetch the comments first.</p>{% endif %}
+  <form method="post" action="/videos/{{ video.video_id|urlencode }}/comments/assist">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="hint">The video title, description and the stored comments go to Meta's Model API ({{ am.model }}). Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products. Nothing is sent to YouTube.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if am.busy or not am.has_key or not am.has_comments %} disabled{% endif %}>Sort and draft replies</button></div>
+  </form>
+  {% endif %}
+
+  {% if cv.pinned %}
+  <div class="cm-pinned" id="pinned-draft">
+    <h3 class="run-h">Pinned comment draft</h3>
+    <p class="cm-draft-text" id="pinned-text">{{ cv.pinned.text }}</p>
+    <div class="actions">
+      <button type="button" class="button secondary" data-copy-target="pinned-text" aria-label="Copy pinned comment draft">Copy</button>
+      <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ cv.pinned.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Mark used</button></form>
+      <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ cv.pinned.id }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if cv.total %}
+  <div class="chip-row" role="group" aria-label="Filter comments">
+    {% for chip in cv.chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }} ({{ chip.count }})</a>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if cv.rows %}
+  <ul class="cm-list" id="comments-list">
+    {% for row in cv.rows %}
+    {% set row_no = loop.index %}
+    <li class="cm-item" id="comment-{{ row.comment.comment_id }}">
+      <p class="cm-head"><strong>{{ row.comment.author }}</strong> <span class="muted">{{ row.date_text }} &middot; {{ row.likes_text }} likes &middot; {{ row.category_label }}</span> <a href="{{ row.youtube_url }}" target="_blank" rel="noopener noreferrer">Open on YouTube</a></p>
+      <p class="cm-text">{{ row.comment.text }}</p>
+      {% if row.draft %}
+      <div class="cm-draft" id="draft-{{ row.draft.id }}">
+        <p class="cm-draft-label">Draft reply</p>
+        <p class="cm-draft-text" id="draft-text-{{ row.draft.id }}">{{ row.draft.text }}</p>
+        <div class="actions">
+          <button type="button" class="button secondary" data-copy-target="draft-text-{{ row.draft.id }}" aria-label="Copy draft reply">Copy</button>
+          <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Mark used</button></form>
+          <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+        </div>
+      </div>
+      {% endif %}
+      {% if row.templates %}
+      <div class="cm-templates">
+        <p class="hint">Reply templates</p>
+        <ul class="cm-template-list">
+          {% for t in row.templates %}
+          <li class="cm-template">
+            <span class="cm-template-name">{{ t.name }}</span>
+            <span class="cm-template-text" id="template-text-{{ row_no }}-{{ loop.index }}">{{ t.text }}</span>
+            <button type="button" class="button secondary" data-copy-target="template-text-{{ row_no }}-{{ loop.index }}" aria-label="Copy template reply">Copy</button>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% elif cv.total %}
+  <p class="muted" id="comments-none-match">No comments match this filter.</p>
+  {% else %}
+  <p class="muted" id="comments-empty">No comments yet. Fetch the comments to see them here.</p>
+  {% endif %}
+</section>

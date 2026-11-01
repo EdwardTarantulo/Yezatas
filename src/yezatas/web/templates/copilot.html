@@ -114,7 +114,7 @@
       <textarea id="cp-question" name="question" rows="3" maxlength="{{ limit }}" data-count-limit="{{ limit }}" data-count-unit="characters" data-count-for="cp-count" placeholder="For example: which videos mention a topic, or write a better title for V12"></textarea>
       <p class="hint counter" id="cp-count" aria-live="off">Up to {{ limit }} characters.</p>
     </div>
-    <p class="hint">Your question, your video titles and stats, and the parts of descriptions and transcripts it asks to read go to Meta's Model API ({{ model }}, Standard mode: Meta does not use them for training). Nothing is sent to YouTube.</p>
+    <p class="hint">Your question, your video titles and stats, and the parts of descriptions and transcripts it asks to read go to Meta's Model API ({{ model }}). Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products. Nothing is sent to YouTube.</p>
     <div class="actions"><button type="submit" class="button primary" id="copilot-ask"{% if not has_key %} disabled{% endif %}>Ask</button></div>
   </form>
   {% endif %}

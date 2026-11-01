@@ -181,14 +181,14 @@ def test_an_empty_chat_shows_the_intro_the_starters_and_the_safety_line(tmp_path
     assert "Numbers come from Yezatas, not the model" in html
     assert "nothing reaches YouTube until you approve and push it on the Changes page" in html
     assert 'id="copilot-new"' not in html  # nothing to start over yet
-    assert "Standard mode" in html and "Nothing is sent to YouTube." in html
+    assert "Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products." in html and "Nothing is sent to YouTube." in html
 
 
-def test_the_nav_has_a_copilot_item_after_outliers(tmp_path: Path) -> None:
+def test_the_nav_has_a_copilot_item_after_checks(tmp_path: Path) -> None:
     ui, _ = make_cp_ui(tmp_path)
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/copilot") == items.index("/outliers") + 1
+    assert items.index("/copilot") == items.index("/checks") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/copilot"]
 
 

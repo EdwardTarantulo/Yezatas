@@ -1,0 +1,125 @@
+{% extends "shell.html" %}
+{% block title %}Affiliate links - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Affiliate links</h1>
+<p class="intro" id="affiliate-about">No program is built in: these rules are your own. Each rule adds your tracking value to links on the domains you list. Only drafts are made. Nothing reaches YouTube until you approve and push on the Changes page.</p>
+
+<section class="card" id="affiliate-rules" aria-labelledby="h-affiliate-rules">
+  <h2 id="h-affiliate-rules">Your rules</h2>
+  {% if rules_error %}<div class="flash error" role="alert" id="affiliate-error">{{ rules_error }}</div>{% endif %}
+  {% if rules %}
+  <table class="vtable">
+    <caption class="visually-hidden">Your affiliate rules</caption>
+    <thead>
+      <tr>
+        <th scope="col">Rule</th>
+        <th scope="col">Domains</th>
+        <th scope="col">Parameter</th>
+        <th scope="col">Value</th>
+        <th scope="col"><span class="visually-hidden">Action</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rule in rules %}
+      <tr id="rule-{{ loop.index0 }}">
+        <td>{{ rule.name }}</td>
+        <td>{{ rule.domains|join(', ') }}</td>
+        <td>{{ rule.param }}</td>
+        <td>{{ rule.value }}</td>
+        <td>
+          <form method="post" action="/affiliate/rules/delete">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="index" value="{{ loop.index0 }}">
+            <button type="submit" class="button secondary">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif not rules_error %}
+  <p class="muted" id="affiliate-no-rules">No rules yet. Add one below.</p>
+  {% endif %}
+</section>
+
+{% if not rules_error %}
+<section class="card" id="affiliate-add" aria-labelledby="h-affiliate-add">
+  <h2 id="h-affiliate-add">Add a rule</h2>
+  <form class="edit-form" method="post" action="/affiliate/rules/add">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field">
+      <label for="aff-name">Name</label>
+      <input type="text" id="aff-name" name="name" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="aff-domains">Domains</label>
+      <input type="text" id="aff-domains" name="domains" autocomplete="off">
+      <p class="hint">Separate domains with commas, like example.com, shop.example.com.</p>
+    </div>
+    <div class="field">
+      <label for="aff-param">Parameter</label>
+      <input type="text" id="aff-param" name="param" autocomplete="off">
+      <p class="hint">For example: tag</p>
+    </div>
+    <div class="field">
+      <label for="aff-value">Value</label>
+      <input type="text" id="aff-value" name="value" autocomplete="off">
+    </div>
+    <div class="actions">
+      <button type="submit" class="button primary">Add rule</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="card" id="affiliate-preview-card" aria-labelledby="h-affiliate-preview">
+  <h2 id="h-affiliate-preview">Preview</h2>
+  <form method="get" action="/affiliate">
+    <div class="field">
+      <label class="check-label"><input type="radio" name="visibility" value="public"{% if visibility != 'all' %} checked{% endif %}> Public only</label>
+      <label class="check-label"><input type="radio" name="visibility" value="all"{% if visibility == 'all' %} checked{% endif %}> All (also unlisted and private)</label>
+    </div>
+    <div class="actions">
+      <button type="submit" class="button primary" name="preview" value="1">Preview</button>
+    </div>
+  </form>
+  <p class="hint">Preview writes nothing.</p>
+
+  {% if preview is not none %}
+  <section id="affiliate-preview" aria-label="Preview">
+    <p id="affiliate-summary">{{ preview.summary }}</p>
+    {% if preview.rows %}
+    <form method="post" action="/affiliate/apply" id="affiliate-apply">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="visibility" value="{{ visibility }}">
+      <table class="vtable">
+        <thead>
+          <tr>
+            <th scope="col"><span class="visually-hidden">Include</span></th>
+            <th scope="col">Video</th>
+            <th class="col-num" scope="col">Links tagged</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview.rows %}
+          <tr id="aff-{{ row.video_id }}">
+            <td><input type="checkbox" name="video_id" value="{{ row.video_id }}" aria-label="Include {{ row.title }}"{% if row.blocked %} disabled{% else %} checked{% endif %}></td>
+            <td><a href="/videos/{{ row.video_id|urlencode }}">{{ row.title }}</a>
+              {% if row.blocked %}<p><strong>Blocked:</strong> {{ row.blocked }}</p>{% endif %}
+              {% for issue in row.issues %}<p class="aff-issue">{{ issue }}</p>{% endfor %}
+            </td>
+            <td class="col-num">{{ row.tagged }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="actions">
+        <button type="submit" class="button primary"{% if not preview.ready %} disabled{% endif %}>Make drafts</button>
+        <span class="hint">Only the ticked videos get a draft. <a href="/changes">Review drafts on Changes</a></span>
+      </div>
+    </form>
+    {% endif %}
+  </section>
+  {% endif %}
+</section>
+{% endblock %}
