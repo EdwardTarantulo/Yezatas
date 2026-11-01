@@ -13,7 +13,8 @@ from yezatas import customchecks
 from yezatas.agent import ModelError, ModelReply
 from yezatas.customchecks import (FIELDS, KINDS, MAX_TAG_COUNT, MAX_TITLE_CHARS, REQUEST_MAX,
                                   RULE_FORMAT, SYSTEM_PROMPT, VISIBILITIES, RuleDraft, RuleError,
-                                  RuleResult, evaluate, rule_from_request, run_rules)
+                                  RuleResult, evaluate, explain, rule_from_request, run_rules,
+                                  validate_rule)
 from yezatas.store import CustomRule, Store, Video
 
 NOW = datetime(2026, 6, 2, 9, 0, tzinfo=timezone.utc)
@@ -430,3 +431,16 @@ def test_values_match_the_words_ignoring_case() -> None:
                  "every description mentions my NEWSLETTER")
     assert made.rule["text"] == "Newsletter"
     assert draft(model_answer(kind="tags_min", count=5), "at least 5 tags").rule["count"] == 5
+
+
+def test_validate_rule_refuses_a_value_not_in_the_words() -> None:
+    data = model_answer(kind="must_link", domain="other.example")
+    with pytest.raises(RuleError, match="not in your words") as caught:
+        validate_rule(data, "link my newsletter")
+    assert "other.example" in str(caught.value)
+
+
+def test_validate_rule_returns_the_rule_and_its_explanation() -> None:
+    rule, text = validate_rule(model_answer(), "every video links example.com")
+    assert rule == {"kind": "must_link", "domain": "example.com", "visibility": "public"}
+    assert text == explain(rule) == "Every public video's description links example.com."

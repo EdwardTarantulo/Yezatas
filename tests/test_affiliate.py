@@ -309,3 +309,20 @@ def test_tagging_keeps_other_parameters_as_written() -> None:
     rule = AffiliateRule("Shop", ("example.com",), "tag", "partner123")
     url = "https://example.com/p?q=a%20b&x=1+2"
     assert tag_url(url, [rule]) == "https://example.com/p?q=a%20b&x=1+2&tag=partner123"
+
+
+def test_plan_drops_link_removed_for_tagged_links(store: Store) -> None:
+    fill(store, video(1, "Shop https://shop.example.com/a"))
+    change = plan_affiliate(store, [RULE])[0]
+    assert change.tagged == 1
+    assert change.blocked == ""
+    assert [i for i in change.issues if i.code == "link_removed"] == []
+
+
+def test_plan_keeps_other_issues_for_tagged_links(store: Store) -> None:
+    fill(store, video(1, "Bad < link https://shop.example.com/a"))
+    change = plan_affiliate(store, [RULE])[0]
+    assert change.tagged == 1
+    assert [i for i in change.issues if i.code == "link_removed"] == []
+    assert any(i.code == "description_angle_brackets" for i in change.issues)
+    assert "< or >" in change.blocked

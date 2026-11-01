@@ -163,6 +163,36 @@ def _explain(rule: dict[str, Any]) -> str:
     return f"Every {scope}video of 4 minutes or more has chapters."
 
 
+def validate_rule(data: object, request: str) -> tuple[dict[str, Any], str]:
+    """Check one decoded rule object and return (clean rule, explain sentence)."""
+    if not isinstance(data, dict):
+        raise RuleError("The model chose a check that is not available. Try describing it another way.")
+    kind = data.get("kind")
+    if kind not in KINDS:
+        raise RuleError("The model chose a check that is not available. Try describing it another way.")
+    visibility = data.get("visibility")
+    if visibility not in VISIBILITIES:
+        raise RuleError("The rule must say whether it covers public videos or all videos.")
+    rule: dict[str, Any] = {"kind": kind}
+    if kind == "must_link":
+        rule["domain"] = _clean_domain(data.get("domain"))
+    elif kind in ("must_contain", "must_not_contain"):
+        text, field = _clean_text_field(data)
+        rule["text"], rule["field"] = text, field
+    elif kind == "title_max":
+        rule["chars"] = _clean_whole(data.get("chars"), "title limit", MAX_TITLE_CHARS)
+    elif kind == "tags_min":
+        rule["count"] = _clean_whole(data.get("count"), "tag count", MAX_TAG_COUNT)
+    rule["visibility"] = visibility
+    _check_from_request(rule, request)
+    return rule, _explain(rule)
+
+
+def explain(rule: dict[str, Any]) -> str:
+    """What the rule means, in one plain sentence written by code."""
+    return _explain(rule)
+
+
 def rule_from_request(client: ModelClient, request: str) -> RuleDraft:
     """Turn the creator's words into one fixed rule, checked by code; raises RuleError.
 
@@ -183,25 +213,8 @@ def rule_from_request(client: ModelClient, request: str) -> RuleDraft:
         data = _parse_object(tally.complete(client, messages, RULE_FORMAT).content)
     except (ModelError, _BadAnswer) as exc:
         raise RuleError(str(exc)) from exc
-    kind = data.get("kind")
-    if kind not in KINDS:
-        raise RuleError("The model chose a check that is not available. Try describing it another way.")
-    visibility = data.get("visibility")
-    if visibility not in VISIBILITIES:
-        raise RuleError("The rule must say whether it covers public videos or all videos.")
-    rule: dict[str, Any] = {"kind": kind}
-    if kind == "must_link":
-        rule["domain"] = _clean_domain(data.get("domain"))
-    elif kind in ("must_contain", "must_not_contain"):
-        text, field = _clean_text_field(data)
-        rule["text"], rule["field"] = text, field
-    elif kind == "title_max":
-        rule["chars"] = _clean_whole(data.get("chars"), "title limit", MAX_TITLE_CHARS)
-    elif kind == "tags_min":
-        rule["count"] = _clean_whole(data.get("count"), "tag count", MAX_TAG_COUNT)
-    rule["visibility"] = visibility
-    _check_from_request(rule, request)
-    return RuleDraft(rule=rule, explain=_explain(rule), model=client.model,
+    rule, text = validate_rule(data, request)
+    return RuleDraft(rule=rule, explain=text, model=client.model,
                      input_tokens=tally.input, cached_tokens=tally.cached,
                      output_tokens=tally.output)
 

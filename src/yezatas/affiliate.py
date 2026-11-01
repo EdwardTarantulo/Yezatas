@@ -205,11 +205,14 @@ def tag_url(url: str, rules: Sequence[AffiliateRule]) -> str:
     return rebuilt
 
 
-def _tagged_description(description: str, rules: Sequence[AffiliateRule]) -> tuple[str, int]:
-    """The description with its links tagged, and how many links changed."""
+def _tagged_description(
+    description: str, rules: Sequence[AffiliateRule]
+) -> tuple[str, int, frozenset[str]]:
+    """The tagged description, the count changed, and the original URLs changed."""
     if not description or not rules:
-        return description, 0
+        return description, 0, frozenset()
     tagged = 0
+    changed: set[str] = set()
 
     def replace(match: re.Match[str]) -> str:
         nonlocal tagged
@@ -222,9 +225,10 @@ def _tagged_description(description: str, rules: Sequence[AffiliateRule]) -> tup
         if new_core == core:
             return whole
         tagged += 1
+        changed.add(core)
         return new_core + trailing
 
-    return _URL.sub(replace, description), tagged
+    return _URL.sub(replace, description), tagged, frozenset(changed)
 
 
 def plan_affiliate(store: Store, rules: Sequence[AffiliateRule], visibility: str = "public") -> list[AffiliateChange]:
@@ -235,13 +239,21 @@ def plan_affiliate(store: Store, rules: Sequence[AffiliateRule], visibility: str
     for video in store.list_videos():
         if visibility == "public" and video.privacy_status != "public":
             continue
-        description, tagged = _tagged_description(video.description, rules)
+        description, tagged, changed = _tagged_description(video.description, rules)
         if tagged == 0 or description == video.description:
             continue
         issues = tuple(validate_draft(
             Draft(video.title, description, tuple(video.tags)),
             original=Draft(video.title, video.description, tuple(video.tags)),
         ))
+        tagged_messages = {
+            f'The link "{url}" was in the original description but is missing now.'
+            for url in changed
+        }
+        issues = tuple(
+            issue for issue in issues
+            if not (issue.code == "link_removed" and issue.message in tagged_messages)
+        )
         if store.get_draft(video.video_id) is not None:
             blocked = BLOCKED_HAS_DRAFT
         elif has_errors(issues):
