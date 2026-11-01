@@ -407,7 +407,7 @@ def map_thumb_error(exc: BaseException) -> tuple[str, str]:
                 "thumb",
                 "YouTube refused to set this thumbnail. Custom thumbnails need a verified channel "
                 "(youtube.com/verify), and YouTube can refuse them for some videos. Nothing was "
-                "changed; the old thumbnail is saved in History.",
+                "changed.",
             )
         if reason == "uploadRateLimitExceeded":
             return (
@@ -2385,7 +2385,7 @@ def create_app(
         form = await read_form(request)
         state.dismiss_thumb_result()
         back = str(form.get("back") or "")
-        if back.startswith("/") and not back.startswith("//"):
+        if back.startswith("/") and not back.startswith(("//", "/\\")):
             return see_other(back)
         return see_other("/history#thumbnails")
 

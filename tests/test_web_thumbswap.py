@@ -197,6 +197,7 @@ def test_forbidden_error(tmp_path: Path) -> None:
     html = ui.client.get(f"/videos/{V}/packaging/variants/{vid}/replace").text
     assert 'id="thumb-failed"' in html
     assert "verified channel" in html
+    assert "saved in History" not in html
     assert thumbswap_mod.load_swaps(ui.web.images_dir) == []
 
 
@@ -286,3 +287,21 @@ def test_map_thumb_error() -> None:
     k4, m4 = map_thumb_error(e4)
     assert k4 == "thumb"
     assert "too many thumbnails" in m4
+
+
+def test_dismiss_only_goes_back_to_local_pages(tmp_path: Path) -> None:
+    ui, writer = make(tmp_path)
+    for bad in ("//example.com/x", "/\\example.com/x", "https://example.com/x", ""):
+        form = {"csrf": ui.csrf(), "back": bad}
+        r = ui.client.post("/thumbnails/done", data=form, follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"].endswith("/history#thumbnails")
+    r = ui.client.post("/thumbnails/done", data={"csrf": ui.csrf(), "back": "/videos"}, follow_redirects=False)
+    assert r.headers["location"].endswith("/videos")
+
+
+def test_confirm_page_quota_has_separators(tmp_path: Path) -> None:
+    ui, writer = make(tmp_path)
+    V, vid = seed_variant(ui)
+    html = ui.client.get(f"/videos/{V}/packaging/variants/{vid}/replace").text
+    assert "units left today (budget 10,000)" in html

@@ -53,7 +53,7 @@
     <li>Yezatas reads the video's live thumbnail and saves a copy in History, then uploads the new one (YouTube's <code>thumbnails.set</code>).</li>
     <li>The change is live at once; History can put the old one back.</li>
   </ul>
-  <p>This uses {{ units }} of {{ plan.remaining }} units left today (budget {{ plan.budget }}).</p>
+  <p>This uses {{ units|num }} of {{ plan.remaining|num }} units left today (budget {{ plan.budget|num }}).</p>
   {% if not plan.fits %}
   <p class="issue warning">Not enough quota left today. It resets at midnight Pacific time.</p>
   {% elif not has_write %}
