@@ -33,6 +33,7 @@ from ..store import (AdCheck, AgentRun, CopilotProposal, CopilotTurn, DraftRow, 
                      CommentReply, ReplyTemplate)
 from ..comments import CATEGORIES as COMMENT_CATEGORIES
 from .. import affiliate as affiliate_mod
+from .. import bulkask as bulkask_mod
 from .. import customchecks as customchecks_mod
 from .. import replytemplates as replytemplates_mod
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
@@ -1683,6 +1684,23 @@ def bulk_apply_message(result: BulkResult) -> str:
         text += (" Review them on the Changes page; nothing changes on YouTube until you "
                  "approve and push.")
     return text
+
+
+# --- bulk edit by asking: revalidating the posted plan ---------------------------------------
+def parse_ask_proposal(raw: str, request: str, digest: bulkask_mod.Digest) -> bulkask_mod.AskPlan:
+    """A plan re-validated from the posted proposal, or AskError.
+
+    The page never trusts the hidden fields: the plan is checked again in the
+    core with a fresh digest, and every written text must still be in the
+    creator's words, exactly as `propose` checks them.
+    """
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        raise bulkask_mod.AskError("That plan cannot be used. Ask for it again.") from None
+    if not isinstance(data, dict):
+        raise bulkask_mod.AskError("That plan cannot be used. Ask for it again.")
+    return bulkask_mod.validate_plan(data, request, digest)
 
 
 # --- the copilot chat -----------------------------------------------------------------------------

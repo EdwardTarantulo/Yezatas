@@ -40,6 +40,7 @@ from .. import translate
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import Config, ensure_dirs
 from .. import affiliate as affiliate_mod
+from .. import bulkask as bulkask_mod
 from .. import comments as comments_mod
 from .. import customchecks as customchecks_mod
 from .. import replytemplates as replytemplates_mod
@@ -63,7 +64,7 @@ from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBat
                     build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
                     chapters_blocker, dashboard_model, format_cost, format_count, format_date,
                     group_checks, history_groups, lang_name, links_check_line, make_entries,
-                    outlier_count, outlier_line, parse_affiliate_rule_form, parse_bulk_form,
+                    outlier_count, outlier_line, parse_affiliate_rule_form, parse_ask_proposal, parse_bulk_form,
                     parse_rule_proposal, plan_lines, preview_card,
                     pull_moment, push_results, run_restore_summary, run_view, stops_batch,
                     thumb_url, top_other_videos)
@@ -169,6 +170,8 @@ CommentReaderFactory = Callable[[Any], CommentReader]
 CommentsAssistFn = Callable[[Store, str, datetime, Report], "comments_mod.AssistResult"]
 # (the creator's words) -> the proposed fixed rule
 RuleMakerFn = Callable[[str], "customchecks_mod.RuleDraft"]
+# (store, the creator's words) -> the proposed bulk plan
+BulkAskerFn = Callable[[Store, str], "bulkask_mod.AskProposal"]
 
 
 def default_translate_tools(config: Config) -> "tuple[translate.Translator | None, translate.Verifier]":
@@ -397,6 +400,21 @@ def make_default_rule_maker(config: Config) -> RuleMakerFn:
     return run
 
 
+def make_default_bulk_asker(config: Config) -> BulkAskerFn:
+    """The real bulk asker: Muse Spark through Meta's Model API, one client per ask."""
+
+    def run(store: Store, request: str) -> "bulkask_mod.AskProposal":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        return bulkask_mod.propose(client, store, request)
+
+    return run
+
+
 def make_default_transcribe(config: Config) -> TranscribeFn:
     """The real transcribe function: Muse Voice Transcribe through Meta's Model API."""
 
@@ -518,7 +536,7 @@ class WebState:
         adcheck_fn: AdcheckFn | None = None,
         comment_reader: CommentReaderFactory | None = None,
         comments_assist: CommentsAssistFn | None = None,
-        rule_maker: RuleMakerFn | None = None,
+        rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -536,6 +554,7 @@ class WebState:
         self._comment_reader_factory = comment_reader
         self._comments_assist = comments_assist or make_default_comments_assist(config)
         self._rule_maker = rule_maker or make_default_rule_maker(config)
+        self._bulk_asker = bulk_asker or make_default_bulk_asker(config)
         self._link_fetch = link_fetch  # None: the real visit, links_mod.fetch_url
         self.packaging_tools = packaging_tools
         # Whether a Meta key exists, asked on page loads without building any client. None: an
@@ -1200,6 +1219,10 @@ class WebState:
         """Turn the creator's words into a proposed rule. Short: callers use a worker thread."""
         return self._rule_maker(request)
 
+    def propose_bulk(self, store: Store, request: str) -> "bulkask_mod.AskProposal":
+        """Turn the creator's words into a proposed bulk plan. Short: callers use a worker thread."""
+        return self._bulk_asker(store, request)
+
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -1240,7 +1263,7 @@ def create_app(
     adcheck: AdcheckFn | None = None,
     comment_reader: CommentReaderFactory | None = None,
     comments_assist: CommentsAssistFn | None = None,
-    rule_maker: RuleMakerFn | None = None,
+    rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1254,7 +1277,7 @@ def create_app(
                      packaging_tools or packaging_mod.packaging_tools_from_config,
                      packaging_fetch or packaging_mod.fetch_thumbnail,
                      packaging_key or (None if packaging_tools else has_meta_key), copilot,
-                     link_fetch, adcheck, comment_reader, comments_assist, rule_maker)
+                     link_fetch, adcheck, comment_reader, comments_assist, rule_maker, bulk_asker)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -2196,6 +2219,16 @@ def create_app(
         return see_other(target)
 
     # --- bulk edit (no model: drafts only) -----------------------------------------------------
+    def bulk_data(form: Any, error: str, preview: Any, proposal: Any = None,
+                  ask_preview: bool = False, ask_request: str = "",
+                  ask_plan_json: str = "") -> dict[str, Any]:
+        return {"active": "changes", "form": form, "error": error, "preview": preview,
+                "hidden": form.pairs(), "max_bulk": bulk.MAX_BULK,
+                "has_key": has_packaging_key(), "model": config.model,
+                "request_max": bulkask_mod.REQUEST_MAX, "ask_proposal": proposal,
+                "ask_preview": ask_preview, "ask_request": ask_request,
+                "ask_plan_json": ask_plan_json}
+
     @app.get("/bulk")
     def bulk_page(request: Request) -> Response:
         params = request.query_params
@@ -2212,9 +2245,9 @@ def create_app(
                 videos = {c.video_id: store.get_video(c.video_id) for c in plan}
             if not error:
                 preview = build_bulk_preview(plan, {k: v for k, v in videos.items() if v})
-        return render(request, "bulk.html", {
-            "active": "changes", "form": form, "error": error, "preview": preview,
-            "hidden": form.pairs(), "max_bulk": bulk.MAX_BULK})
+        return render(request, "bulk.html", bulk_data(form, error, preview))
+
+
 
     @app.post("/bulk/apply")
     async def bulk_apply(request: Request) -> Response:
@@ -2238,6 +2271,98 @@ def create_app(
         kind, message, target = await run_in_threadpool(work)
         flash(request, kind, message)
         return see_other(target)
+
+    @app.post("/bulk/ask")
+    async def bulk_ask(request: Request) -> Response:
+        posted = await read_form(request)
+        text = str(posted.get("request") or "")
+        if not await run_in_threadpool(has_packaging_key):
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+            return see_other("/bulk")
+
+        def work() -> "bulkask_mod.AskProposal":
+            with Store(config.catalog_db) as store:
+                return state.propose_bulk(store, text)
+
+        try:
+            proposal_core = await run_in_threadpool(work)
+        except (bulkask_mod.AskError, agent.ModelError) as exc:
+            flash(request, "error", str(exc))
+            return see_other("/bulk")
+        plan_json = ""
+        if proposal_core.plan is not None:
+            plan_json = json.dumps(bulkask_mod.plan_to_dict(proposal_core.plan),
+                                   ensure_ascii=False, sort_keys=True)
+        total = proposal_core.input_tokens + proposal_core.output_tokens
+        cost = agent.estimate_cost(proposal_core.model, proposal_core.input_tokens,
+                                   proposal_core.cached_tokens, proposal_core.output_tokens)
+        proposal = {"explain": proposal_core.explain, "cannot": proposal_core.cannot,
+                    "model": proposal_core.model, "tokens": f"{total:,}",
+                    "cost": format_cost(cost), "request": text.strip(),
+                    "plan_json": plan_json}
+        return render(request, "bulk.html",
+                      bulk_data(parse_bulk_form(posted, submitted=False), "", None,
+                                proposal=proposal, ask_request=text.strip(),
+                                ask_plan_json=plan_json))
+
+    @app.post("/bulk/ask/preview")
+    async def bulk_ask_preview(request: Request) -> Response:
+        posted = await read_form(request)
+        req_text = str(posted.get("request") or "")
+        plan_raw = str(posted.get("plan") or posted.get("plan_json") or "")
+
+        def work() -> tuple[Any, str]:
+            with Store(config.catalog_db) as store:
+                digest = bulkask_mod.catalog_digest(store)
+                plan = parse_ask_proposal(plan_raw, req_text, digest)
+                changes = bulkask_mod.plan_ask(store, plan)
+                videos = {c.video_id: store.get_video(c.video_id) for c in changes}
+                preview = build_bulk_preview(
+                    changes, {k: v for k, v in videos.items() if v is not None})
+                plan_json = json.dumps(bulkask_mod.plan_to_dict(plan),
+                                       ensure_ascii=False, sort_keys=True)
+                return preview, plan_json
+
+        try:
+            preview, plan_json = await run_in_threadpool(work)
+        except bulkask_mod.AskError as exc:
+            flash(request, "error", str(exc))
+            return see_other("/bulk")
+        return render(request, "bulk.html",
+                      bulk_data(parse_bulk_form(posted, submitted=False), "", preview,
+                                ask_preview=True, ask_request=req_text.strip(),
+                                ask_plan_json=plan_json))
+
+    @app.post("/bulk/ask/apply")
+    async def bulk_ask_apply(request: Request) -> Response:
+        posted = await read_form(request)
+        req_text = str(posted.get("request") or "")
+        plan_raw = str(posted.get("plan") or posted.get("plan_json") or "")
+        ids = [str(i) for i in posted.getlist("video_id") if str(i)]
+
+        def work() -> tuple[str, str, str]:
+            if not ids:
+                return "error", "Tick at least one video to make drafts.", "/bulk"
+            with Store(config.catalog_db) as store:
+                try:
+                    digest = bulkask_mod.catalog_digest(store)
+                    plan = parse_ask_proposal(plan_raw, req_text, digest)
+                    result = bulkask_mod.apply_ask(store, plan, ids)
+                except ValueError as exc:
+                    return "error", str(exc), "/bulk"
+            message = bulk_apply_message(result)
+            if result.drafted:
+                return "ok", message, "/changes"
+            return "info", message, "/bulk"
+
+        kind, message, target = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other(target)
+
+    @app.post("/bulk/ask/discard")
+    async def bulk_ask_discard(request: Request) -> Response:
+        await read_form(request)
+        return see_other("/bulk")
 
     # --- reply templates (G5) -------------------------------------------------------------------
     @app.get("/replies")

@@ -6,6 +6,45 @@
 
 {% if error %}<div class="flash error" role="alert" id="bulk-error">{{ error }}</div>{% endif %}
 
+<section class="card" id="bulk-ask" aria-labelledby="h-bulk-ask">
+  <h2 id="h-bulk-ask">Describe the change</h2>
+  {% if not has_key %}<p class="hint" id="bulk-ask-no-key">There is no Meta API key. Add one in Setup. Nothing was sent.</p>{% endif %}
+  <form class="edit-form" method="post" action="/bulk/ask" id="bulk-ask-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field">
+      <label for="ba-request">Your change</label>
+      <textarea id="ba-request" name="request" rows="3" maxlength="{{ request_max }}" data-count-limit="{{ request_max }}" data-count-unit="characters" data-count-for="ba-count" placeholder="For example: swap https://discord.gg/oldcode for https://discord.gg/newcode on videos from 2024">{{ ask_request }}</textarea>
+      <p class="hint counter" id="ba-count" aria-live="off">Up to {{ request_max }} characters.</p>
+    </div>
+    <p class="hint">Muse Spark only picks steps from a fixed list. Any new text must be in your words; code makes the changes, and only as drafts.</p>
+    <p class="hint">Your words, and the links and repeated lines from your descriptions, go to Meta's Model API ({{ model }}). Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products. Nothing is sent to YouTube.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if not has_key %} disabled{% endif %}>Plan it with Muse Spark</button></div>
+  </form>
+</section>
+
+{% if ask_proposal %}
+<section class="card" id="bulk-ask-proposal" aria-labelledby="h-bulk-ask-proposal">
+  <h2 id="h-bulk-ask-proposal">Proposed change</h2>
+  {% if ask_proposal.cannot %}
+  <p id="ba-cannot">{{ ask_proposal.cannot }}</p>
+  <p class="muted" id="ba-cost">{{ ask_proposal.model }} &middot; {{ ask_proposal.tokens }} tokens &middot; cost {{ ask_proposal.cost }}</p>
+  {% else %}
+  {% for line in ask_proposal.explain %}<p class="ba-explain">{{ line }}</p>{% endfor %}
+  <p class="muted" id="ba-cost">{{ ask_proposal.model }} &middot; {{ ask_proposal.tokens }} tokens &middot; cost {{ ask_proposal.cost }}</p>
+  <form method="post" action="/bulk/ask/preview">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="request" value="{{ ask_proposal.request }}">
+    <input type="hidden" name="plan" value="{{ ask_proposal.plan_json }}">
+    <div class="actions"><button type="submit" class="button primary">Preview these changes</button></div>
+  </form>
+  {% endif %}
+  <form method="post" action="/bulk/ask/discard">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="actions"><button type="submit" class="button secondary">Discard</button></div>
+  </form>
+</section>
+{% endif %}
+
 <form class="card bulk-form edit-form" method="get" action="/bulk" id="bulk-form">
   <fieldset class="bulk-kind">
     <legend><label class="check-label"><input type="radio" name="kind" value="replace"{% if form.kind != 'footer' %} checked{% endif %}> Find &amp; replace</label></legend>
@@ -66,10 +105,13 @@
   <h2 class="bulk-summary" id="bulk-summary">{{ preview.summary }}</h2>
   {% if preview.too_many %}<p class="flash error" role="alert" id="bulk-too-many">{{ preview.too_many }}</p>{% endif %}
   {% if preview.rows %}
-  <form method="post" action="/bulk/apply" id="bulk-apply">
+  <form method="post" action="{% if ask_preview %}/bulk/ask/apply{% else %}/bulk/apply{% endif %}" id="bulk-apply">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    {% for name, value in hidden %}<input type="hidden" name="{{ name }}" value="{{ value }}">
+    {% if ask_preview %}<input type="hidden" name="request" value="{{ ask_request }}">
+    <input type="hidden" name="plan" value="{{ ask_plan_json }}">
+    {% else %}{% for name, value in hidden %}<input type="hidden" name="{{ name }}" value="{{ value }}">
     {% endfor %}
+    {% endif %}
     <table class="vtable bulk-table">
       <thead>
         <tr>
