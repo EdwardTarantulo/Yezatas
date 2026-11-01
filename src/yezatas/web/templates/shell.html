@@ -2,12 +2,12 @@
 {% from "_macros.html" import icon, mark %}
 {% block body_class %}app{% endblock %}
 {% block body %}
-{% set nav = [('dashboard', 'Dashboard', '/'), ('content', 'Content', '/videos'), ('links', 'Links', '/links'), ('affiliate', 'Affiliate', '/affiliate'), ('outliers', 'Outliers', '/outliers'), ('strategy', 'Strategy', '/strategy'), ('checks', 'Checks', '/checks'), ('copilot', 'Copilot', '/copilot'), ('replies', 'Replies', '/replies'), ('translations', 'Translations', '/translations'), ('competitors', 'Competitors', '/competitors'), ('search', 'Search gaps', '/search-gaps'), ('changes', 'Changes', '/changes'), ('history', 'History', '/history'), ('agent', 'Agent log', '/agent'), ('setup', 'Setup', '/setup')] %}
+{% set nav_groups = [('Channel', [('dashboard', 'Dashboard', '/'), ('content', 'Content', '/videos'), ('links', 'Links', '/links'), ('affiliate', 'Affiliate', '/affiliate'), ('outliers', 'Outliers', '/outliers'), ('strategy', 'Strategy', '/strategy')]), ('Assist', [('checks', 'Checks', '/checks'), ('copilot', 'Copilot', '/copilot'), ('replies', 'Replies', '/replies'), ('translations', 'Translations', '/translations')]), ('Research', [('competitors', 'Competitors', '/competitors'), ('search', 'Search gaps', '/search-gaps')]), ('Review', [('changes', 'Changes', '/changes'), ('history', 'History', '/history'), ('agent', 'Agent log', '/agent')]), ('', [('setup', 'Setup', '/setup')])] %}
 <header class="topbar">
   <a class="brand" href="/" aria-label="Yezatas home">{{ mark() }}<span class="brand-name">Yezatas</span></a>
   <form class="search" action="/videos" method="get" role="search">
     <label class="visually-hidden" for="q">Search your videos</label>
-    <input id="q" type="search" name="q" value="{{ q|default('') }}" placeholder="Search across your channel" maxlength="200" autocomplete="off">
+    <input id="q" type="search" name="q" value="{{ q|default('') }}" placeholder="Search videos" maxlength="200" autocomplete="off">
     <button type="submit" class="search-btn" aria-label="Search">{{ icon('search') }}</button>
   </form>
   <div class="top-actions">
@@ -17,8 +17,13 @@
 </header>
 <div class="layout">
   <nav class="sidebar" aria-label="Main">
-    {% for key, label, href in nav %}
+    {% for group, items in nav_groups %}
+    {% if not group %}<div class="nav-spacer"></div>{% endif %}
+    <div class="nav-group">{% if group %}<p class="nav-label">{{ group }}</p>{% endif %}
+    {% for key, label, href in items %}
     <a class="nav-item{% if active|default('') == key %} active{% endif %}" href="{{ href }}"{% if active|default('') == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span>{% if key == 'changes' and draft_count|default(0) %}<span class="nav-count" id="nav-drafts">{{ draft_count }}<span class="visually-hidden"> draft{{ '' if draft_count == 1 else 's' }}</span></span>{% endif %}</a>
+    {% endfor %}
+    </div>
     {% endfor %}
   </nav>
   <main class="main">
