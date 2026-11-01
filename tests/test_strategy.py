@@ -17,7 +17,7 @@ from yezatas.store import Comment, OutlierReport, Store, Video
 from yezatas.strategy import (
     MAX_IDEAS, MAX_POINTS, MAX_QUESTIONS, QUESTION_CHARS, STRATEGY_FORMAT, STRATEGY_MODEL,
     TEXT_MAX, StrategyError, StrategyIdea, StrategyPoint, StrategyReport, build_context,
-    latest_report, make_report, save_report,
+    SYSTEM_PROMPT, latest_report, make_report, save_report,
 )
 
 START = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -64,9 +64,9 @@ def reply(data: Any, tokens: tuple[int, int, int] = (1000, 100, 200)) -> ModelRe
 
 def good_answer(**override: Any) -> dict[str, Any]:
     answer: dict[str, Any] = {
-        "works": [{"text": "Question titles do well.", "refs": ["V15"]}],
-        "gaps": [{"text": "Some videos have thin descriptions.", "refs": ["V3"]}],
-        "ideas": [{"title": "Try a question title", "why": "It builds on V15.",
+        "works": [{"text": "Cactus question titles do well.", "refs": ["V15"]}],
+        "gaps": [{"text": "Some cactus videos have thin descriptions.", "refs": ["V3"]}],
+        "ideas": [{"title": "Try a question title", "why": "It builds on the cactus video V15.",
                    "refs": ["V15"]}],
     }
     answer.update(override)
@@ -175,10 +175,10 @@ def test_make_report_happy_path(store: Store) -> None:
     assert set(fmt["json_schema"]["schema"]["properties"]) == {"works", "gaps", "ideas"}
     assert [m["role"] for m in call["messages"]] == ["system", "user"]
     assert call["messages"][1]["content"] == build_context(store, AS_OF).text
-    assert report.works == (StrategyPoint("Question titles do well.", (vid(15),)),)
-    assert report.gaps == (StrategyPoint("Some videos have thin descriptions.", (vid(3),)),)
+    assert report.works == (StrategyPoint("Cactus question titles do well.", (vid(15),)),)
+    assert report.gaps == (StrategyPoint("Some cactus videos have thin descriptions.", (vid(3),)),)
     assert report.ideas == (
-        StrategyIdea("Try a question title", "It builds on V15.", (vid(15),)),)
+        StrategyIdea("Try a question title", "It builds on the cactus video V15.", (vid(15),)),)
     assert report.notes == () and report.model == STRATEGY_MODEL
     assert (report.input_tokens, report.cached_tokens, report.output_tokens) == (1000, 100, 200)
     assert report.created_at == NOW.isoformat()
@@ -186,10 +186,10 @@ def test_make_report_happy_path(store: Store) -> None:
 
 def test_invented_refs_are_filtered_and_a_point_without_one_is_dropped(store: Store) -> None:
     report = run_report(store, good_answer(
-        works=[{"text": "Question titles do well.", "refs": ["V15", "V999", "V15"]},
+        works=[{"text": "Cactus question titles do well.", "refs": ["V15", "V999", "V15"]},
                {"text": "Only an invented video.", "refs": ["V999"]}],
         gaps=[], ideas=[]))
-    assert report.works == (StrategyPoint("Question titles do well.", (vid(15),)),)
+    assert report.works == (StrategyPoint("Cactus question titles do well.", (vid(15),)),)
     assert report.notes == ("Dropped a point that named no video of the channel.",)
 
 
@@ -204,11 +204,11 @@ def test_invented_numbers_are_dropped_with_a_note(store: Store) -> None:
     assert "999999" not in build_context(store, AS_OF).numbers
     report = run_report(store, good_answer(
         works=[{"text": "It reached 999999 views.", "refs": ["V15"]},
-               {"text": "Question titles do well.", "refs": ["V15"]}],
+               {"text": "Cactus question titles do well.", "refs": ["V15"]}],
         ideas=[{"title": "Repeat it", "why": "It reached 999999 views.", "refs": ["V15"]},
-               {"title": "Try a question title", "why": "It builds on V15.",
+               {"title": "Try a question title", "why": "It builds on the cactus video V15.",
                 "refs": ["V15"]}]))
-    assert [p.text for p in report.works] == ["Question titles do well."]
+    assert [p.text for p in report.works] == ["Cactus question titles do well."]
     assert [i.title for i in report.ideas] == ["Try a question title"]
     assert report.notes == (
         "Dropped a point that uses a number that was not in the tables.",
@@ -244,11 +244,11 @@ def test_a_model_error_and_a_bad_answer_become_strategy_errors(store: Store) -> 
 
 
 def test_texts_are_cut_and_sections_are_limited(store: Store) -> None:
-    long_text = "Helpful opening. " + "word " * 90
+    long_text = "Helpful cactus opening. " + "word " * 90
     report = run_report(store, {
         "works": [{"text": long_text, "refs": ["V15"]} for _ in range(MAX_POINTS + 2)],
         "gaps": [{"text": long_text, "refs": ["V15"]} for _ in range(MAX_POINTS + 2)],
-        "ideas": [{"title": long_text, "why": "It builds on V15.", "refs": ["V15"]}
+        "ideas": [{"title": long_text, "why": "It builds on the cactus video V15.", "refs": ["V15"]}
                   for _ in range(MAX_IDEAS + 2)],
     })
     assert len(report.works) == MAX_POINTS and len(report.gaps) == MAX_POINTS
@@ -257,12 +257,98 @@ def test_texts_are_cut_and_sections_are_limited(store: Store) -> None:
     assert all(len(i.title) <= TEXT_MAX and len(i.why) <= TEXT_MAX for i in report.ideas)
 
 
+@pytest.fixture
+def titled(tmp_path: Path):
+    with make_store(
+        tmp_path,
+        [
+            video(1, title="How to connect optical cable to a Mesa TV"),
+            video(2, title="Hearthstone Arena - Reaching Level 5 Key"),
+            video(3, title="Repot a Cactus in Spring"),
+        ],
+    ) as s:
+        yield s
+
+
+KEPT = {"text": "The optical cable guide V1 has no next step.", "refs": ["V1"]}
+
+
+def test_a_point_that_does_not_match_its_titles_is_dropped(titled) -> None:
+    context = build_context(titled, AS_OF)
+    assert context.titles["V3"] == "Repot a Cactus in Spring"
+    report = run_report(
+        titled,
+        good_answer(
+            works=[
+                {"text": "V2 sits on one side of a boot-manager choice.", "refs": ["V2"]},
+                KEPT,
+            ],
+            gaps=[],
+            ideas=[],
+        ),
+    )
+    assert [p.text for p in report.works] == [KEPT["text"]]
+    assert report.notes == (
+        "Dropped a point that does not match the titles of the videos it names.",
+    )
+
+
+def test_an_idea_that_does_not_match_its_titles_is_dropped(titled) -> None:
+    report = run_report(
+        titled,
+        good_answer(
+            works=[KEPT],
+            gaps=[],
+            ideas=[
+                {"title": "GRUB vs rEFInd", "why": "Builds on V2.", "refs": ["V2"]},
+                {
+                    "title": "Repotting in winter",
+                    "why": "Builds on the cactus video V3.",
+                    "refs": ["V3"],
+                },
+            ],
+        ),
+    )
+    assert [i.title for i in report.ideas] == ["Repotting in winter"]
+    assert report.notes == (
+        "Dropped an idea that does not match the titles of the videos it names.",
+    )
+
+
+def test_a_point_must_match_every_video_it_names(titled) -> None:
+    report = run_report(
+        titled,
+        good_answer(
+            works=[
+                {"text": "Optical cable tips for V1 and V2.", "refs": ["V1", "V2"]},
+                {"text": "Optical cable and arena tips.", "refs": ["V1", "V2"]},
+            ],
+            gaps=[],
+            ideas=[],
+        ),
+    )
+    assert [p.text for p in report.works] == ["Optical cable and arena tips."]
+
+
+def test_a_plural_matches_a_title_word(titled) -> None:
+    report = run_report(
+        titled,
+        good_answer(works=[{"text": "Better cables for V1.", "refs": ["V1"]}], gaps=[], ideas=[]),
+    )
+    assert len(report.works) == 1
+
+
+def test_the_prompt_asks_for_a_title_word() -> None:
+    assert "use at least one word of its title" in SYSTEM_PROMPT
+
+
 # --- saving --------------------------------------------------------------------------------------
 def sample_report(created_at: str = "2026-06-01T12:00:00+00:00") -> StrategyReport:
     return StrategyReport(
-        works=(StrategyPoint("Question titles do well.", (vid(15),)),),
-        gaps=(StrategyPoint("Some videos have thin descriptions.", (vid(3),)),),
-        ideas=(StrategyIdea("Try a question title", "It builds on V15.", (vid(15),)),),
+        works=(StrategyPoint("Cactus question titles do well.", (vid(15),)),),
+        gaps=(StrategyPoint("Some cactus videos have thin descriptions.", (vid(3),)),),
+        ideas=(StrategyIdea("Try a question title", "It builds on the cactus video V15.",
+                (vid(15),)),),
         notes=("A note.",), model=STRATEGY_MODEL, input_tokens=1000, cached_tokens=100,
         output_tokens=200, created_at=created_at)
 
@@ -273,9 +359,9 @@ def test_save_and_latest_round_trip(tmp_path: Path) -> None:
     path = save_report(home, report)
     assert path == home / "reports" / "strategy-20260601-120000-000000.json"
     assert json.loads(path.read_text(encoding="utf-8")) == {
-        "works": [{"text": "Question titles do well.", "video_ids": [vid(15)]}],
-        "gaps": [{"text": "Some videos have thin descriptions.", "video_ids": [vid(3)]}],
-        "ideas": [{"title": "Try a question title", "why": "It builds on V15.",
+        "works": [{"text": "Cactus question titles do well.", "video_ids": [vid(15)]}],
+        "gaps": [{"text": "Some cactus videos have thin descriptions.", "video_ids": [vid(3)]}],
+        "ideas": [{"title": "Try a question title", "why": "It builds on the cactus video V15.",
                    "video_ids": [vid(15)]}],
         "notes": ["A note."], "model": STRATEGY_MODEL, "input_tokens": 1000,
         "cached_tokens": 100, "output_tokens": 200, "created_at": report.created_at}
