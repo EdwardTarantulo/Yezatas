@@ -53,7 +53,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Edit safely** | Changes, History | Drafts shown as diffs, approved one by one, pushed with a quota preview; a backup before every update, restore one video or undo a whole push. |
 | **Suggest** | Video, Copilot | A suggestion agent with read-only tools and a fact guard, and a channel copilot with the whole catalog in one context. Edits are only ever proposals. |
 | **Translate** | Translate, Subtitles, Translations | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. A glossary of the creator's terms (kept as they are or with a fixed translation), checked by code, and a list of every translation made from older text. |
-| **Transcribe** | Transcript | Transcripts of the creator's own video file, chapter starts chosen by segment number (code sets the times), SRT downloads. |
+| **Transcribe** | Transcript, Shorts finder | Transcripts of the creator's own video file, chapter starts chosen by segment number (code sets the times), SRT downloads, and moments that could stand alone as a Short (picked by segment number; times and quotes from the transcript). |
 | **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download and a feed preview. |
 | **Insights** | Outliers, Strategy | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos. |
 | **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first, or described in plain words. |
@@ -70,7 +70,7 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 |---|---|---|
 | Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule, and a bulk change described in words into fixed steps. |
 | Muse Wonder 1.0 | Meta's Model API | The strategy report: what works on the channel, the gaps and next video ideas, from tables made by code (every ref and number is checked by code). |
-| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. At build time it also wrote the glossary and the Translations page (see the log). |
+| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles, and the Shorts finder (Muse Spark 1.3 as the fallback for both). At build time it also wrote the glossary, the Translations page and the Shorts finder (see the log). |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
@@ -147,6 +147,7 @@ src/yezatas/
   agent.py, copilot.py       # the suggestion agent and the channel copilot (Muse Spark 1.3)
   translate.py, subtitle_translate.py    # verified translations (Muse Spark Open + Muse Glimmer)
   transcribe.py, chapters.py, subtitles.py   # transcripts, chapters, SRT
+  shorts.py                  # the Shorts finder (Muse Spark Open)
   packaging.py, outliers.py  # the packaging check, own-channel outliers
   strategy.py                # the strategy report (Muse Wonder 1.0)
   glossary.py                # the translation glossary, checked by code
@@ -375,6 +376,14 @@ as it lands; the git history is the detailed record.
   Baseten credits. Tried on the real channel the same day: with one product name kept, a video's Spanish and
   German translations came back verified with the name intact. The browser found two bugs the tests had missed (the
   add form had no CSRF token, and the outdated list linked to the wrong anchor); Spark Open fixed both.
+- **2026-11-01**: **Shorts finder**, the second block built on Baseten by **Muse Spark Open**, which also runs it.
+  On the video page it reads the transcript and picks up to five moments that could stand alone as a vertical
+  Short. Like chapters, the model only names the first and last segment numbers. Code looks up the times, keeps
+  moments of 15 to 60 seconds that do not overlap, takes the quote from the transcript and links each moment to
+  its second on YouTube. Nothing is changed or sent to YouTube. In review: a guessed draft lookup, three copies of
+  the same code, the old-database tests that did not know the new table, a name clash that let the subtitles card
+  overwrite the new card's data, and no page refresh while it runs. Five fix
+  rounds, all by Spark Open.
 
 ---
 
