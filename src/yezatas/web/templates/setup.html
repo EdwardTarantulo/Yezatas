@@ -371,7 +371,12 @@
     <p class="waiting"><span class="spinner" aria-hidden="true"></span>
       <span id="pull-msg">{{ pull.message or 'Starting…' }}</span></p>
   {% elif not steps.pull.enabled or not estimate %}
+    {% if signed_in and not check %}
+    <p>Yezatas checks the connection again first (1 quota unit), then pulls.</p>
+    {{ post_button('/setup/pull', 'Check and pull', 'primary') }}
+    {% else %}
     <p>Check the connection first (step 7).</p>
+    {% endif %}
   {% else %}
     {% set batches = (check.video_count + 49) // 50 %}
     <p>Estimated cost: <strong>{{ estimate.units }}</strong> quota units

@@ -146,11 +146,36 @@ def test_pull_progress_messages(tmp_path: Path) -> None:
     assert any(m.startswith("Fetching video details (batch 3") for m in seen)
 
 
-def test_pull_needs_a_successful_check(tmp_path: Path) -> None:
+def test_pull_checks_the_connection_itself_after_a_restart(tmp_path: Path) -> None:
     ui = ready_ui(tmp_path)
+    assert "Check and pull" in ui.setup_html()
+    ui.post("/setup/pull")
+    ui.web.pull_job.wait()
+    snap = ui.web.pull_job.snapshot()
+    assert snap.status == "done"
+    assert ui.web.check.ok
+    assert ledger(ui)[:2] == [("channels.list", 1), ("channels.list", 1)]
+
+
+def test_pull_without_a_sign_in_asks_for_the_check(tmp_path: Path) -> None:
+    ui = make_ui(tmp_path)
+    write_client_file(ui.config)
     resp = ui.post("/setup/pull")
     assert "Check the connection first" in resp.text
     assert ui.web.pull_job.snapshot().status == "idle"
+    assert ledger(ui) == []
+    assert ui.reader.calls == []
+
+
+def test_pull_does_not_rerun_a_failed_check(tmp_path: Path) -> None:
+    from yezatas.web.steps import CheckState
+
+    ui = ready_ui(tmp_path)
+    ui.web._check = CheckState(False, "auth", "Sign in again.")
+    resp = ui.post("/setup/pull")
+    assert "Check the connection first" in resp.text
+    assert ledger(ui) == []
+    assert ui.reader.calls == []
 
 
 def test_pull_refused_when_estimate_exceeds_remaining_quota(tmp_path: Path) -> None:

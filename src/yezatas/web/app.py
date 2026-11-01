@@ -2151,6 +2151,9 @@ def create_app(
         await read_form(request)
         sid = request.state.session_id
         check = state.check
+        if check is None and config.token_path.is_file():
+            # After a restart: check again on its own (1 quota unit), then pull.
+            check = await run_in_threadpool(state.run_check)
         if check is None or not check.ok or not check.has_uploads:
             state.add_flash(sid, "error", "Check the connection first (step 7).", "check")
             return back_to_setup("check")
