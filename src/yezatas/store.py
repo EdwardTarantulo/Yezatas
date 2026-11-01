@@ -247,10 +247,23 @@ _SCHEMA_V8: tuple[str, ...] = (
     )""",
 )
 
+# v9: push runs. One push of several drafts is one run, so History can undo it in one step. Older
+# pushes keep run_id NULL (they are restored one by one; groups are never guessed).
+_SCHEMA_V9: tuple[str, ...] = (
+    "ALTER TABLE pushes ADD COLUMN run_id INTEGER",
+    """CREATE TABLE push_runs (
+        id INTEGER PRIMARY KEY,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        video_count INTEGER NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX idx_pushes_run ON pushes(run_id, id)",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
     _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
-    _SCHEMA_V8,
+    _SCHEMA_V8, _SCHEMA_V9,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -347,6 +360,17 @@ class PushRecord:
     before: dict[str, Any]
     after: dict[str, Any]
     message: str
+    run_id: int | None = None  # the push run it belongs to; None for pushes made before v9
+
+
+@dataclass(frozen=True)
+class PushRun:
+    """One call of push_drafts: the pushes it made share its id."""
+
+    id: int
+    started_at: str
+    finished_at: str | None
+    video_count: int
 
 
 @dataclass(frozen=True)
@@ -818,19 +842,71 @@ class Store:
             before=json.loads(row["before_json"]),
             after=json.loads(row["after_json"]),
             message=row["message"],
+            run_id=row["run_id"],
         )
 
     def begin_push(
-        self, video_id: str, source: str, before: dict[str, Any], now: datetime | None = None
+        self,
+        video_id: str,
+        source: str,
+        before: dict[str, Any],
+        now: datetime | None = None,
+        run_id: int | None = None,
     ) -> int:
         """Record the backup of YouTube's live text before a push; status "pending"."""
         with self._conn:
             cur = self._conn.execute(
-                "INSERT INTO pushes (video_id, started_at, status, source, before_json) "
-                "VALUES (?, ?, 'pending', ?, ?)",
-                (video_id, _iso(now), source, _dumps(before)),
+                "INSERT INTO pushes (video_id, started_at, status, source, before_json, run_id) "
+                "VALUES (?, ?, 'pending', ?, ?, ?)",
+                (video_id, _iso(now), source, _dumps(before), run_id),
             )
         return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def begin_push_run(self, now: datetime | None = None) -> int:
+        """Open a push run; the pushes of one push_drafts call carry its id."""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO push_runs (started_at) VALUES (?)", (_iso(now),)
+            )
+        return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def finish_push_run(self, run_id: int, video_count: int, now: datetime | None = None) -> None:
+        with self._conn:
+            self._conn.execute(
+                "UPDATE push_runs SET finished_at = ?, video_count = ? WHERE id = ?",
+                (_iso(now), video_count, run_id),
+            )
+
+    def get_push_run(self, run_id: int) -> PushRun | None:
+        row = self._conn.execute("SELECT * FROM push_runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        return PushRun(row["id"], row["started_at"], row["finished_at"], row["video_count"])
+
+    def list_pushes_of_run(self, run_id: int) -> list[PushRecord]:
+        """The push records of one run, in push order (oldest first)."""
+        rows = self._conn.execute(
+            "SELECT * FROM pushes WHERE run_id = ? ORDER BY id", (run_id,)
+        ).fetchall()
+        return [self._row_to_push(r) for r in rows]
+
+    def get_push_runs(self, run_ids: Sequence[int]) -> dict[int, PushRun]:
+        """Several runs at once, by id."""
+        found: dict[int, PushRun] = {}
+        for run_id in dict.fromkeys(run_ids):
+            run = self.get_push_run(run_id)
+            if run is not None:
+                found[run_id] = run
+        return found
+
+    def later_pushed(self, video_id: str, push_id: int) -> PushRecord | None:
+        """The first push of this video after `push_id` that reached YouTube, if any."""
+        row = self._conn.execute(
+            "SELECT * FROM pushes WHERE video_id = ? AND id > ? AND status = 'pushed' "
+            "ORDER BY id LIMIT 1",
+            (video_id, push_id),
+        ).fetchone()
+        return self._row_to_push(row) if row else None
 
     def finish_push(
         self,

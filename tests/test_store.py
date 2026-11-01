@@ -10,6 +10,8 @@ from yezatas.store import (MIGRATIONS, DraftRow, OutlierReport, PackagingReview,
                            TranscriptRecord, TranslationRecord, Video)
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+# undoes the v9 migration, for tests that turn a database back into an older version
+BACK_TO_V8 = "DROP INDEX idx_pushes_run; ALTER TABLE pushes DROP COLUMN run_id; DROP TABLE push_runs; "
 
 
 def make_video(vid: str = "vid00000001", **kw: object) -> Video:
@@ -42,7 +44,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 8
+        assert s.schema_version == len(MIGRATIONS) == 9
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -52,7 +54,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 8
+        assert s.schema_version == 9
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -150,10 +152,10 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
     conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; "
                        "DROP TABLE translations; DROP TABLE transcripts; DROP TABLE subtitle_translations; "
                        "DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
-                       "PRAGMA user_version = 1;")
+                       "DROP TABLE push_runs; PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 8
+        assert s.schema_version == 9
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -179,7 +181,7 @@ def test_v3_drafts_get_the_catalog_language_as_their_base(tmp_path: Path) -> Non
         "ALTER TABLE drafts DROP COLUMN default_language; "
         "ALTER TABLE drafts DROP COLUMN localizations_json; "
         "ALTER TABLE drafts DROP COLUMN base_default_language; "
-        "ALTER TABLE drafts DROP COLUMN base_localizations_json; PRAGMA user_version = 3;")
+        "ALTER TABLE drafts DROP COLUMN base_localizations_json; " + BACK_TO_V8 + "PRAGMA user_version = 3;")
     conn.close()
     with Store(path) as s:
         row = s.get_draft("vid00000001")
@@ -262,6 +264,57 @@ def test_push_records_round_trip_newest_first(store: Store) -> None:
     assert [r.id for r in store.list_pushes("vid00000001")] == [third, first]
     assert [r.id for r in store.list_pushes(limit=2)] == [third, second]
     assert store.get_push(999) is None
+
+
+def test_push_runs_group_pushes_and_older_pushes_have_no_run(store: Store) -> None:
+    old = store.begin_push("vid00000001", "manual", {"title": "old"}, now=T0)
+    assert store.get_push(old).run_id is None and store.get_push_run(1) is None
+    run = store.begin_push_run(now=T0)
+    a = store.begin_push("vid00000001", "manual", {"title": "a"}, now=T0, run_id=run)
+    b = store.begin_push("vid00000002", "manual", {"title": "b"}, T0, run)
+    other = store.begin_push_run(now=T0)
+    c = store.begin_push("vid00000003", "manual", {"title": "c"}, now=T0, run_id=other)
+    got = store.get_push_run(run)
+    assert got is not None and (got.started_at, got.finished_at, got.video_count) == (
+        T0.isoformat(), None, 0)
+    store.finish_push_run(run, 2, now=T0 + timedelta(seconds=5))
+    got = store.get_push_run(run)
+    assert got.video_count == 2 and got.finished_at == (T0 + timedelta(seconds=5)).isoformat()
+    assert [r.id for r in store.list_pushes_of_run(run)] == [a, b]  # push order
+    assert [r.id for r in store.list_pushes_of_run(other)] == [c]
+    assert store.get_push(a).run_id == run and store.list_pushes_of_run(999) == []
+    assert set(store.get_push_runs([run, other, run, 999])) == {run, other}
+
+
+def test_later_pushed_finds_the_next_pushed_row_of_the_video(store: Store) -> None:
+    first = store.begin_push("vid00000001", "manual", {"title": "a"}, now=T0)
+    failed = store.begin_push("vid00000001", "manual", {"title": "b"}, now=T0)
+    store.finish_push(failed, "failed", {}, "no", now=T0)
+    assert store.later_pushed("vid00000001", first) is None
+    third = store.begin_push("vid00000001", "manual", {"title": "c"}, now=T0)
+    store.finish_push(third, "pushed", {}, "ok", now=T0)
+    other = store.begin_push("vid00000002", "manual", {"title": "d"}, now=T0)
+    store.finish_push(other, "pushed", {}, "ok", now=T0)
+    later = store.later_pushed("vid00000001", first)
+    assert later is not None and later.id == third
+    assert store.later_pushed("vid00000001", third) is None
+
+
+def test_v8_database_upgrades_to_v9_and_keeps_its_pushes(tmp_path: Path) -> None:
+    path = tmp_path / "v8.sqlite"
+    with Store(path) as s:
+        push = s.begin_push("vid00000001", "manual", {"title": "old"}, now=T0)
+        s.finish_push(push, "pushed", {"title": "new"}, "ok", now=T0)
+    conn = sqlite3.connect(path)  # turn it back into a version 8 database
+    conn.executescript(BACK_TO_V8 + "PRAGMA user_version = 8;")
+    conn.close()
+    with Store(path) as s:
+        assert s.schema_version == 9
+        record = s.get_push(push)
+        assert record is not None and record.run_id is None and record.status == "pushed"
+        assert record.before == {"title": "old"} and record.after == {"title": "new"}
+        run = s.begin_push_run(now=T0)
+        assert s.begin_push("vid00000001", "manual", {}, now=T0, run_id=run) > push
 
 
 def test_agent_runs_round_trip_newest_first(store: Store) -> None:
@@ -389,10 +442,10 @@ def test_v5_database_upgrades_to_v6_and_keeps_its_data(tmp_path: Path) -> None:
                          now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 5 database
     conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
-                       "DROP TABLE subtitle_translations; PRAGMA user_version = 5;")
+                       "DROP TABLE subtitle_translations; " + BACK_TO_V8 + "PRAGMA user_version = 5;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 8
+        assert s.schema_version == 9
         assert s.get_video("vid00000001") is not None and s.get_draft("vid00000001") is not None
         transcript = s.latest_transcript("vid00000001")
         assert transcript is not None and transcript.segments[0]["text"] == "Hello"
@@ -459,10 +512,10 @@ def test_v6_database_upgrades_to_v7_and_keeps_its_data(tmp_path: Path) -> None:
         s.add_subtitle_translation(make_subtitles("es"), now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 6 database
     conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
-                       "PRAGMA user_version = 6;")
+                       "" + BACK_TO_V8 + "PRAGMA user_version = 6;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 8
+        assert s.schema_version == 9
         assert s.get_video("vid00000001") is not None
         assert len(s.list_subtitle_translations("vid00000001")) == 1
         assert s.latest_packaging_review("vid00000001") is None
@@ -506,10 +559,10 @@ def test_v7_database_upgrades_to_v8_and_keeps_its_data(tmp_path: Path) -> None:
         s.upsert_video(make_video(), pid, now=T0)
         s.add_packaging_review(make_review(), now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 7 database
-    conn.executescript("DROP TABLE outlier_reports; PRAGMA user_version = 7;")
+    conn.executescript("DROP TABLE outlier_reports; " + BACK_TO_V8 + "PRAGMA user_version = 7;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 8
+        assert s.schema_version == 9
         assert s.get_video("vid00000001") is not None
         assert s.latest_packaging_review("vid00000001") is not None
         assert s.latest_outlier_report() is None

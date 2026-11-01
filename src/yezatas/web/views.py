@@ -20,7 +20,7 @@ from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_T
 from ..push import PushItem
 from ..seo import (CATEGORIES, CHAPTERS_MIN_DURATION, CheckResult, Scorecard, chapter_problem,
                    fix_priority, parse_chapters, parse_duration)
-from ..store import (AgentRun, DraftRow, OutlierReport, PackagingReview, PushRecord,
+from ..store import (AgentRun, DraftRow, OutlierReport, PackagingReview, PushRecord, PushRun,
                      SubtitleTranslationRecord, ThumbnailVariant, TranscriptRecord, TranslationRecord,
                      Video)
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
@@ -636,6 +636,71 @@ def history_rows(records: Iterable[PushRecord], titles: Mapping[str, str],
             backup=backup_of_record(record), has_draft=record.video_id in draft_ids,
         ))
     return rows
+
+
+@dataclass(frozen=True)
+class HistoryGroup:
+    """The History rows of one push run, or a single older push (run_id None, no header)."""
+
+    run_id: int | None
+    header: str  # "Push of <time> · N videos · K changed"; "" without a run
+    can_undo: bool  # at least one row of the run reached YouTube
+    rows: list[HistoryRow]
+
+
+def _videos(n: int) -> str:
+    return f"{n} video" + ("" if n == 1 else "s")
+
+
+def history_groups(records: Iterable[PushRecord], runs: Mapping[int, PushRun],
+                   run_records: Mapping[int, Sequence[PushRecord]],
+                   titles: Mapping[str, str], fmt_time: Callable[[str], str],
+                   draft_ids: Collection[str] = ()) -> list[HistoryGroup]:
+    """Group the newest-first push records by run, in the order their newest record appears.
+
+    A run shows all its records (`run_records`, oldest first), even those beyond the page limit.
+    Pushes without a run stay one group each: old groups are never guessed.
+    """
+    groups: list[HistoryGroup] = []
+    seen: set[int] = set()
+    for record in records:
+        if record.run_id is None:
+            groups.append(HistoryGroup(
+                None, "", False, history_rows([record], titles, fmt_time, draft_ids)))
+            continue
+        if record.run_id in seen:
+            continue
+        seen.add(record.run_id)
+        members = list(reversed(run_records.get(record.run_id) or [record]))  # newest first
+        changed = sum(1 for m in members if m.status == "pushed")
+        run = runs.get(record.run_id)
+        started = fmt_time(run.started_at if run is not None else members[-1].started_at)
+        count = run.video_count if run is not None and run.video_count else len(members)
+        groups.append(HistoryGroup(
+            record.run_id, f"Push of {started} · {_videos(count)} · {changed} changed",
+            changed > 0, history_rows(members, titles, fmt_time, draft_ids)))
+    return groups
+
+
+MAX_LISTED_SKIPS = 5
+
+
+def run_restore_summary(result: edits.RunRestore, titles: Mapping[str, str]) -> str:
+    """One flash sentence for an undone push run: how many drafts, and which videos were skipped."""
+    drafted = result.count("drafted")
+    text = (f"Restore drafts made for {_videos(drafted)}." if drafted
+            else "No restore drafts were made.")
+    same = result.count("unchanged")
+    if same:
+        text += f" {_videos(same)} already had that text on YouTube."
+    skipped = [i for i in result.items if i.status == "skipped"]
+    if skipped:
+        listed = [f"{titles.get(i.video_id) or i.video_id}: {i.message}"
+                  for i in skipped[:MAX_LISTED_SKIPS]]
+        if len(skipped) > MAX_LISTED_SKIPS:
+            listed.append(f"and {len(skipped) - MAX_LISTED_SKIPS} more")
+        text += f" {len(skipped)} skipped: " + "; ".join(listed) + "."
+    return text
 
 
 # --- AI suggestions: agent runs, the fix-next batch -------------------------------------------

@@ -582,6 +582,9 @@ button.gbtn { cursor: pointer; }
 .result-main p { margin: 2px 0 0; }
 .history { list-style: none; padding: 0; margin: 0; }
 .history-row { margin: 0 0 12px; }
+.history-group { margin: 0 0 12px; }
+.history-run-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0 8px; }
+.history-run-title { margin: 0; font-size: 16px; font-weight: 600; }
 .history-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 6px; }
 .history-title { font-weight: 500; overflow-wrap: anywhere; }
 .history-when { margin-left: auto; }

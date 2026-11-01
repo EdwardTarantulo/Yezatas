@@ -146,129 +146,138 @@ def push_drafts(
     units = 0
     live: dict[str, dict[str, Any]] = {}
     live_localizations: dict[str, dict[str, Any]] = {}
-    if selected:
-        preview = guard.preview(push_units(len(selected)))
-        if not preview.fits:
-            raise QuotaExceeded(
-                f"Pushing {len(selected)} video(s) needs {preview.total} quota units "
-                f"but only {preview.remaining} are left today."
-            )
-        stopped = False
-        for start in range(0, len(selected), MAX_RESULTS):
-            batch = selected[start : start + MAX_RESULTS]
-            if stopped:
-                for row in batch:
-                    results[row.video_id] = PushItem(
-                        row.video_id, "not_attempted", "Stopped before reading this video."
-                    )
+    run_id: int | None = None  # opened once there is something to push
+    pushes_made = 0
+    try:
+        if selected:
+            preview = guard.preview(push_units(len(selected)))
+            if not preview.fits:
+                raise QuotaExceeded(
+                    f"Pushing {len(selected)} video(s) needs {preview.total} quota units "
+                    f"but only {preview.remaining} are left today."
+                )
+            run_id = store.begin_push_run(now)  # before the first YouTube call
+            stopped = False
+            for start in range(0, len(selected), MAX_RESULTS):
+                batch = selected[start : start + MAX_RESULTS]
+                if stopped:
+                    for row in batch:
+                        results[row.video_id] = PushItem(
+                            row.video_id, "not_attempted", "Stopped before reading this video."
+                        )
+                    continue
+                say(f"Reading {len(batch)} video(s) from YouTube...")
+                try:
+                    units += guard.charge("videos.list", note="push")
+                    response = writer.videos([row.video_id for row in batch], "snippet,localizations")
+                except Exception as exc:  # noqa: BLE001 - reported per video, never raised
+                    stopped = _is_stop(exc)
+                    for row in batch:
+                        results[row.video_id] = PushItem(
+                            row.video_id, "failed", _error_message("Reading from YouTube", exc)
+                        )
+                    continue
+                for item in response.get("items") or []:
+                    if isinstance(item, dict) and isinstance(item.get("snippet"), dict):
+                        live[item["id"]] = item["snippet"]
+                        localized = item.get("localizations")
+                        live_localizations[item["id"]] = localized if isinstance(localized, dict) else {}
+
+        stop_message = ""
+        for row in selected:
+            video_id = row.video_id
+            if video_id in results:
                 continue
-            say(f"Reading {len(batch)} video(s) from YouTube...")
+            if stop_message:
+                results[video_id] = PushItem(video_id, "not_attempted", stop_message)
+                continue
+            snippet = live.get(video_id)
+            if snippet is None:
+                results[video_id] = PushItem(
+                    video_id,
+                    "missing",
+                    "This video is not on YouTube any more (deleted or unavailable). Nothing was pushed.",
+                )
+                continue
+            localized = live_localizations.get(video_id, {})
+            sets_i18n = row.default_language is not None or row.localizations is not None
+            # The translations go into the backup only when this push changes them, so restoring
+            # an older text never rolls back translations added later.
+            before = backup_of(snippet, localized if sets_i18n else None)
+            if (_live_text(snippet) != (row.base_title, row.base_description, row.base_tags)
+                    or (row.default_language is not None
+                        and snippet.get("defaultLanguage") != row.base_default_language)
+                    or (row.localizations is not None
+                        and plain_localizations(localized) != row.base_localizations)):
+                push_id = store.begin_push(video_id, row.source, before, now, run_id)
+                pushes_made += 1
+                message = (
+                    "This video was changed on YouTube (for example in Studio) after your last pull. "
+                    "Nothing was pushed. The catalog now shows the live text; check your draft against it."
+                )
+                store.finish_push(push_id, "conflict", {}, message, now)
+                store.update_video_text(
+                    video_id, before["title"], before["description"], before["tags"], now,
+                    default_language=snippet.get("defaultLanguage"), localizations=localized,
+                )
+                store.set_draft_approval(video_id, None)
+                results[video_id] = PushItem(video_id, "conflict", message, push_id)
+                say(f"{video_id}: changed on YouTube, not pushed.")
+                continue
+
+            sent: dict[str, Any] = {key: snippet[key] for key in KEEP_SNIPPET_KEYS if key in snippet}
+            sent.update(title=row.title, description=row.description, tags=list(row.tags))
+            body: dict[str, Any] = {"id": video_id, "snippet": sent}
+            part = "snippet"
+            after = sent
+            if sets_i18n:
+                if row.default_language is not None:
+                    sent["defaultLanguage"] = row.default_language
+                sent_localizations = (row.localizations if row.localizations is not None
+                                      else plain_localizations(localized))
+                body["localizations"] = sent_localizations
+                part = "snippet,localizations"
+                after = {**sent, "localizations": sent_localizations}
+            push_id = store.begin_push(video_id, row.source, before, now, run_id)  # backup first
+            pushes_made += 1
             try:
-                units += guard.charge("videos.list", note="push")
-                response = writer.videos([row.video_id for row in batch], "snippet,localizations")
-            except Exception as exc:  # noqa: BLE001 - reported per video, never raised
-                stopped = _is_stop(exc)
-                for row in batch:
-                    results[row.video_id] = PushItem(
-                        row.video_id, "failed", _error_message("Reading from YouTube", exc)
-                    )
+                units += guard.charge("videos.update", note="push")
+                say(f"Updating {video_id}...")
+                response = writer.update_video(body, part)
+            except Exception as exc:  # noqa: BLE001 - recorded and reported, never raised
+                message = _error_message("YouTube update", exc)
+                store.finish_push(push_id, "failed", {}, message, now)
+                results[video_id] = PushItem(video_id, "failed", message, push_id)
+                if _is_stop(exc):
+                    stop_message = "Stopped after an error that would affect every video."
                 continue
-            for item in response.get("items") or []:
-                if isinstance(item, dict) and isinstance(item.get("snippet"), dict):
-                    live[item["id"]] = item["snippet"]
-                    localized = item.get("localizations")
-                    live_localizations[item["id"]] = localized if isinstance(localized, dict) else {}
-
-    stop_message = ""
-    for row in selected:
-        video_id = row.video_id
-        if video_id in results:
-            continue
-        if stop_message:
-            results[video_id] = PushItem(video_id, "not_attempted", stop_message)
-            continue
-        snippet = live.get(video_id)
-        if snippet is None:
-            results[video_id] = PushItem(
-                video_id,
-                "missing",
-                "This video is not on YouTube any more (deleted or unavailable). Nothing was pushed.",
-            )
-            continue
-        localized = live_localizations.get(video_id, {})
-        sets_i18n = row.default_language is not None or row.localizations is not None
-        # The translations go into the backup only when this push changes them, so restoring
-        # an older text never rolls back translations added later.
-        before = backup_of(snippet, localized if sets_i18n else None)
-        if (_live_text(snippet) != (row.base_title, row.base_description, row.base_tags)
-                or (row.default_language is not None
-                    and snippet.get("defaultLanguage") != row.base_default_language)
-                or (row.localizations is not None
-                    and plain_localizations(localized) != row.base_localizations)):
-            push_id = store.begin_push(video_id, row.source, before, now)
-            message = (
-                "This video was changed on YouTube (for example in Studio) after your last pull. "
-                "Nothing was pushed. The catalog now shows the live text; check your draft against it."
-            )
-            store.finish_push(push_id, "conflict", {}, message, now)
+            returned = response.get("snippet") if isinstance(response, dict) else None
+            returned = returned if isinstance(returned, dict) else {}
+            store.finish_push(push_id, "pushed", after, "Pushed to YouTube.", now)
+            extra: dict[str, Any] = {}
+            if sets_i18n:
+                returned_localizations = response.get("localizations") if isinstance(response, dict) else None
+                extra = {
+                    "default_language": returned.get("defaultLanguage", sent.get("defaultLanguage")),
+                    "localizations": (returned_localizations if isinstance(returned_localizations, dict)
+                                      else sent_localizations),
+                }
             store.update_video_text(
-                video_id, before["title"], before["description"], before["tags"], now,
-                default_language=snippet.get("defaultLanguage"), localizations=localized,
+                video_id,
+                returned.get("title", sent["title"]),
+                returned.get("description", sent["description"]),
+                # The update response lists tags alphabetically, but YouTube keeps the order sent (a
+                # later read returns it): storing the response's order made the next push conflict.
+                sent["tags"],
+                now,
+                **extra,
             )
-            store.set_draft_approval(video_id, None)
-            results[video_id] = PushItem(video_id, "conflict", message, push_id)
-            say(f"{video_id}: changed on YouTube, not pushed.")
-            continue
-
-        sent: dict[str, Any] = {key: snippet[key] for key in KEEP_SNIPPET_KEYS if key in snippet}
-        sent.update(title=row.title, description=row.description, tags=list(row.tags))
-        body: dict[str, Any] = {"id": video_id, "snippet": sent}
-        part = "snippet"
-        after = sent
-        if sets_i18n:
-            if row.default_language is not None:
-                sent["defaultLanguage"] = row.default_language
-            sent_localizations = (row.localizations if row.localizations is not None
-                                  else plain_localizations(localized))
-            body["localizations"] = sent_localizations
-            part = "snippet,localizations"
-            after = {**sent, "localizations": sent_localizations}
-        push_id = store.begin_push(video_id, row.source, before, now)  # the backup comes first
-        try:
-            units += guard.charge("videos.update", note="push")
-            say(f"Updating {video_id}...")
-            response = writer.update_video(body, part)
-        except Exception as exc:  # noqa: BLE001 - recorded and reported, never raised
-            message = _error_message("YouTube update", exc)
-            store.finish_push(push_id, "failed", {}, message, now)
-            results[video_id] = PushItem(video_id, "failed", message, push_id)
-            if _is_stop(exc):
-                stop_message = "Stopped after an error that would affect every video."
-            continue
-        returned = response.get("snippet") if isinstance(response, dict) else None
-        returned = returned if isinstance(returned, dict) else {}
-        store.finish_push(push_id, "pushed", after, "Pushed to YouTube.", now)
-        extra: dict[str, Any] = {}
-        if sets_i18n:
-            returned_localizations = response.get("localizations") if isinstance(response, dict) else None
-            extra = {
-                "default_language": returned.get("defaultLanguage", sent.get("defaultLanguage")),
-                "localizations": (returned_localizations if isinstance(returned_localizations, dict)
-                                  else sent_localizations),
-            }
-        store.update_video_text(
-            video_id,
-            returned.get("title", sent["title"]),
-            returned.get("description", sent["description"]),
-            # The update response lists tags alphabetically, but YouTube keeps the order sent (a
-            # later read returns it): storing the response's order made the next push conflict.
-            sent["tags"],
-            now,
-            **extra,
-        )
-        store.delete_draft(video_id)
-        results[video_id] = PushItem(video_id, "pushed", "Pushed to YouTube.", push_id)
-        say(f"{video_id}: pushed.")
+            store.delete_draft(video_id)
+            results[video_id] = PushItem(video_id, "pushed", "Pushed to YouTube.", push_id)
+            say(f"{video_id}: pushed.")
+    finally:
+        if run_id is not None:  # a stopped or failed push closes its run too
+            store.finish_push_run(run_id, pushes_made, now)
 
     items = tuple(results[video_id] for video_id in approved if video_id in results)
     return PushReport(items, units)

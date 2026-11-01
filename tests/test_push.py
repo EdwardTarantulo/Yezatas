@@ -9,7 +9,7 @@ from fakes import FakeYouTubeWriter, make_http_error
 from yezatas.catalog import pull_catalog
 from yezatas.edits import (
     DraftError, add_translations, approve, fingerprint, remove_translation, restore_draft,
-    save_draft, set_language,
+    restore_run, save_draft, set_language,
 )
 from yezatas.push import KEEP_SNIPPET_KEYS, backup_of, push_drafts, push_units
 from yezatas.quota import QuotaExceeded, QuotaGuard
@@ -334,7 +334,82 @@ def test_pushed_history_can_be_restored_through_the_same_path(env) -> None:
     assert store.get_push(second.items[0].push_id).source == "restore"
 
 
-# --- language and translations --------------------------------------------------------------
+# --- push runs ---------------------------------------------------------------------------------
+
+
+def test_a_multi_video_push_is_one_closed_run(env) -> None:
+    store, writer = env
+    approved = {v: approved_draft(store, v) for v in (V1, V2, V3)}
+    result = push_drafts(writer, store, make_guard(store), approved, now=NOW)
+    pushes = store.list_pushes()
+    assert len(pushes) == 3 and len({p.run_id for p in pushes}) == 1
+    run = store.get_push_run(pushes[0].run_id)
+    assert run is not None and run.video_count == 3 and run.finished_at == NOW.isoformat()
+    assert [p.id for p in store.list_pushes_of_run(run.id)] == [i.push_id for i in result.items]
+    second = push_drafts(writer, store, make_guard(store),
+                          {V1: approved_draft(store, V1, "Another title")}, now=NOW)
+    assert store.get_push(second.items[0].push_id).run_id != run.id  # each call is its own run
+
+
+def test_conflicts_and_failures_are_part_of_the_run(env) -> None:
+    store, writer = env
+    approved = {v: approved_draft(store, v) for v in (V1, V2, V3)}
+    writer.studio_edit(V1, title="Changed by hand")
+    writer.update_errors[V2] = make_http_error(400, "invalidDescription", "Bad description.")
+    push_drafts(writer, store, make_guard(store), approved, now=NOW)
+    pushes = store.list_pushes_of_run(store.list_pushes()[0].run_id)
+    assert [p.status for p in pushes] == ["conflict", "failed", "pushed"]
+    assert store.get_push_run(pushes[0].run_id).video_count == 3
+
+
+def test_a_stopped_push_still_closes_its_run(env) -> None:
+    store, writer = env
+    approved = {v: approved_draft(store, v) for v in (V1, V2, V3)}
+    writer.update_errors[V2] = make_http_error(403, "quotaExceeded")
+    push_drafts(writer, store, make_guard(store), approved, now=NOW)
+    run = store.get_push_run(store.list_pushes()[0].run_id)
+    assert run.finished_at is not None and run.video_count == 2  # V3 was never attempted
+
+
+def test_a_crash_inside_a_push_closes_the_run(env) -> None:
+    store, writer = env
+    approved = {v: approved_draft(store, v) for v in (V1, V2)}
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    store.update_video_text = broken  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        push_drafts(writer, store, make_guard(store), approved, now=NOW)
+    run = store.get_push_run(1)
+    assert run is not None and run.finished_at is not None and run.video_count == 1
+
+
+def test_no_run_is_made_when_nothing_is_pushed(env) -> None:
+    store, writer = env
+    save_draft(store, V1, "Not approved", "d", [], now=NOW)
+    push_drafts(writer, store, make_guard(store), {V1: fingerprint(store.get_draft(V1))}, now=NOW)
+    assert store.get_push_run(1) is None and writer.calls == []
+    approved = {V2: approved_draft(store, V2)}
+    with pytest.raises(QuotaExceeded):
+        push_drafts(writer, store, make_guard(store, budget=1), approved, now=NOW)
+    assert store.get_push_run(1) is None  # refused before any call: no run
+
+
+def test_a_pushed_run_can_be_undone_into_drafts_without_touching_youtube(env) -> None:
+    store, writer = env
+    originals = {v: store.get_video(v).title for v in (V1, V2)}
+    approved = {v: approved_draft(store, v) for v in (V1, V2)}
+    push_drafts(writer, store, make_guard(store), approved, now=NOW)
+    writer.calls.clear()
+    updates = len(writer.updates)
+    result = restore_run(store, store.list_pushes()[0].run_id, now=NOW)
+    assert result.count("drafted") == 2
+    assert {v: store.get_draft(v).title for v in (V1, V2)} == originals
+    assert writer.calls == [] and len(writer.updates) == updates
+
+
+# --- language and translations--------------------------------------------------------------
 
 
 def approve_now(store: Store, video_id: str) -> str:

@@ -49,9 +49,9 @@ from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
 from .views import (Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem, build_listing,
                     build_outlier_view, build_packaging_view, build_preview, build_subtitles_view, build_transcript_view,
                     build_translate_view, change_cards, chapters_blocker, dashboard_model, format_cost,
-                    format_count, format_date, group_checks, history_rows, lang_name, make_entries,
+                    format_count, format_date, group_checks, history_groups, lang_name, make_entries,
                     outlier_count, outlier_line, plan_lines, preview_card, pull_moment, push_results,
-                    run_view, stops_batch, thumb_url, top_other_videos)
+                    run_restore_summary, run_view, stops_batch, thumb_url, top_other_videos)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -1693,16 +1693,45 @@ def create_app(
     def history_page(request: Request) -> Response:
         with Store(config.catalog_db) as store:
             records = store.list_pushes(limit=HISTORY_LIMIT)
+            run_ids = [r.run_id for r in records if r.run_id is not None]
+            runs = store.get_push_runs(run_ids)
+            run_records = {run_id: store.list_pushes_of_run(run_id) for run_id in runs}
             drafts = {row.video_id for row in store.list_drafts()}
             titles = {}
-            for record in records:
+            for record in [*records, *(m for ms in run_records.values() for m in ms)]:
                 video = store.get_video(record.video_id)
                 if video is not None:
                     titles[record.video_id] = video.title
         return render(request, "history.html", {
-            "active": "history", "rows": history_rows(records, titles, _local_time, drafts),
-            "limit": HISTORY_LIMIT,
+            "active": "history",
+            "groups": history_groups(records, runs, run_records, titles, _local_time, drafts),
+            "limit": HISTORY_LIMIT, "shown": len(records),
         })
+
+    @app.post("/history/runs/{run_id}/undo")
+    async def undo_run(request: Request, run_id: int) -> Response:
+        await read_form(request)
+
+        def work() -> tuple[str, str, str]:
+            with Store(config.catalog_db) as store:
+                try:
+                    result = edits.restore_run(store, run_id)
+                except edits.DraftError as exc:
+                    return "error", str(exc), "/history"
+                titles = {}
+                for item in result.items:
+                    video = store.get_video(item.video_id)
+                    if video is not None:
+                        titles[item.video_id] = video.title
+            made = result.count("drafted")
+            message = run_restore_summary(result, titles)
+            if made:
+                return "ok", message + " Nothing changes on YouTube until you approve and push them.", "/changes"
+            return "info", message, "/history"
+
+        kind, message, target = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other(target)
 
     @app.post("/history/{push_id}/restore")
     async def restore_text(request: Request, push_id: int) -> Response:

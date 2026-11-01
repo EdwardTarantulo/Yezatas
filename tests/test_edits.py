@@ -8,7 +8,7 @@ from fakes import FakeYouTubeReader, make_item
 from yezatas.catalog import pull_catalog, video_from_api
 from yezatas.edits import (
     DraftError, add_translations, approve, discard, fingerprint, is_stale, issues_for, pending,
-    rebase, remove_translation, restore_draft, save_draft, set_language, unapprove,
+    rebase, remove_translation, restore_draft, restore_run, save_draft, set_language, unapprove,
 )
 from yezatas.quota import QuotaGuard
 from yezatas.store import Store
@@ -174,6 +174,93 @@ def test_restoring_the_current_text_leaves_no_draft(store: Store) -> None:
         {"title": video.title, "description": video.description, "tags": video.tags})
     result = restore_draft(store, push_id)
     assert result.discarded and store.get_draft(VID) is None
+
+
+def test_restore_draft_takes_an_optional_note(store: Store) -> None:
+    push_id = store.begin_push(VID, "manual", {"title": "Old title", "description": "", "tags": []})
+    row = restore_draft(store, push_id, now=NOW, note="Custom note").draft
+    assert row is not None and row.note == "Custom note" and row.source == "restore"
+
+
+def make_pushed(store: Store, run: int | None, video_id: str, title: str, status: str = "pushed") -> int:
+    """A push row with a backup holding `title` (the text from before the push)."""
+    push_id = store.begin_push(
+        video_id, "manual", {"title": title, "description": "Old text", "tags": ["old"]},
+        NOW, run)
+    store.finish_push(push_id, status, {}, "m", NOW)
+    return push_id
+
+
+def test_restore_run_makes_a_draft_per_pushed_video(store: Store) -> None:
+    run = store.begin_push_run(NOW)
+    a = make_pushed(store, run, VID, "Old title two")
+    b = make_pushed(store, run, VID5, "Old title five")
+    store.finish_push_run(run, 2, NOW)
+    result = restore_run(store, run, NOW)
+    assert result.run_id == run and result.count("drafted") == 2 and result.count("skipped") == 0
+    assert [(i.video_id, i.push_id, i.status, i.message) for i in result.items] == [
+        (VID, a, "drafted", "Restore draft made."), (VID5, b, "drafted", "Restore draft made.")]
+    row = store.get_draft(VID)
+    assert row.title == "Old title two" and row.source == "restore" and row.approved_at is None
+    assert row.note == f"Restore of push run #{run}"
+    assert store.get_draft(VID5).title == "Old title five"
+
+
+def test_restore_run_skips_what_it_must_not_touch(store: Store) -> None:
+    run = store.begin_push_run(NOW)
+    failed = make_pushed(store, run, "vid000001", "Old one", status="failed")
+    has_draft = make_pushed(store, run, VID, "Old two")
+    save_draft(store, VID, "Work in progress", "d", [], now=NOW)
+    again = make_pushed(store, run, "vid000003", "Old three")
+    later = make_pushed(store, None, "vid000003", "Newer three")  # a later push of the same video
+    ok = make_pushed(store, run, "vid000004", "Old four")
+    result = restore_run(store, run, NOW)
+    by_id = {i.push_id: i for i in result.items}
+    assert [i.push_id for i in result.items] == [failed, has_draft, again, ok]  # push order
+    assert (by_id[failed].status, by_id[failed].message) == (
+        "skipped", "This video was not changed by that push.")
+    assert (by_id[has_draft].status, by_id[has_draft].message) == (
+        "skipped", "This video already has a draft. Push or discard it first.")
+    assert by_id[again].status == "skipped" and by_id[again].message == (
+        f"Changed again by push #{later}; restore that one from History if you want to go "
+        "further back.")
+    assert by_id[ok].status == "drafted"
+    assert store.get_draft(VID).title == "Work in progress"  # untouched
+    assert store.get_draft("vid000001") is None and store.get_draft("vid000003") is None
+    assert store.get_draft("vid000004").title == "Old four"
+
+
+def test_a_later_failed_push_does_not_block_the_undo(store: Store) -> None:
+    run = store.begin_push_run(NOW)
+    make_pushed(store, run, VID, "Old two")
+    make_pushed(store, None, VID, "Tried again", status="failed")
+    assert restore_run(store, run, NOW).count("drafted") == 1
+
+
+def test_restore_run_reports_text_that_is_already_live_as_unchanged(store: Store) -> None:
+    video = store.get_video(VID)
+    run = store.begin_push_run(NOW)
+    push_id = store.begin_push(
+        VID, "manual",
+        {"title": video.title, "description": video.description, "tags": video.tags}, NOW, run)
+    store.finish_push(push_id, "pushed", {}, "m", NOW)
+    result = restore_run(store, run, NOW)
+    assert [(i.status, i.message) for i in result.items] == [
+        ("unchanged", "That text is already on YouTube.")]
+    assert store.get_draft(VID) is None
+
+
+def test_restore_run_turns_a_backup_error_into_a_skip(store: Store) -> None:
+    run = store.begin_push_run(NOW)
+    push_id = store.begin_push(VID, "manual", {}, NOW, run)
+    store.finish_push(push_id, "pushed", {}, "m", NOW)
+    result = restore_run(store, run, NOW)
+    assert result.items[0].status == "skipped" and "no saved text" in result.items[0].message
+
+
+def test_restore_run_of_an_unknown_run_is_refused(store: Store) -> None:
+    with pytest.raises(DraftError, match="This push run does not exist."):
+        restore_run(store, 99)
 
 
 def test_fingerprint_changes_with_text_or_base(store: Store) -> None:

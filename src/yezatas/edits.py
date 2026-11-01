@@ -332,8 +332,12 @@ def rebase(store: Store, video_id: str, now: datetime | None = None) -> DraftRow
     return new_row
 
 
-def restore_draft(store: Store, push_id: int, now: datetime | None = None) -> SaveResult:
+def restore_draft(
+    store: Store, push_id: int, now: datetime | None = None, *, note: str | None = None
+) -> SaveResult:
     """Turn the backup of a push (the text from before it) into a draft to review and approve.
+
+    `note` replaces the default draft note ("Restore of the text from before push #N").
 
     A backup that also holds the video language or the translations restores them too (when
     they differ from the video's now); older backups leave them alone.
@@ -365,8 +369,63 @@ def restore_draft(store: Store, push_id: int, now: datetime | None = None) -> Sa
         localizations = None
     return _store_draft(
         store, video, None, text, language, localizations,
-        source="restore", note=f"Restore of the text from before push #{push_id}", now=now,
+        source="restore",
+        note=note if note is not None else f"Restore of the text from before push #{push_id}",
+        now=now,
     )
+
+
+@dataclass(frozen=True)
+class RunRestoreItem:
+    video_id: str
+    push_id: int
+    status: str  # drafted | unchanged | skipped
+    message: str
+
+
+@dataclass(frozen=True)
+class RunRestore:
+    run_id: int
+    items: tuple[RunRestoreItem, ...]
+
+    def count(self, status: str) -> int:
+        return sum(1 for item in self.items if item.status == status)
+
+
+def restore_run(store: Store, run_id: int, now: datetime | None = None) -> RunRestore:
+    """Make restore drafts for every video a push run changed (drafts only, YouTube is not called).
+
+    A video is skipped, never forced, when it was not changed by the run, already has a draft, or
+    was pushed again later: undoing must not silently throw away a later change.
+    """
+    if store.get_push_run(run_id) is None:
+        raise DraftError("This push run does not exist.")
+    items: list[RunRestoreItem] = []
+    for record in store.list_pushes_of_run(run_id):
+        def item(status: str, message: str, record=record) -> RunRestoreItem:
+            return RunRestoreItem(record.video_id, record.id, status, message)
+
+        if record.status != "pushed":
+            items.append(item("skipped", "This video was not changed by that push."))
+        elif store.get_draft(record.video_id) is not None:
+            items.append(item("skipped", "This video already has a draft. Push or discard it first."))
+        elif (later := store.later_pushed(record.video_id, record.id)) is not None:
+            items.append(item(
+                "skipped",
+                f"Changed again by push #{later.id}; restore that one from History "
+                "if you want to go further back.",
+            ))
+        else:
+            try:
+                result = restore_draft(store, record.id, now, note=f"Restore of push run #{run_id}")
+            except DraftError as exc:
+                items.append(item("skipped", str(exc)))
+                continue
+            if result.saved:
+                items.append(item("drafted", "Restore draft made."))
+            else:
+                items.append(item("unchanged", "That text is already on YouTube."))
+    return RunRestore(run_id, tuple(items))
 
 
 def fingerprint(row: DraftRow) -> str:
