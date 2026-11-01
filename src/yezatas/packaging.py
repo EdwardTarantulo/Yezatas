@@ -410,6 +410,11 @@ def _save_file(images_dir: Path, video_id: str, prefix: str, extension: str, dat
     return name
 
 
+def save_image(images_dir: Path, video_id: str, prefix: str, data: bytes) -> str:
+    """Store JPEG bytes under images_dir/<video_id>/ with a generated name; returns the bare name."""
+    return _save_file(images_dir, video_id, prefix, "jpg", data)
+
+
 def stored_image_path(images_dir: Path, video_id: str, image_file: str) -> Path:
     """The path of a stored image, from a bare file name only (never a path)."""
     if not image_file or Path(image_file).name != image_file or image_file in (".", ".."):

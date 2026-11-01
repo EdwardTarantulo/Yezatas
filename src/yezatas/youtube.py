@@ -137,3 +137,10 @@ class GoogleYouTubeWriter(GoogleYouTubeReader):
 
     def update_video(self, body: dict[str, Any], part: str) -> dict[str, Any]:
         return self._service.videos().update(part=part, body=body).execute()
+
+    def set_thumbnail(self, video_id: str, image: bytes) -> dict[str, Any]:
+        """Upload JPEG bytes as the video's thumbnail (thumbnails.set, 50 units)."""
+        from googleapiclient.http import MediaInMemoryUpload
+
+        media = MediaInMemoryUpload(image, mimetype="image/jpeg", resumable=False)
+        return self._service.thumbnails().set(videoId=video_id, media_body=media).execute()

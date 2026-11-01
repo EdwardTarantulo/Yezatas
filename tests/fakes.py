@@ -111,6 +111,8 @@ class FakeYouTubeWriter(FakeYouTubeReader):
         self.update_errors: dict[str, Exception] = {}  # video id -> raised by update_video
         self.on_update: Callable[[dict[str, Any]], None] | None = None  # called before applying
         self.updates: list[tuple[dict[str, Any], str]] = []
+        self.thumbnails_set: list[tuple[str, bytes]] = []
+        self.thumbnail_errors: dict[str, Exception] = {}  # video id -> raised by set_thumbnail
 
     def item(self, video_id: str) -> dict[str, Any]:
         return next(i for i in self.items if i["id"] == video_id)
@@ -125,6 +127,13 @@ class FakeYouTubeWriter(FakeYouTubeReader):
 
     def remove(self, video_id: str) -> None:
         self.items = [i for i in self.items if i["id"] != video_id]
+
+    def set_thumbnail(self, video_id: str, image: bytes) -> dict[str, Any]:
+        self.calls.append(("thumbnails.set", video_id))
+        if video_id in self.thumbnail_errors:
+            raise self.thumbnail_errors[video_id]
+        self.thumbnails_set.append((video_id, image))
+        return {"items": [{"default": {"url": f"https://example.invalid/{video_id}-new.jpg"}}]}
 
     def videos(self, ids: Sequence[str], part: str) -> dict[str, Any]:
         self.calls.append(("videos", (tuple(ids), part)))
