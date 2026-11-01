@@ -102,6 +102,20 @@ as it lands; the git history is the detailed record.
   nothing; **Make drafts** saves only the ticked videos, re-checked first. Videos that already have a draft or would
   break YouTube's limits are blocked. No model is used. A preview on the real channel (`http://` to `https://` in
   public descriptions) found 213 videos; it showed that an upgraded link was reported as "removed", which is fixed.
+- **2026-11-01**: **channel copilot**: ask about your own channel in plain words on a **Copilot** page:
+  - **The whole channel in context.** **Muse Spark 1.3** gets a table of every video made by code (date, views, "vs
+    norm", SEO score, chapters, Short or not), with videos named by refs like V12 that the page turns into links.
+  - **Read-only tools.** Find and count videos by filters, search titles, tags, descriptions and transcripts, read one
+    video with its failed checks, read a transcript, and channel totals, all computed by code.
+  - **Number guard.** Every number in an answer must come from the table, a tool, the question or the chat so far.
+    Otherwise the model gets one chance to fix it, and then the sentence is removed with a note under the answer.
+  - **Edits are proposals.** The model can offer a new title, description and tags for a video (checked by the edit
+    validator and the fact guard first). It becomes a draft only when the creator clicks Make draft, then goes through
+    Changes, approve and push.
+  - On the real channel, "Which of my popular videos have no chapters?" was answered from a code-counted list (7
+    outliers of 4 minutes or more without chapters) for about $0.06; a follow-up proposed a new title and description
+    opening for one of them for $0.05, most of its input cached. The first run counted Shorts as "no chapters" and
+    repeated each title next to its link; both are fixed.
 
 ## Setup
 
@@ -135,7 +149,7 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 
 | Model | Where it runs | What Yezatas uses it for |
 |---|---|---|
-| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. |
+| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. |
 | Muse Spark Open | Baseten | Translating titles, descriptions and subtitles. |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
