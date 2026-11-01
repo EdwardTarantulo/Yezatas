@@ -92,6 +92,38 @@ class GoogleYouTubeReader:
         return self._service.videos().list(part=part, id=",".join(ids)).execute()
 
 
+class CommentReader(Protocol):
+    """The comment read the comments assistant needs; each call returns the raw API response."""
+
+    def comment_threads(self, video_id: str, page_token: str | None) -> dict[str, Any]: ...
+
+
+class GoogleCommentReader:
+    """CommentReader backed by google-api-python-client. Thin on purpose; not unit-tested.
+
+    Reading comments needs the youtube.force-ssl scope.
+    """
+
+    def __init__(self, credentials: Any) -> None:
+        from googleapiclient.discovery import build
+
+        self._service = build("youtube", "v3", credentials=credentials, cache_discovery=False)
+
+    def comment_threads(self, video_id: str, page_token: str | None) -> dict[str, Any]:
+        return (
+            self._service.commentThreads()
+            .list(
+                part="snippet",
+                videoId=video_id,
+                maxResults=100,
+                textFormat="plainText",
+                order="time",
+                pageToken=page_token,
+            )
+            .execute()
+        )
+
+
 class YouTubeWriter(Protocol):
     """What a push needs: read a batch of videos, and update one video's snippet."""
 
