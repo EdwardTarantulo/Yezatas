@@ -1,0 +1,122 @@
+{% extends "shell.html" %}
+{% block title %}Search gaps - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Search gaps: what viewers searched for</h1>
+<p class="muted" id="searchgaps-about">Real YouTube search terms from the last {{ days }} days (YouTube Analytics, read-only) whose words are missing from the title of the video they led to. A term for the whole channel is a gap when no public title has all its words.</p>
+
+<section class="card" id="searchgaps-connect" aria-labelledby="h-searchgaps-connect">
+  <h2 id="h-searchgaps-connect">1. Search terms</h2>
+  {% if signin_running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="searchgaps_signin-msg" role="status" aria-live="polite">{{ signin_message or 'Starting…' }}</span></p>
+  <p class="hint">This can take a few minutes. You can leave this page. The result shows here.</p>
+  <form class="inline" method="post" action="/search-gaps/connect/cancel"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Cancel</button></form>
+  {% else %}
+  {% if signin_failed %}
+  <div class="flash error" role="alert" id="searchgaps-signin-failed">{{ signin_failed }}</div>
+  <form class="inline" method="post" action="/search-gaps/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if not connected %}
+  <p class="hint" id="searchgaps-connect-hint">Search terms come from YouTube Analytics. Enable the YouTube Analytics API in your Google Cloud project, then connect: Google asks once more, and the edit access you gave stays.</p>
+  <form class="packaging-form" method="post" action="/search-gaps/connect">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="actions"><button type="submit" class="button primary">Connect search terms</button></div>
+  </form>
+  {% else %}
+  {% if read_running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="searchgaps-msg" role="status" aria-live="polite">{{ read_message or 'Starting…' }}</span></p>
+  <p class="hint">This can take a few minutes. You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if read_failed %}
+  <div class="flash error" role="alert" id="searchgaps-read-failed">{{ read_failed }}</div>
+  <form class="inline" method="post" action="/search-gaps/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% endif %}
+  <p class="hint">Reading uses 1 call for the channel and 1 for each of your {{ max_videos }} most viewed public videos (YouTube Analytics quota, not your daily YouTube Data quota). Nothing is written to YouTube.</p>
+  <form class="packaging-form" method="post" action="/search-gaps/read">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="actions"><button type="submit" class="button primary"{% if read_running %} disabled{% endif %}>Read search terms</button></div>
+  </form>
+  {% if terms_when %}
+  <p class="muted" id="searchgaps-terms-when">Read {{ terms_when }} · {{ terms_range }} · {{ calls }} calls</p>
+  {% endif %}
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="card" id="searchgaps-gaps" aria-labelledby="h-searchgaps-gaps">
+  <h2 id="h-searchgaps-gaps">2. Gaps ({{ gap_count }})</h2>
+  {% if rows %}
+  <table class="vtable ol-table">
+    <caption class="visually-hidden">Search gaps</caption>
+    <thead>
+      <tr>
+        <th scope="col">Search term</th>
+        <th class="col-num" scope="col">Views from it</th>
+        <th scope="col">Video</th>
+        <th scope="col">Missing words</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.term }}</td>
+        <td class="col-num">{{ r.views }}</td>
+        <td>{% if r.video_url %}<a href="{{ r.video_url }}">{{ r.video_title }}</a>{% else %}<span class="muted">{{ r.video_title }}</span>{% endif %}</td>
+        <td>{{ r.missing }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  {% if not terms_when %}
+  <p class="empty-note">No gaps yet: read the search terms first.</p>
+  {% else %}
+  <p class="empty-note">Every search term's words are already in its video's title.</p>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="card" id="searchgaps-rank" aria-labelledby="h-searchgaps-rank">
+  <h2 id="h-searchgaps-rank">3. Which gaps to fix</h2>
+  <p class="muted">{{ model }} gets the {{ max_sent }} gaps with the most views as labels with their numbers and picks up to {{ max_picks }}. A reason that quotes a number it was not given is dropped.</p>
+  {% if rank_running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="searchgaps_rank-msg" role="status" aria-live="polite">{{ rank_message or 'Starting…' }}</span></p>
+  <p class="hint">This can take a few minutes. You can leave this page. The result shows here.</p>
+  {% else %}
+  {% if rank_failed %}
+  <div class="flash error" role="alert" id="searchgaps-rank-failed">{{ rank_failed }}</div>
+  <form class="inline" method="post" action="/search-gaps/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if not has_key %}<p class="hint" id="searchgaps-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  <p class="hint">These go to Meta's Model API ({{ model }}). Meta handles them under your Meta account's terms; on free credits Meta may use them to improve its products. Nothing is sent to YouTube. One run costs about {{ estimate }}.</p>
+  <form class="packaging-form" method="post" action="/search-gaps/rank">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="actions"><button type="submit" class="button primary"{% if not has_key or not gap_count %} disabled{% endif %}>Rank with Muse Spark</button></div>
+  </form>
+  {% endif %}
+  {% if ranking %}
+  <div id="searchgaps-ranking">
+    <h3 class="run-h">Last ranking: {{ ranking.when }}</h3>
+    {% if ranking.status == "too_few" %}
+    <p class="empty-note">There were no gaps to rank.</p>
+    {% elif ranking.status == "error" %}
+    <div class="flash error" role="alert">{{ ranking.error }}</div>
+    {% else %}
+    <ul class="run-list" id="searchgaps-picks">
+      {% for p in ranking.picks %}
+      <li><strong>{{ p.priority }}</strong> {{ p.term }} ({{ p.views }} views, missing: {{ p.missing }}) {% if p.video_url %}<a href="{{ p.video_url }}">{{ p.video_title }}</a>{% else %}<span class="muted">{{ p.video_title }}</span>{% endif %}: {{ p.reason }}</li>
+      {% endfor %}
+    </ul>
+    {% if ranking.notes %}
+    <ul class="run-list muted" id="searchgaps-notes">
+      {% for n in ranking.notes %}
+      <li>{{ n }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+    <p class="muted">{% if ranking.model %}{{ ranking.model }}{% endif %}{% if ranking.tokens %} · {{ ranking.tokens }} tokens{% endif %}{% if ranking.cost %} · Cost {{ ranking.cost }}{% endif %}</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

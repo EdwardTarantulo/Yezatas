@@ -35,6 +35,7 @@ from .. import shorts as shorts_mod
 from .. import copilot as copilot_mod
 from .. import strategy as strategy_mod
 from .. import competitors as competitors_mod
+from .. import searchgaps as searchgaps_mod
 from .. import links as links_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
@@ -58,6 +59,7 @@ from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
                          parse_client_file, read_saved_client, save_client_file)
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
 from .competitors_view import build_competitor_cards, build_insight_view
+from .searchgaps_view import build_gap_rows, build_ranking_view
 from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
@@ -129,6 +131,13 @@ STRATEGY_TIMEOUT_SECONDS = 5 * 60.0
 COMPETITORS_TIMEOUT_SECONDS = 5 * 60.0
 COMPETITORS_TIMEOUT_MESSAGE = ("Reading or explaining the other channels took more than 5 minutes, so "
                                "Yezatas stopped waiting. Try again.")
+SEARCHGAPS_TIMEOUT_SECONDS = 5 * 60.0
+SEARCHGAPS_TIMEOUT_MESSAGE = ("Reading or ranking the search terms took more than 5 minutes, so "
+                              "Yezatas stopped waiting. Try again.")
+ANALYTICS_DISABLED = ("The YouTube Analytics API is not enabled in your Google Cloud project. Enable "
+                      "it (APIs & Services, Library, YouTube Analytics API), wait a minute, then try again.")
+ANALYTICS_SIGN_IN = ("Google did not accept the search-terms sign-in. Click Connect search terms and "
+                     "sign in again.")
 STRATEGY_TIMEOUT_MESSAGE = (
     "The strategy report took more than 5 minutes, so Yezatas stopped waiting. Try again."
 )
@@ -196,6 +205,9 @@ CompetitorReaderFactory = Callable[[Any], "competitors_mod.PublicChannelReader"]
 # (the followed channels, report) -> the saved explanation
 CompetitorExplainFn = Callable[[list["competitors_mod.CompetitorChannel"], Report],
                                "competitors_mod.CompetitorInsight"]
+AnalyticsReaderFactory = Callable[[Any], "searchgaps_mod.AnalyticsReader"]
+GapRankFn = Callable[["searchgaps_mod.SearchTerms", list["searchgaps_mod.SearchGap"], Report],
+                     "searchgaps_mod.GapRanking"]
 # (store, the creator's words) -> the proposed bulk plan
 BulkAskerFn = Callable[[Store, str], "bulkask_mod.AskProposal"]
 
@@ -252,11 +264,22 @@ def _num(value: int) -> str:
 
 def sign_in_with_write_access(config: Config) -> Any:
     """The default write sign-in: the same browser flow as setup, asking to edit videos."""
-    return auth.sign_in(config, scopes=(auth.WRITE,))
+    scopes = (auth.WRITE, auth.ANALYTICS) if auth.can_read_analytics(config) else (auth.WRITE,)
+    return auth.sign_in(config, scopes=scopes)
 
 
 def load_write_credentials(config: Config) -> Any:
     return auth.load_credentials(config, scopes=(auth.WRITE,))
+
+
+def sign_in_with_analytics_access(config: Config) -> Any:
+    """The search-terms sign-in: the same browser flow, adding read access to YouTube Analytics and
+    keeping the edit access already given."""
+    return auth.sign_in(config, scopes=auth.analytics_scopes(config))
+
+
+def load_analytics_credentials(config: Config) -> Any:
+    return auth.load_credentials(config, scopes=(auth.ANALYTICS,))
 
 
 def map_suggest_error(exc: BaseException) -> tuple[str, str]:
@@ -385,6 +408,39 @@ def make_default_competitor_explain(config: Config) -> CompetitorExplainFn:
         report("Asking the model")
         made = competitors_mod.explain(channels, client)
         competitors_mod.save_insight(config.home, made)
+        return made
+
+    return run
+
+
+def map_searchgaps_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, searchgaps_mod.SearchGapsError):
+        return ("search_gaps", str(exc))
+    if isinstance(exc, agent.ModelError):
+        return (exc.kind, str(exc))
+    kind, text = map_api_error(exc)
+    if kind == "api_disabled":
+        return (kind, ANALYTICS_DISABLED)
+    if kind == "auth":
+        return (kind, ANALYTICS_SIGN_IN)
+    return (kind, text)
+
+
+def make_default_gap_rank(config: Config) -> GapRankFn:
+    def run(
+        terms: "searchgaps_mod.SearchTerms",
+        gaps: list["searchgaps_mod.SearchGap"],
+        report: Report,
+    ) -> "searchgaps_mod.GapRanking":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        report("Asking the model")
+        made = searchgaps_mod.rank_gaps(terms, gaps, client)
+        searchgaps_mod.save_ranking(config.home, made)
         return made
 
     return run
@@ -640,6 +696,10 @@ class WebState:
         rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
         strategy_fn: StrategyFn | None = None,
         shorts_fn: ShortsFn | None = None,
+        analytics_sign_in: Callable[[Config], Any] | None = None,
+        analytics_credentials_loader: CredentialsLoader | None = None,
+        analytics_reader: AnalyticsReaderFactory | None = None,
+        gap_rank: GapRankFn | None = None,
         competitor_reader: CompetitorReaderFactory | None = None,
         competitor_explain: CompetitorExplainFn | None = None,
     ) -> None:
@@ -664,6 +724,10 @@ class WebState:
         self._shorts = shorts_fn or make_default_shorts(config)
         self._competitor_reader = competitor_reader  # None: the real reader
         self._competitor_explain = competitor_explain or make_default_competitor_explain(config)
+        self._analytics_sign_in = analytics_sign_in or sign_in_with_analytics_access
+        self._analytics_credentials_loader = analytics_credentials_loader or load_analytics_credentials
+        self._analytics_reader = analytics_reader  # None: the real YouTube Analytics reader
+        self._gap_rank = gap_rank or make_default_gap_rank(config)
         self._link_fetch = link_fetch  # None: the real visit, links_mod.fetch_url
         self.packaging_tools = packaging_tools
         # Whether a Meta key exists, asked on page loads without building any client. None: an
@@ -715,6 +779,18 @@ class WebState:
                                            COMPETITORS_TIMEOUT_MESSAGE, clock)
         self._competitors_seen: JobSnapshot | None = None
         self._competitors_explain_seen: JobSnapshot | None = None
+        self.searchgaps_signin_job = Job(
+            map_sign_in_error, sign_in_timeout, SIGN_IN_TIMEOUT_MESSAGE, clock
+        )
+        self.searchgaps_job = Job(
+            map_searchgaps_error, SEARCHGAPS_TIMEOUT_SECONDS, SEARCHGAPS_TIMEOUT_MESSAGE, clock
+        )
+        self.searchgaps_rank_job = Job(
+            map_searchgaps_error, SEARCHGAPS_TIMEOUT_SECONDS, SEARCHGAPS_TIMEOUT_MESSAGE, clock
+        )
+        self._searchgaps_seen: JobSnapshot | None = None
+        self._searchgaps_rank_seen: JobSnapshot | None = None
+        self._searchgaps_signin_seen: JobSnapshot | None = None
         self.copilot_job = Job(map_copilot_error, COPILOT_TIMEOUT_SECONDS,
                                COPILOT_TIMEOUT_MESSAGE, clock)
         self._copilot_seen: JobSnapshot | None = None
@@ -1287,6 +1363,75 @@ class WebState:
             if not explain_snap.running:
                 self._competitors_explain_seen = explain_snap
 
+    # --- search gaps: real search terms missing from titles (C5) ---
+    def start_analytics_sign_in(self) -> bool:
+        def work(report: Report) -> None:
+            report("Waiting for you to finish in the browser tab…")
+            self._analytics_sign_in(self.config)
+
+        return self.searchgaps_signin_job.start(work)
+
+    def analytics_credentials(self) -> Any:
+        """Credentials that may read search terms, or None. Never raises."""
+        try:
+            return self._analytics_credentials_loader(self.config)
+        except Exception:  # noqa: BLE001 - a broken token file just means "sign in again"
+            return None
+
+    def start_search_terms(self, creds: Any) -> bool:
+        return self.searchgaps_job.start(lambda report: self._run_search_terms(creds, report))
+
+    def _run_search_terms(self, creds: Any, report: Report) -> "searchgaps_mod.SearchTerms":
+        report("Starting…")
+        if self._analytics_reader is None:
+            reader: Any = searchgaps_mod.GoogleAnalyticsReader(creds)
+        else:
+            reader = self._analytics_reader(creds)
+        with Store(self.config.catalog_db) as store:
+            if store.latest_pull() is None:
+                raise searchgaps_mod.SearchGapsError("There is no pulled catalog yet. Pull it in Setup first.")
+            videos = store.list_videos("video_id")
+        terms = searchgaps_mod.fetch_terms(reader, videos, report=report)
+        searchgaps_mod.save_terms(self.config.home, terms)
+        return terms
+
+    def start_gap_rank(self) -> bool:
+        return self.searchgaps_rank_job.start(self._run_gap_rank)
+
+    def _run_gap_rank(self, report: Report) -> "searchgaps_mod.GapRanking":
+        terms = searchgaps_mod.load_terms(self.config.home)
+        if terms is None:
+            raise searchgaps_mod.SearchGapsError("Read the search terms first.")
+        with Store(self.config.catalog_db) as store:
+            videos = store.list_videos("video_id")
+        gaps = searchgaps_mod.find_gaps(terms, videos)
+        return self._gap_rank(terms, gaps, report)
+
+    def searchgaps_state(self) -> tuple[JobSnapshot, JobSnapshot, JobSnapshot]:
+        signin_snap = self.searchgaps_signin_job.snapshot()
+        read_snap = self.searchgaps_job.snapshot()
+        rank_snap = self.searchgaps_rank_job.snapshot()
+        with self._lock:
+            if signin_snap is self._searchgaps_signin_seen:
+                signin_snap = JobSnapshot("idle")
+            if read_snap is self._searchgaps_seen:
+                read_snap = JobSnapshot("idle")
+            if rank_snap is self._searchgaps_rank_seen:
+                rank_snap = JobSnapshot("idle")
+        return signin_snap, read_snap, rank_snap
+
+    def dismiss_searchgaps_results(self) -> None:
+        signin_snap = self.searchgaps_signin_job.snapshot()
+        read_snap = self.searchgaps_job.snapshot()
+        rank_snap = self.searchgaps_rank_job.snapshot()
+        with self._lock:
+            if not signin_snap.running:
+                self._searchgaps_signin_seen = signin_snap
+            if not read_snap.running:
+                self._searchgaps_seen = read_snap
+            if not rank_snap.running:
+                self._searchgaps_rank_seen = rank_snap
+
     # --- copilot: questions about the channel -----------------------------------------------------
     def copilot_chat(self, store: Store) -> int | None:
         """The chat on screen: the one picked with "New chat", else the newest (None: no turns)."""
@@ -1514,6 +1659,10 @@ def create_app(
     rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
     strategy: StrategyFn | None = None,
     shorts: ShortsFn | None = None, shorts_key: Callable[[Config], bool] | None = None,
+    analytics_sign_in: Callable[[Config], Any] | None = None,
+    analytics_credentials_loader: CredentialsLoader | None = None,
+    analytics_reader: AnalyticsReaderFactory | None = None,
+    gap_rank: GapRankFn | None = None,
     competitor_reader: CompetitorReaderFactory | None = None,
     competitor_explain: CompetitorExplainFn | None = None,
 ) -> FastAPI:
@@ -1531,7 +1680,9 @@ def create_app(
                      packaging_key or (None if packaging_tools else has_meta_key), copilot,
                      link_fetch, adcheck, comment_reader, comments_assist, rule_maker, bulk_asker,
                      strategy_fn=strategy, shorts_fn=shorts,
-                     competitor_reader=competitor_reader, competitor_explain=competitor_explain)
+                     competitor_reader=competitor_reader, competitor_explain=competitor_explain,
+                     analytics_sign_in=analytics_sign_in, analytics_credentials_loader=analytics_credentials_loader,
+                     analytics_reader=analytics_reader, gap_rank=gap_rank)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -2069,6 +2220,94 @@ def create_app(
             "poll": snap.running,
         })
 
+    # --- search gaps: real search terms missing from titles (C5) ---
+    @app.get("/search-gaps")
+    def searchgaps_page(request: Request) -> Response:
+        terms = searchgaps_mod.load_terms(config.home)
+        with Store(config.catalog_db) as store:
+            if store.latest_pull() is None:
+                videos = []
+            else:
+                videos = store.list_videos("video_id")
+        gaps = searchgaps_mod.find_gaps(terms, videos) if terms else []
+        signin_snap, read_snap, rank_snap = state.searchgaps_state()
+        return render(request, "searchgaps.html", {
+            "active": "search",
+            "connected": auth.can_read_analytics(config),
+            "signed_in": config.token_path.is_file(),
+            "rows": build_gap_rows(gaps),
+            "gap_count": len(gaps),
+            "terms_when": _local_time(terms.fetched_at) if terms else "",
+            "terms_range": f"{terms.start_date} to {terms.end_date}" if terms else "",
+            "calls": terms.calls if terms else 0,
+            "ranking": build_ranking_view(searchgaps_mod.latest_ranking(config.home), _local_time),
+            "has_key": has_packaging_key(),
+            "model": config.model,
+            "days": searchgaps_mod.ANALYTICS_DAYS,
+            "max_videos": searchgaps_mod.MAX_VIDEOS,
+            "max_sent": searchgaps_mod.MAX_SENT,
+            "max_picks": searchgaps_mod.MAX_PICKS,
+            "estimate": format_cost(agent.estimate_cost(config.model, 2500, 0, 1200)),
+            "signin_running": signin_snap.running,
+            "signin_message": signin_snap.message,
+            "signin_failed": signin_snap.message if signin_snap.status == "failed" else "",
+            "read_running": read_snap.running,
+            "read_message": read_snap.message,
+            "read_failed": read_snap.message if read_snap.status == "failed" else "",
+            "rank_running": rank_snap.running,
+            "rank_message": rank_snap.message,
+            "rank_failed": rank_snap.message if rank_snap.status == "failed" else "",
+            "poll": signin_snap.running or read_snap.running or rank_snap.running,
+        })
+
+    @app.post("/search-gaps/connect")
+    async def connect_searchgaps(request: Request) -> Response:
+        await read_form(request)
+        client, _ = read_saved_client(config)
+        if client is None:
+            flash(request, "error", "Add the OAuth client file first, in Setup (step 5).")
+        elif not state.start_analytics_sign_in():
+            flash(request, "error", "A sign-in is already waiting for you in the browser.")
+        return see_other("/search-gaps")
+
+    @app.post("/search-gaps/connect/cancel")
+    async def cancel_connect_searchgaps(request: Request) -> Response:
+        await read_form(request)
+        state.searchgaps_signin_job.cancel("Sign-in cancelled.")
+        return see_other("/search-gaps")
+
+    @app.post("/search-gaps/read")
+    async def read_searchgaps(request: Request) -> Response:
+        await read_form(request)
+        creds = await run_in_threadpool(state.analytics_credentials)
+        if creds is None:
+            flash(request, "error", "Reading search terms needs the search-terms sign-in. "
+                        "Click Connect search terms first.")
+        elif not state.start_search_terms(creds):
+            flash(request, "error", "The search terms are already being read. Wait for it to finish.")
+        return see_other("/search-gaps")
+
+    @app.post("/search-gaps/rank")
+    async def rank_searchgaps(request: Request) -> Response:
+        await read_form(request)
+        has_key = await run_in_threadpool(has_packaging_key)
+        if not has_key:
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+            return see_other("/search-gaps")
+        terms = await run_in_threadpool(searchgaps_mod.load_terms, config.home)
+        if terms is None:
+            flash(request, "error", "Read the search terms first.")
+            return see_other("/search-gaps")
+        if not state.start_gap_rank():
+            flash(request, "error", "The gaps are already being ranked. Wait for it to finish.")
+        return see_other("/search-gaps")
+
+    @app.post("/search-gaps/done")
+    async def dismiss_searchgaps(request: Request) -> Response:
+        await read_form(request)
+        state.dismiss_searchgaps_results()
+        return see_other("/search-gaps")
+
     @app.get("/competitors")
     def competitors_page(request: Request) -> Response:
         cards = build_competitor_cards(competitors_mod.load_channels(config.home), _local_time)
@@ -2179,6 +2418,9 @@ def create_app(
             "strategy": _job_json(state.strategy_job.snapshot()),
             "competitors": _job_json(state.competitors_job.snapshot()),
             "competitors_explain": _job_json(state.competitors_explain_job.snapshot()),
+            "searchgaps_signin": _job_json(state.searchgaps_signin_job.snapshot()),
+            "searchgaps": _job_json(state.searchgaps_job.snapshot()),
+            "searchgaps_rank": _job_json(state.searchgaps_rank_job.snapshot()),
             "copilot": _job_json(state.copilot_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),

@@ -96,7 +96,7 @@ def test_nav_link(tmp_path: Path) -> None:
     ui, _ = make_competitors_ui(tmp_path)
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/competitors") == items.index("/strategy") + 1
+    assert items.index("/competitors") == items.index("/translations") + 1
     assert 'id="competitors-about"' in html
     assert "about 9 of your" in html
 

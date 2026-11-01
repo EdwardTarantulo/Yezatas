@@ -117,7 +117,7 @@
     fetch("/api/status", { credentials: "same-origin", headers: { "X-CSRF-Token": csrf } })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("status " + r.status)); })
       .then(function (s) {
-        var jobs = ["signin", "pull", "write", "push", "suggest", "translate", "subtitles", "transcribe", "chapters", "packaging", "variants", "outliers", "strategy", "competitors", "competitors_explain", "copilot", "links", "adcheck", "shorts", "comments", "assist"];
+        var jobs = ["signin", "pull", "write", "push", "suggest", "translate", "subtitles", "transcribe", "chapters", "packaging", "variants", "outliers", "strategy", "competitors", "competitors_explain", "searchgaps_signin", "searchgaps", "searchgaps_rank", "copilot", "links", "adcheck", "shorts", "comments", "assist"];
         var running = jobs.some(function (name) { return s[name] && s[name].status === "running"; });
         if (running) {
           seenRunning = true;
