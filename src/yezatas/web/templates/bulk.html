@@ -1,0 +1,108 @@
+{% extends "shell.html" %}
+{% block title %}Bulk edit - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Bulk edit</h1>
+<p class="intro">Change many videos at once: swap a link or fix a typo everywhere, or put a block at the end of every description. No model is used, and only drafts are made. Nothing reaches YouTube until you approve and push on the Changes page. After you push these drafts, History can undo that whole push in one step.</p>
+
+{% if error %}<div class="flash error" role="alert" id="bulk-error">{{ error }}</div>{% endif %}
+
+<form class="card bulk-form edit-form" method="get" action="/bulk" id="bulk-form">
+  <fieldset class="bulk-kind">
+    <legend><label class="check-label"><input type="radio" name="kind" value="replace"{% if form.kind != 'footer' %} checked{% endif %}> Find &amp; replace</label></legend>
+    <div class="field">
+      <label for="bulk-find">Text to find</label>
+      <input type="text" id="bulk-find" name="find" value="{{ form.find }}" autocomplete="off">
+      <p class="hint">Exact text; capital letters count. No patterns.</p>
+    </div>
+    <div class="field">
+      <label for="bulk-replace">Replace with</label>
+      <input type="text" id="bulk-replace" name="replace_with" value="{{ form.replace_with }}" autocomplete="off">
+      <p class="hint">Leave empty to remove the text.</p>
+    </div>
+    <div class="field">
+      <span class="field-label">Change the</span>
+      <label class="check-label"><input type="checkbox" name="field" value="title"{% if 'title' in form.fields %} checked{% endif %}> Title</label>
+      <label class="check-label"><input type="checkbox" name="field" value="description"{% if 'description' in form.fields %} checked{% endif %}> Description</label>
+    </div>
+  </fieldset>
+
+  <fieldset class="bulk-kind">
+    <legend><label class="check-label"><input type="radio" name="kind" value="footer"{% if form.kind == 'footer' %} checked{% endif %}> Footer block</label></legend>
+    <div class="field">
+      <label for="bulk-footer">Block for the end of each description</label>
+      <textarea id="bulk-footer" name="footer" rows="5">{{ form.footer }}</textarea>
+      <p class="hint">Added after a blank line. A description that already ends with it is left alone.</p>
+    </div>
+    <div class="field">
+      <label for="bulk-marker">First line of an existing block (optional)</label>
+      <input type="text" id="bulk-marker" name="marker" value="{{ form.marker }}" autocomplete="off">
+      <p class="hint">If a description has a line equal to this, everything from its last such line to the end is replaced by the block.</p>
+    </div>
+  </fieldset>
+
+  <fieldset class="bulk-scope">
+    <legend>Which videos</legend>
+    <div class="field">
+      <label class="check-label"><input type="radio" name="visibility" value="public"{% if form.visibility != 'all' %} checked{% endif %}> Public only</label>
+      <label class="check-label"><input type="radio" name="visibility" value="all"{% if form.visibility == 'all' %} checked{% endif %}> All (also unlisted and private)</label>
+    </div>
+    <div class="field bulk-dates">
+      <label for="bulk-from">Published from</label>
+      <input type="date" id="bulk-from" name="from" value="{{ form.date_from }}">
+      <label for="bulk-to">to</label>
+      <input type="date" id="bulk-to" name="to" value="{{ form.date_to }}">
+      <p class="hint">Both dates are optional and included.</p>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit" class="button primary" name="preview" value="1">Preview</button>
+    <a class="button secondary" href="/changes">Back to Changes</a>
+  </div>
+</form>
+
+{% if preview is not none %}
+<section id="bulk-preview" aria-label="Preview">
+  <h2 class="bulk-summary" id="bulk-summary">{{ preview.summary }}</h2>
+  {% if preview.too_many %}<p class="flash error" role="alert" id="bulk-too-many">{{ preview.too_many }}</p>{% endif %}
+  {% if preview.rows %}
+  <form method="post" action="/bulk/apply" id="bulk-apply">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for name, value in hidden %}<input type="hidden" name="{{ name }}" value="{{ value }}">
+    {% endfor %}
+    <table class="vtable bulk-table">
+      <thead>
+        <tr>
+          <th class="col-tick" scope="col"><span class="visually-hidden">Include</span></th>
+          <th scope="col">Video</th>
+          <th class="col-num" scope="col">Count</th>
+          <th scope="col">Before &rarr; after</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in preview.rows %}
+        <tr id="b-{{ r.video_id }}"{% if r.blocked %} class="blocked"{% endif %}>
+          <td class="col-tick"><input type="checkbox" name="video_id" value="{{ r.video_id }}" aria-label="Include {{ r.title }}"{% if r.blocked %} disabled{% else %} checked{% endif %}></td>
+          <td><a href="/videos/{{ r.video_id|urlencode }}">{{ r.title }}</a>
+            {% if r.blocked %}<p class="bulk-blocked"><strong>Blocked:</strong> {{ r.blocked }}</p>{% endif %}
+            {% for w in r.warnings %}<p class="issue warning bulk-warning"><strong>Warning:</strong> {{ w }}</p>{% endfor %}
+          </td>
+          <td class="col-num">{{ r.count }}</td>
+          <td class="bulk-excerpt">
+            {% for label, before, after in r.excerpts %}
+            <p><span class="muted">{{ label }}:</span> <del class="seg removed">{{ before if before else '(nothing)' }}</del> &rarr; <ins class="seg added">{{ after if after else '(removed)' }}</ins></p>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="actions">
+      <button type="submit" class="button primary"{% if not preview.ready %} disabled{% endif %}>Make drafts</button>
+      <span class="muted">Only the ticked videos get a draft. Nothing is sent to YouTube.</span>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

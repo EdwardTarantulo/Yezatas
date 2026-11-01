@@ -14,6 +14,7 @@ from urllib.parse import quote, urlencode
 
 from .. import edits
 from ..agent import estimate_cost
+from ..bulk import MAX_BULK, BulkChange, BulkResult, BulkSpec
 from ..diffs import DraftDiff, diff_row
 from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_TYPICAL, MIN_AGE_DAYS,
                         OUTLIER_THRESHOLD, PEERS, OutlierScore, below_norm, outliers, ratio_label)
@@ -1521,3 +1522,153 @@ def build_outlier_view(videos: Sequence[Video], scores: Sequence[OutlierScore],
         limits={"peers": PEERS, "min_age": MIN_AGE_DAYS, "high": ratio_label(OUTLIER_THRESHOLD),
                 "low": ratio_label(BELOW_THRESHOLD), "explained": MAX_EXPLAINED,
                 "typical": MAX_TYPICAL, "chars": DESCRIPTION_CHARS})
+
+
+# --- bulk edit (find & replace, footer block) ---------------------------------------------------
+BULK_EXCERPT_CHARS = 90
+BULK_LEAD_CHARS = 30
+
+
+@dataclass(frozen=True)
+class BulkForm:
+    """The values of the bulk form as typed (kept on the page when something is wrong)."""
+
+    kind: str = "replace"
+    find: str = ""
+    replace_with: str = ""
+    fields: tuple[str, ...] = ("description",)
+    footer: str = ""
+    marker: str = ""
+    visibility: str = "public"
+    date_from: str = ""
+    date_to: str = ""
+    submitted: bool = False  # True when the Preview button was used
+
+    def spec(self, video_ids: Sequence[str] = ()) -> BulkSpec:
+        return BulkSpec(kind=self.kind, find=self.find, replace_with=self.replace_with,
+                        fields=self.fields, footer=self.footer, footer_marker=self.marker,
+                        visibility=self.visibility, published_from=self.date_from,
+                        published_to=self.date_to, video_ids=tuple(video_ids))
+
+    def pairs(self) -> list[tuple[str, str]]:
+        """The form values as name/value pairs: hidden fields and the preview query string."""
+        out = [("kind", self.kind), ("find", self.find), ("replace_with", self.replace_with)]
+        out += [("field", f) for f in self.fields]
+        out += [("footer", self.footer), ("marker", self.marker), ("visibility", self.visibility),
+                ("from", self.date_from), ("to", self.date_to)]
+        return out
+
+    def preview_url(self) -> str:
+        return "/bulk?" + urlencode([*self.pairs(), ("preview", "1")])
+
+
+def parse_bulk_form(params: Any, *, submitted: bool) -> BulkForm:
+    """Read the bulk form from a query string or a posted form (anything with get/getlist)."""
+    if not submitted:
+        return BulkForm()
+    return BulkForm(
+        kind=str(params.get("kind") or "replace"),
+        find=str(params.get("find") or ""),
+        replace_with=str(params.get("replace_with") or ""),
+        fields=tuple(str(f) for f in params.getlist("field")),
+        footer=str(params.get("footer") or ""),
+        marker=str(params.get("marker") or ""),
+        visibility=str(params.get("visibility") or "public"),
+        date_from=str(params.get("from") or "").strip(),
+        date_to=str(params.get("to") or "").strip(),
+        submitted=True,
+    )
+
+
+def _window(text: str, start: int) -> str:
+    chunk = text[start:start + BULK_EXCERPT_CHARS]
+    return ("…" if start > 0 else "") + chunk + ("…" if start + BULK_EXCERPT_CHARS < len(text) else "")
+
+
+def _excerpt(label: str, old: str, new: str) -> tuple[str, str, str] | None:
+    """(label, before, after): the first changed line of `old` -> `new`, cut around the change."""
+    old_lines, new_lines = old.split("\n"), new.split("\n")
+    i = 0
+    while i < len(old_lines) and i < len(new_lines) and old_lines[i] == new_lines[i]:
+        i += 1
+    if i >= len(old_lines) and i >= len(new_lines):
+        return None
+    before = old_lines[i] if i < len(old_lines) else ""
+    after = new_lines[i] if i < len(new_lines) else ""
+    while not before.strip() and not after.strip() and i < max(len(old_lines), len(new_lines)) - 1:
+        i += 1  # a blank line is no help: show the first line with text
+        before = old_lines[i] if i < len(old_lines) else ""
+        after = new_lines[i] if i < len(new_lines) else ""
+    common = 0
+    while common < len(before) and common < len(after) and before[common] == after[common]:
+        common += 1
+    start = max(0, common - BULK_LEAD_CHARS)
+    return label, _window(before, start), _window(after, start)
+
+
+@dataclass(frozen=True)
+class BulkRow:
+    video_id: str
+    title: str
+    count: int
+    excerpts: tuple[tuple[str, str, str], ...]  # (label, before, after)
+    warnings: tuple[str, ...]
+    blocked: str
+
+
+def build_bulk_rows(plan: Sequence[BulkChange], videos: Mapping[str, Video]) -> list[BulkRow]:
+    rows: list[BulkRow] = []
+    for change in plan:
+        video = videos.get(change.video_id)
+        found: list[tuple[str, str, str]] = []
+        if video is not None:
+            text = video.description.replace("\r\n", "\n").replace("\r", "\n")
+            for label, old, now in (("Title", video.title, change.title),
+                                    ("Description", text, change.description)):
+                excerpt = _excerpt(label, old, now)
+                if excerpt is not None:
+                    found.append(excerpt)
+        rows.append(BulkRow(
+            video_id=change.video_id,
+            title=(video.title if video is not None else change.title) or change.video_id,
+            count=change.count, excerpts=tuple(found),
+            warnings=tuple(i.message for i in change.issues if i.severity != "error"),
+            blocked=change.blocked))
+    return rows
+
+
+@dataclass(frozen=True)
+class BulkPreview:
+    rows: tuple[BulkRow, ...]
+    ready: int  # rows that can be drafted
+    blocked: int
+    summary: str
+    too_many: str  # "" or the sentence about MAX_BULK
+
+
+def build_bulk_preview(plan: Sequence[BulkChange], videos: Mapping[str, Video]) -> BulkPreview:
+    rows = build_bulk_rows(plan, videos)
+    blocked = sum(1 for r in rows if r.blocked)
+    ready = len(rows) - blocked
+    if not rows:
+        summary = "No video matches: nothing would change."
+    else:
+        summary = f"{_videos(ready)} would change" + (f", {blocked} blocked" if blocked else "") + "."
+    too_many = (f"This would touch {len(rows)} videos, but at most {MAX_BULK} can be changed at "
+                "once, so Make drafts will refuse. Narrow the dates or untick videos."
+                if len(rows) > MAX_BULK else "")
+    return BulkPreview(tuple(rows), ready, blocked, summary, too_many)
+
+
+def bulk_apply_message(result: BulkResult) -> str:
+    """The flash text after Make drafts."""
+    text = (f"Drafts made for {_videos(result.drafted)}." if result.drafted
+            else "No drafts were made.")
+    if result.blocked:
+        text += f" {_videos(result.blocked)} blocked."
+    if result.not_in_plan:
+        text += f" {_videos(result.not_in_plan)} no longer matched."
+    if result.drafted:
+        text += (" Review them on the Changes page; nothing changes on YouTube until you "
+                 "approve and push.")
+    return text

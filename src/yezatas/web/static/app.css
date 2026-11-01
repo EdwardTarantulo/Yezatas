@@ -729,3 +729,22 @@ button.gbtn { cursor: pointer; }
   .ol-table .col-median { display: none; }
   .ol-table .col-num, .ol-table .col-ratio { width: 70px; }
 }
+
+/* --- bulk edit --- */
+.bulk-link { margin: -12px 0 16px; }
+.bulk-form fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 16px; padding: 12px 16px 4px; }
+.bulk-form legend { padding: 0 6px; font-weight: 600; }
+.bulk-form .field-label { display: block; font-weight: 500; margin-bottom: 4px; }
+.bulk-form .field > .check-label { margin-right: 16px; }
+.bulk-form .check-label input { width: auto; display: inline-block; }
+.bulk-form .bulk-dates label { display: inline-block; }
+.bulk-form input[type=date] { width: auto; display: inline-block; margin-right: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.bulk-summary { font-size: 18px; margin: 24px 0 12px; }
+.bulk-table { table-layout: auto; }
+.bulk-table .col-tick { width: 36px; }
+.bulk-table .col-num { width: 70px; }
+.bulk-table td p { margin: 4px 0 0; }
+.bulk-table tr.blocked { background: var(--hover); }
+.bulk-blocked { color: var(--bad); }
+.bulk-warning { padding: 4px 8px; }
+.bulk-excerpt { overflow-wrap: anywhere; }

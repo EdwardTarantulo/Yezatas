@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
-from .. import agent, auth, edits, push, subtitle_translate
+from .. import agent, auth, bulk, edits, push, subtitle_translate
 from .. import chapters as chapters_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
@@ -46,12 +46,14 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem, build_listing,
-                    build_outlier_view, build_packaging_view, build_preview, build_subtitles_view, build_transcript_view,
-                    build_translate_view, change_cards, chapters_blocker, dashboard_model, format_cost,
-                    format_count, format_date, group_checks, history_groups, lang_name, make_entries,
-                    outlier_count, outlier_line, plan_lines, preview_card, pull_moment, push_results,
-                    run_restore_summary, run_view, stops_batch, thumb_url, top_other_videos)
+from .views import (Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem, build_bulk_preview,
+                    build_listing, build_outlier_view, build_packaging_view, build_preview,
+                    build_subtitles_view, build_transcript_view, build_translate_view,
+                    bulk_apply_message, change_cards, chapters_blocker, dashboard_model,
+                    format_cost, format_count, format_date, group_checks, history_groups, lang_name,
+                    make_entries, outlier_count, outlier_line, parse_bulk_form, plan_lines,
+                    preview_card, pull_moment, push_results, run_restore_summary, run_view,
+                    stops_batch, thumb_url, top_other_videos)
 
 DEFAULT_PORT = 8765
 SIGN_IN_TIMEOUT_SECONDS = 300.0
@@ -1749,6 +1751,47 @@ def create_app(
             anchor = f"#d-{quote(record.video_id)}" if record is not None else ""
             return ("ok", f"Restore draft made from push #{push_id}. Nothing changes on YouTube "
                     "until you approve and push it.", "/changes" + anchor)
+
+        kind, message, target = await run_in_threadpool(work)
+        flash(request, kind, message)
+        return see_other(target)
+
+    # --- bulk edit (no model: drafts only) -----------------------------------------------------
+    @app.get("/bulk")
+    def bulk_page(request: Request) -> Response:
+        form = parse_bulk_form(request.query_params, submitted="preview" in request.query_params)
+        error, preview = "", None
+        if form.submitted:
+            with Store(config.catalog_db) as store:
+                try:
+                    plan = bulk.plan_bulk(store, form.spec())
+                except ValueError as exc:
+                    error, plan = str(exc), []
+                videos = {c.video_id: store.get_video(c.video_id) for c in plan}
+            if not error:
+                preview = build_bulk_preview(plan, {k: v for k, v in videos.items() if v})
+        return render(request, "bulk.html", {
+            "active": "changes", "form": form, "error": error, "preview": preview,
+            "hidden": form.pairs(), "max_bulk": bulk.MAX_BULK})
+
+    @app.post("/bulk/apply")
+    async def bulk_apply(request: Request) -> Response:
+        posted = await read_form(request)
+        form = parse_bulk_form(posted, submitted=True)
+        ids = [str(i) for i in posted.getlist("video_id") if str(i)]
+
+        def work() -> tuple[str, str, str]:
+            if not ids:
+                return "error", "Tick at least one video to make drafts.", form.preview_url()
+            with Store(config.catalog_db) as store:
+                try:
+                    result = bulk.apply_bulk(store, form.spec(), ids)
+                except ValueError as exc:
+                    return "error", str(exc), form.preview_url()
+            message = bulk_apply_message(result)
+            if result.drafted:
+                return "ok", message, "/changes"
+            return "info", message, form.preview_url()
 
         kind, message, target = await run_in_threadpool(work)
         flash(request, kind, message)
