@@ -118,6 +118,9 @@ def _urls(text: str) -> list[str]:
     return [url.rstrip(".,;:!?)]}'\"") for url in _URL.findall(text)]
 
 
+find_urls = _urls  # used by bulk.py
+
+
 def _check_links_removed(draft: Draft, original: Draft) -> list[Issue]:
     """One warning per original URL that is missing from the draft.
 

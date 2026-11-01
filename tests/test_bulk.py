@@ -206,6 +206,42 @@ def test_error_issues_block_and_warnings_do_not(store: Store) -> None:
     assert store.get_draft(vid(1)) is None
 
 
+def test_a_link_changed_as_asked_has_no_missing_link_warning(store: Store) -> None:
+    desc = "Follow https://twitter.com/MesaChan and https://example.invalid/keep"
+    fill(store, video(1, desc))
+    spec = BulkSpec("replace", find="twitter.com/MesaChan", replace_with="x.com/MesaChan")
+    change = plan_bulk(store, spec)[0]
+    assert "https://x.com/MesaChan" in change.description
+    assert not any(i.code == "link_removed" for i in change.issues)
+
+
+def test_a_link_broken_by_the_replace_still_warns(store: Store) -> None:
+    desc = "Follow https://twitter.com/MesaChan and https://example.invalid/keep"
+    fill(store, video(1, desc))
+    spec = BulkSpec("replace", find="twitter.com/MesaChan", replace_with="see my page")
+    change = plan_bulk(store, spec)[0]
+    assert any(
+        i.code == "link_removed" and "https://twitter.com/MesaChan" in i.message
+        for i in change.issues
+    )
+
+
+def test_only_the_asked_link_loses_its_warning(store: Store) -> None:
+    fill(store, video(1, "A https://old.invalid/a and https://old.invalid/b"))
+    spec = BulkSpec("replace", find="old.invalid/a", replace_with="new.invalid/a")
+    change = plan_bulk(store, spec)[0]
+    assert not any(
+        i.code == "link_removed" and "https://old.invalid/a" in i.message
+        for i in change.issues
+    )
+    spec2 = BulkSpec("replace", find=" and https://old.invalid/b", replace_with="")
+    change2 = plan_bulk(store, spec2)[0]
+    assert any(
+        i.code == "link_removed" and "https://old.invalid/b" in i.message
+        for i in change2.issues
+    )
+
+
 def test_empty_title_is_blocked(store: Store) -> None:
     fill(store, video(1, "d", title="Gone"))
     change = plan_bulk(store, BulkSpec("replace", find="Gone", replace_with="", fields=("title",)))[0]

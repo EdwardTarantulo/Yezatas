@@ -19,7 +19,7 @@ from typing import Sequence
 
 from .edits import DraftError, save_draft
 from .store import Store, Video
-from .validate import Draft, Issue, has_errors, validate_draft
+from .validate import Draft, Issue, find_urls, has_errors, validate_draft
 
 KINDS = ("replace", "footer")
 FIELDS = ("title", "description")
@@ -171,6 +171,16 @@ def _changed(video: Video, spec: BulkSpec, footer: str) -> tuple[str, str, int] 
     return (title, description, count) if count else None
 
 
+def _asked_links(spec: BulkSpec, original: str, new: str) -> set[str]:
+    """Original links that the find & replace turned into another link, as the creator asked."""
+    if spec.kind != "replace":
+        return set()
+    find, replacement = _newlines(spec.find), _newlines(spec.replace_with)
+    new_urls = set(find_urls(new))
+    return {url for url in find_urls(original)
+            if find in url and url.replace(find, replacement) in new_urls}
+
+
 def plan_bulk(store: Store, spec: BulkSpec) -> list[BulkChange]:
     """What the edit would do to each video it touches (most viewed first). Writes nothing."""
     start, end, footer = _check_spec(spec)
@@ -183,10 +193,14 @@ def plan_bulk(store: Store, spec: BulkSpec) -> list[BulkChange]:
         if result is None:
             continue
         title, description, count = result
-        issues = tuple(validate_draft(
-            Draft(title, description, tuple(video.tags)),
-            original=Draft(video.title, video.description, tuple(video.tags)),
-        ))
+        asked = _asked_links(spec, video.description, description)
+        issues = tuple(
+            i for i in validate_draft(
+                Draft(title, description, tuple(video.tags)),
+                original=Draft(video.title, video.description, tuple(video.tags)),
+            )
+            if not (i.code == "link_removed" and any(f'"{url}"' in i.message for url in asked))
+        )
         if store.get_draft(video.video_id) is not None:
             blocked = BLOCKED_HAS_DRAFT
         elif has_errors(issues):
