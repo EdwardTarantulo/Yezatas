@@ -58,7 +58,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Insights** | Outliers, Strategy, Competitors, Search gaps | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos; the same outlier rule on up to 5 other public channels; and the real YouTube search terms whose words are missing from the titles. |
 | **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first, or described in plain words. |
 | **Ad safety** | Video | An advertiser-friendly check of the title, description, tags and transcript; every quote is checked by code. Advice only. |
-| **Community** | Video, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy (nothing is posted), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
+| **Community** | Video, Comments, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy (nothing is posted), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
 
 ---
 
@@ -473,6 +473,13 @@ as it lands; the git history is the detailed record.
 - **2026-11-02**: **One undo button where one is enough**, built by **Muse Spark Open** on Baseten (one
   round). History shows **Undo this push** only when a push changed more than one video; for a single video
   its own **Restore this text** does the same thing.
+- **2026-11-02**: **A Comments page for the whole channel**, built by **Muse Spark Open** on Baseten (three
+  rounds and one fix round, about 65K tokens). **Assist → Comments** lists the stored comments of every video
+  newest first, with filters (category, only with a reply draft) and a **By video** column. **Fetch new
+  comments** reads the 10 newest videos and says its quota cost first (about 10 units); a video with comments
+  turned off is skipped with a note. **Sort new comments** runs the existing Muse Spark sort once per video that
+  has unsorted comments. Each draft can be copied, opened on YouTube, marked as used or dismissed without
+  leaving the page. Comments are only read: you post replies on YouTube yourself.
 
 ---
 
