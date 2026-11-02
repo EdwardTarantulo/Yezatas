@@ -211,3 +211,10 @@ def test_error_pages_have_no_shell(tmp_path: Path) -> None:
     ui = make_ui(tmp_path, signed_in_browser=False)
     html = ui.client.get("/setup").text
     assert 'class="topbar"' not in html and 'class="sidebar"' not in html
+
+
+def test_fix_next_says_how_it_is_ranked(tmp_path: Path) -> None:
+    ui, _ = seeded_ui(tmp_path)
+    html = ui.client.get("/").text
+    assert "Ranked by views &times; points missing (100 minus the SEO score)" in html
+    assert "names the check that costs that video the most points" in html
