@@ -12,7 +12,7 @@ from yezatas.store import (MIGRATIONS, AdCheck, Comment, CommentReply, CustomRul
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 # undo the newest migrations, for tests that turn a database back into an older version
-BACK_TO_V14 = "DROP TABLE category_checks; DROP TABLE pinned_comments; "
+BACK_TO_V14 = "ALTER TABLE comments DROP COLUMN by_owner; DROP TABLE category_checks; DROP TABLE pinned_comments; "
 BACK_TO_V13 = BACK_TO_V14 + "ALTER TABLE comments DROP COLUMN owner_replied; "
 BACK_TO_V12 = BACK_TO_V13 + "DROP TABLE shorts_finds; "
 BACK_TO_V11 = BACK_TO_V12 + "DROP TABLE comments; DROP TABLE comment_replies; DROP TABLE reply_templates; DROP TABLE custom_rules; "

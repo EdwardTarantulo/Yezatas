@@ -420,6 +420,7 @@ _SCHEMA_V15: tuple[str, ...] = (
         input_tokens INTEGER NOT NULL DEFAULT 0,
         output_tokens INTEGER NOT NULL DEFAULT 0
     )""",
+    "ALTER TABLE comments ADD COLUMN by_owner INTEGER NOT NULL DEFAULT 0",
 )
 
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
@@ -623,6 +624,20 @@ class AdCheck:
 
 
 @dataclass(frozen=True)
+class PinnedComment:
+    """One video's pinned comment: the user's "I pinned one already" and Muse Spark's newest suggestion."""
+
+    video_id: str
+    marked_at: str  # when the user said a pinned comment is up ("" when not)
+    suggestion: str  # Muse Spark's newest kept suggestion ("" when none yet)
+    suggested_at: str
+    model: str
+    error: str  # why the newest suggestion failed ("" when it did not)
+    input_tokens: int
+    output_tokens: int
+
+
+@dataclass(frozen=True)
 class CategoryCheck:
     """Muse Spark's view of which YouTube category fits one video (the newest check only)."""
 
@@ -672,6 +687,7 @@ class Comment:
     category: str = ""  # a key of comments.CATEGORIES, or "" when not classified yet
     classified_at: str = ""
     owner_replied: bool = False  # the channel itself replied on YouTube (seen at the last fetch)
+    by_owner: bool = False  # the channel itself wrote this comment (seen at the last fetch)
 
 
 @dataclass(frozen=True)
@@ -1521,6 +1537,53 @@ class Store:
         ).fetchone()
         return self._row_to_ad_check(row) if row else None
 
+    # --- pinned comments (V8) ---
+    @staticmethod
+    def _row_to_pinned_comment(row: sqlite3.Row) -> PinnedComment:
+        return PinnedComment(
+            video_id=row["video_id"], marked_at=row["marked_at"], suggestion=row["suggestion"],
+            suggested_at=row["suggested_at"], model=row["model"], error=row["error"],
+            input_tokens=row["input_tokens"], output_tokens=row["output_tokens"],
+        )
+
+    def pinned_comment(self, video_id: str) -> PinnedComment | None:
+        row = self._conn.execute("SELECT * FROM pinned_comments WHERE video_id = ?", (video_id,)).fetchone()
+        return self._row_to_pinned_comment(row) if row else None
+
+    def mark_pinned(self, video_id: str, now: datetime | None = None) -> None:
+        """The user says a pinned comment is up on the video."""
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO pinned_comments (video_id, marked_at) VALUES (?, ?) "
+                "ON CONFLICT(video_id) DO UPDATE SET marked_at = excluded.marked_at",
+                (video_id, _iso(now)))
+
+    def save_pinned_suggestion(self, video_id: str, suggestion: str, model: str, error: str,
+                               input_tokens: int, output_tokens: int, now: datetime | None = None) -> None:
+        """Store Muse Spark's newest suggestion. A failed one (empty `suggestion`, with its `error`) keeps the
+        suggestion before it; the mark is always kept."""
+        ts = _iso(now)
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO pinned_comments (video_id, suggestion, suggested_at, model, error, input_tokens, "
+                "output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(video_id) DO UPDATE SET "
+                "suggestion = CASE WHEN excluded.suggestion != '' THEN excluded.suggestion "
+                "ELSE pinned_comments.suggestion END, "
+                "suggested_at = CASE WHEN excluded.suggestion != '' THEN excluded.suggested_at "
+                "ELSE pinned_comments.suggested_at END, "
+                "model = excluded.model, error = excluded.error, input_tokens = excluded.input_tokens, "
+                "output_tokens = excluded.output_tokens",
+                (video_id, suggestion, ts if suggestion else "", model, error, input_tokens, output_tokens))
+
+    def pinned_states(self) -> dict[str, str]:
+        """Video id -> "marked" (the user said a pinned comment is up), "own" (a fetched comment is by the
+        channel) or "none" (comments fetched, none by the channel). Other videos are left out."""
+        states = {row[0]: "own" if row[1] else "none" for row in self._conn.execute(
+            "SELECT video_id, MAX(by_owner) FROM comments GROUP BY video_id")}
+        for row in self._conn.execute("SELECT video_id FROM pinned_comments WHERE marked_at != ''"):
+            states[row[0]] = "marked"
+        return states
+
     # --- category checks (V7) ---
     @staticmethod
     def _row_to_category_check(row: sqlite3.Row) -> CategoryCheck:
@@ -1910,6 +1973,7 @@ class Store:
             category=row["category"],
             classified_at=row["classified_at"],
             owner_replied=bool(row["owner_replied"]),
+            by_owner=bool(row["by_owner"]),
         )
 
     def upsert_comments(self, comments: Sequence[Comment], now: datetime | None = None) -> int:
@@ -1924,15 +1988,17 @@ class Store:
             self._conn.executemany(
                 """
                 INSERT INTO comments (comment_id, video_id, author, text, published_at,
-                    like_count, reply_count, fetched_at, category, classified_at, owner_replied)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    like_count, reply_count, fetched_at, category, classified_at, owner_replied, by_owner)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(comment_id) DO UPDATE SET
                     video_id=excluded.video_id, author=excluded.author, text=excluded.text,
                     published_at=excluded.published_at, like_count=excluded.like_count,
-                    reply_count=excluded.reply_count, fetched_at=excluded.fetched_at, owner_replied=excluded.owner_replied
+                    reply_count=excluded.reply_count, fetched_at=excluded.fetched_at, owner_replied=excluded.owner_replied,
+                    by_owner=excluded.by_owner
                 """,
                 [(c.comment_id, c.video_id, c.author, c.text, c.published_at, c.like_count,
-                  c.reply_count, c.fetched_at or ts, c.category, c.classified_at, int(c.owner_replied)) for c in items],
+                  c.reply_count, c.fetched_at or ts, c.category, c.classified_at, int(c.owner_replied),
+                  int(c.by_owner)) for c in items],
             )
         return len(items)
 

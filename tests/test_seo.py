@@ -61,9 +61,10 @@ def check(video: Video, check_id: str, context: ChannelContext | None = None):
 
 
 def ctx_for(*videos: Video) -> ChannelContext:
-    """The channel context, with Muse Spark agreeing with each video's category."""
+    """The channel context, with Muse Spark agreeing with each video's category and a comment from the channel."""
     return replace(channel_context(videos),
-                   category_checks={v.video_id: CategoryJudgment("26", "26", False) for v in videos})
+                   category_checks={v.video_id: CategoryJudgment("26", "26", False) for v in videos},
+                   pinned={v.video_id: "own" for v in videos})
 
 
 # --- whole scorecard ---
@@ -76,16 +77,16 @@ def test_perfect_video_scores_100():
     assert all(c.applicable and c.passed for c in result.checks)
 
 
-def test_perfect_video_total_is_106_points():
+def test_perfect_video_total_is_111_points():
     result = card(make_video(), ctx_for(make_video()))
-    assert sum(c.max_points for c in result.checks) == 106  # 100 + the category check (6)
-    assert len(result.checks) == len(CHECKS) == 26
+    assert sum(c.max_points for c in result.checks) == 111  # 100 + the category check (6) + the pinned comment (5)
+    assert len(result.checks) == len(CHECKS) == 27
 
 
-def test_max_points_of_all_checks_sum_to_106():
+def test_max_points_of_all_checks_sum_to_111():
     result = card(make_video(), ctx_for(make_video()))
     assert all(c.applicable for c in result.checks)
-    assert sum(c.max_points for c in result.checks) == 106  # 100 + the category check (6)
+    assert sum(c.max_points for c in result.checks) == 111  # 100 + the category check (6) + the pinned comment (5)
 
 
 def test_empty_video_scores_low_and_does_not_crash():

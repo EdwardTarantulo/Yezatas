@@ -144,6 +144,8 @@ class ChannelContext:
     stale_localizations: dict[str, frozenset[str]] = field(default_factory=dict)
     # video id -> its finished category check; a video without one is not judged (no points lost)
     category_checks: dict[str, CategoryJudgment] = field(default_factory=dict)
+    # video id -> "own", "marked" or "none" (see Store.pinned_states); a video left out is not judged
+    pinned: dict[str, str] = field(default_factory=dict)
 
 
 def normalize_title(title: str) -> str:
@@ -602,6 +604,23 @@ def check_category(video: Video, context: ChannelContext | None) -> CheckResult:
                    f"video page if {name} is right.")
 
 
+def check_pinned_comment(video: Video, context: ChannelContext | None) -> CheckResult:
+    title = "A pinned comment from you"
+    state = context.pinned.get(video.video_id) if context else None
+    if state is None:
+        return _skip("pinned_comment", "details", title, 5,
+                     "Comments not fetched yet. Fetch them in the Comments tool, or mark that you pinned one.")
+    if state == "marked":
+        return _result("pinned_comment", "details", title, 5, 5, "You marked that a pinned comment is up.")
+    if state == "own":
+        return _result("pinned_comment", "details", title, 5, 5,
+                       "A comment from your channel is on this video. YouTube's API does not say which comment "
+                       "is pinned, so make sure yours is.")
+    return _result("pinned_comment", "details", title, 5, 0,
+                   "No comment from your channel was found in the fetched comments.",
+                   "Pin a comment that adds something: a question, a link, the next video.")
+
+
 def check_thumbnail_hd(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "A sharp thumbnail is available"
     if not video.thumbnails:
@@ -640,6 +659,7 @@ CHECKS: tuple[CheckFn, ...] = (
     check_audio_language,
     check_localizations,
     check_category,
+    check_pinned_comment,
     check_thumbnail_hd,
 )
 
@@ -654,14 +674,15 @@ def score_video(video: Video, context: ChannelContext | None = None) -> Scorecar
 
 def score_catalog(videos: Iterable[Video],
                   stale_localizations: Mapping[str, frozenset[str]] | None = None,
-                  category_checks: Mapping[str, CategoryJudgment] | None = None) -> dict[str, Scorecard]:
+                  category_checks: Mapping[str, CategoryJudgment] | None = None,
+                  pinned: Mapping[str, str] | None = None) -> dict[str, Scorecard]:
     """`stale_localizations`: video id -> translations on YouTube made from older text (not counted).
-    `category_checks`: video id -> its finished category check."""
+    `category_checks`: video id -> its finished category check. `pinned`: video id -> its pinned state."""
     videos = list(videos)
     context = channel_context(videos)
-    if stale_localizations or category_checks:
+    if stale_localizations or category_checks or pinned:
         context = ChannelContext(context.title_counts, dict(stale_localizations or {}),
-                                 dict(category_checks or {}))
+                                 dict(category_checks or {}), dict(pinned or {}))
     return {v.video_id: score_video(v, context) for v in videos}
 
 

@@ -133,7 +133,14 @@ def _comment_from_item(item: Any, video_id: str, owner: str = "") -> Comment | N
         like_count=_as_int(top_snippet.get("likeCount")),
         reply_count=_as_int(reply_raw),
         owner_replied=_owner_replied(item, owner),
+        by_owner=_by_owner(top_snippet, owner),
     )
+
+
+def _by_owner(snippet: dict[str, Any], owner: str) -> bool:
+    """True when the channel `owner` wrote this comment itself."""
+    author = snippet.get("authorChannelId")
+    return bool(owner) and isinstance(author, dict) and author.get("value") == owner
 
 
 def _owner_replied(item: dict[str, Any], owner: str) -> bool:
