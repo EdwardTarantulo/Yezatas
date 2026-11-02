@@ -1,0 +1,33 @@
+{% extends "shell.html" %}
+{% block title %}Analytics - Yezatas{% endblock %}
+{% block content %}
+<h1 class="page-title">Analytics</h1>
+<p class="muted an-intro">Read-only numbers from YouTube Analytics. Refresh uses YouTube Analytics API quota, not your daily Data API budget. Nothing is written to YouTube.</p>
+<div class="an-grid">
+  {% include "_week_card.html" %}
+  {% if an.countries %}
+  <section class="card" id="analytics-countries" aria-labelledby="h-countries">
+    <div class="card-title-row"><h2 id="h-countries">Where viewers watch from</h2><span class="muted">90 days &middot; top {{ an.countries|length }}</span></div>
+    <ul class="an-rows">
+      {% for r in an.countries %}
+      <li class="an-row"><span class="an-label">{{ r.label }}</span><span class="bar an" aria-hidden="true"><span class="{{ r.bar }}"></span></span><span class="an-num">{{ r.percent }}%</span><span class="muted an-views">{{ r.views_text }}</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  {% if an.sources %}
+  <section class="card" id="analytics-sources" aria-labelledby="h-sources">
+    <div class="card-title-row"><h2 id="h-sources">Where views came from</h2><span class="muted">28 days</span></div>
+    <ul class="an-rows">
+      {% for r in an.sources %}
+      <li class="an-row"><span class="an-label">{{ r.label }}</span><span class="bar an" aria-hidden="true"><span class="{{ r.bar }}"></span></span><span class="an-num">{{ r.percent }}%</span><span class="muted an-views">{{ r.views_text }}</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <section class="card an-note" id="analytics-ctr" aria-labelledby="h-ctr">
+    <h2 id="h-ctr">Impressions and click-through rate</h2>
+    <p class="muted">YouTube's API doesn't share impressions and click-through rate. See them in YouTube Studio, under Analytics, then Reach.</p>
+  </section>
+</div>
+{% endblock %}

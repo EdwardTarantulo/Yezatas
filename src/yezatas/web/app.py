@@ -64,6 +64,7 @@ from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
 from .competitors_view import build_competitor_cards, build_insight_view
 from .searchgaps_view import build_gap_rows, build_ranking_view
+from .analytics_view import build_analytics
 from .today_view import build_today
 from .thumbswap_view import build_swap_rows
 from .jobs import Job, JobSnapshot, Report
@@ -2213,6 +2214,19 @@ def create_app(
         }, status_code=404)
 
     # --- pages ------------------------------------------------------------------------------
+    def week_card(stats: "channelstats_mod.ChannelStats | None", back: str, wid: str) -> dict[str, Any]:
+        """What the shared "Channel this week" card needs besides the week itself."""
+        snap = state.channel_stats_state()
+        signin = state.searchgaps_signin_job.snapshot()
+        return {
+            "back": back, "wid": wid, "connected": auth.can_read_analytics(config),
+            "stats_when": _local_time(stats.fetched_at) if stats else "",
+            "stats_running": snap.running, "stats_message": snap.message,
+            "stats_failed": snap.message if snap.status == "failed" else "",
+            "signin_running": signin.running, "signin_message": signin.message,
+            "poll": snap.running or signin.running,
+        }
+
     @app.get("/")
     def index(request: Request) -> Response:
         data = catalog_data()
@@ -2228,16 +2242,18 @@ def create_app(
         today = build_today(entries, previous, to_answer, drafts,
                             {e.video.video_id: e.video for e in entries}, stats,
                             fix_next[0] if fix_next else None, datetime.now(timezone.utc))
-        snap = state.channel_stats_state()
-        signin = state.searchgaps_signin_job.snapshot()
         return render(request, "today.html", {
-            "active": "today", "today": today, "latest_pull": data["latest_pull"],
-            "connected": auth.can_read_analytics(config),
-            "stats_when": _local_time(stats.fetched_at) if stats else "",
-            "stats_running": snap.running, "stats_message": snap.message,
-            "stats_failed": snap.message if snap.status == "failed" else "",
-            "signin_running": signin.running, "signin_message": signin.message,
-            "poll": snap.running or signin.running,
+            "active": "today", "today": today, "latest_pull": data["latest_pull"], "week": today.week,
+            **week_card(stats, "/", "today-week"),
+        })
+
+    @app.get("/analytics")
+    def analytics_page(request: Request) -> Response:
+        stats = channelstats_mod.load_stats(config.home)
+        an = build_analytics(stats)
+        return render(request, "analytics.html", {
+            "active": "analytics", "an": an, "week": an.week,
+            **week_card(stats, "/analytics", "analytics-week"),
         })
 
     @app.get("/seo")

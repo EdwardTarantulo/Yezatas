@@ -50,42 +50,7 @@
     <p class="td-foot"><a class="button secondary" href="/comments?c=question">Open Comments</a></p>
   </section>
 
-  <section class="card td-week" id="today-week" aria-labelledby="h-week">
-    <div class="card-title-row"><h2 id="h-week">Channel this week</h2>{% if today.week %}<span class="muted">YouTube Analytics &middot; data up to {{ today.week.up_to }}</span>{% endif %}</div>
-    {% if stats_running %}
-    <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="channel_stats-msg" role="status" aria-live="polite">{{ stats_message or 'Starting…' }}</span></p>
-    {% elif stats_failed %}
-    <div class="flash error" role="alert" id="today-week-failed">{{ stats_failed }}</div>
-    <form class="inline" method="post" action="/analytics/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/"><button type="submit" class="button secondary">Dismiss</button></form>
-    {% endif %}
-    {% if not connected %}
-    <p class="hint" id="today-week-connect">These numbers come from YouTube Analytics (read-only). Enable the YouTube Analytics API in your Google Cloud project, then connect: Google asks once more, and the access you gave stays.</p>
-    {% if signin_running %}
-    <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="searchgaps_signin-msg" role="status" aria-live="polite">{{ signin_message or 'Starting…' }}</span></p>
-    {% else %}
-    <form class="inline" method="post" action="/analytics/connect"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/"><button type="submit" class="button primary">Connect Analytics</button></form>
-    {% endif %}
-    {% elif today.week %}
-    <div class="td-stats">
-      {% for s in today.week.stats %}
-      <div class="td-stat">
-        <span class="td-stat-label">{{ s.label }}</span>
-        <span class="td-stat-value">{{ s.value }}</span>
-        {% if s.delta_text %}<span class="td-delta {{ s.delta_class }}">{{ s.delta_text }}<span class="td-delta-vs"> vs the 7 days before</span></span>{% endif %}
-        {% if loop.first %}<span class="td-spark" aria-hidden="true">{% for h in today.week.bars %}<span class="h-{{ h }}{{ ' last' if loop.last else '' }}"></span>{% endfor %}</span>{% endif %}
-      </div>
-      {% endfor %}
-    </div>
-    {% if today.week.sources %}
-    <p class="td-sources"><span class="muted">Where views came from (28 days)</span>{% for label, pct in today.week.sources %} <span class="td-src"><b>{{ label }}</b> {{ pct }}%</span>{% endfor %}</p>
-    {% endif %}
-    {% else %}
-    <p class="empty-note" id="today-week-empty">Not read yet. Refresh reads the last two weeks from YouTube Analytics. Nothing is written to YouTube.</p>
-    {% endif %}
-    {% if connected %}
-    <form class="td-refresh" method="post" action="/analytics/refresh"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/"><button type="submit" class="button secondary"{% if stats_running %} disabled{% endif %}>Refresh</button>{% if stats_when %}<span class="muted">Read {{ stats_when }}</span>{% endif %}</form>
-    {% endif %}
-  </section>
+  {% include "_week_card.html" %}
 
   {% if today.fix %}{% set e = today.fix %}
   <section class="card td-fix" id="today-fix" aria-labelledby="h-fix1">

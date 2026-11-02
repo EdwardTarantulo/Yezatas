@@ -50,7 +50,7 @@ def test_sidebar_groups_daily_pages_first(tmp_path: Path) -> None:
     ui, _ = make_today_ui(tmp_path)
     html = ui.client.get("/").text
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items == ["/", "/comments", "/videos",
+    assert items == ["/", "/comments", "/videos", "/analytics",
                      "/seo", "/checks", "/copilot", "/translations", "/links", "/affiliate", "/replies",
                      "/outliers", "/search-gaps", "/competitors", "/strategy",
                      "/changes", "/history", "/agent", "/setup"]
