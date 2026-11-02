@@ -1894,6 +1894,20 @@ class Store:
             self._conn.execute(
                 "UPDATE comment_replies SET status = ? WHERE id = ?", (status, id))
 
+    def list_recent_comments(self, limit: int = 500) -> list[Comment]:
+        """The stored comments of every video, newest first, at most `limit`."""
+        rows = self._conn.execute(
+            "SELECT * FROM comments ORDER BY published_at DESC, comment_id LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._row_to_comment(r) for r in rows]
+
+    def list_open_comment_replies(self) -> list[CommentReply]:
+        """The open reply drafts of every video, in the order they were made."""
+        rows = self._conn.execute(
+            "SELECT * FROM comment_replies WHERE status = 'open' ORDER BY id"
+        ).fetchall()
+        return [self._row_to_comment_reply(r) for r in rows]
+
     def dismiss_open_comment_replies(self, video_id: str) -> int:
         """Dismiss a video's open reply drafts; returns how many were dismissed."""
         with self._conn:

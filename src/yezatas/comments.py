@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from .agent import ModelClient, ModelError
 from .facts import extract_urls
 from .packaging import _BadAnswer, _Tally, _format, _object, _parse_object
-from .quota import QuotaGuard
+from .quota import QuotaGuard, cost_of
 from .store import Comment, Store
 from .subtitle_translate import _NUMBER, _digits
 from .youtube import CommentReader, api_error_info
@@ -35,6 +35,9 @@ MAX_COMMENTS_TO_MODEL = 150  # comments shown to the model in one call, newest f
 COMMENT_CHARS = 600  # characters of each comment shown to the model
 DRAFT_CHARS = 1000  # a kept draft is cut to this many characters
 MAX_REPLIES = 20  # reply drafts kept from one call
+
+CHANNEL_VIDEOS = 10  # the channel page fetches the comments of this many newest videos
+CHANNEL_PER_VIDEO = 100  # comments per video on the channel page: one page, so one quota unit each
 
 ASSIST_FORMAT = _format("comments_assist", _object({
     "categories": {"type": "array", "items": _object({
@@ -346,3 +349,103 @@ def assist(store: Store, client: ModelClient, video_id: str, *,
     return AssistResult(
         video_id=video_id, counts=counts, drafts=drafts, notes=tuple(notes), model=client.model,
         input_tokens=tally.input, cached_tokens=tally.cached, output_tokens=tally.output)
+
+
+# --- the whole channel -----------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ChannelFetch:
+    """What one channel-wide fetch did."""
+
+    fetched: int
+    videos: int
+    notes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ChannelSort:
+    """What one channel-wide sort did, summed over the videos sorted."""
+
+    videos: int
+    drafts: int
+    counts: dict[str, int]
+    notes: tuple[str, ...]
+    model: str
+    input_tokens: int
+    cached_tokens: int
+    output_tokens: int
+
+
+def newest_video_ids(store: Store, count: int = CHANNEL_VIDEOS) -> list[str]:
+    """The ids of the newest videos in the catalog, newest first."""
+    return [v.video_id for v in store.list_videos("published_at desc")[:count]]
+
+
+def channel_fetch_units(videos: int, per_video: int = CHANNEL_PER_VIDEO) -> int:
+    """Quota units a channel-wide fetch costs at most: one commentThreads page per 100 comments of each video."""
+    pages = max(1, -(-per_video // 100))
+    return max(0, videos) * pages * cost_of("commentThreads.list")
+
+
+def fetch_channel_comments(store: Store, reader: CommentReader, video_ids: Sequence[str], *, guard: QuotaGuard | None, per_video: int = CHANNEL_PER_VIDEO, now: datetime | None = None, report: Callable[[str], None] | None = None) -> ChannelFetch:
+    """Read the comments of each video in turn with `fetch_comments`; returns what was done.
+    A video whose comments are turned off is skipped with a note. Any other failure (quota, API, an unknown
+    video) stops the fetch and is raised; the videos read before it stay stored."""
+    say = report or (lambda line: None)
+    ids = list(video_ids)
+    fetched = 0
+    notes: list[str] = []
+    for n, video_id in enumerate(ids, start=1):
+        say(f"Fetching comments ({n} of {len(ids)})")
+        try:
+            fetched += fetch_comments(store, reader, video_id, guard=guard, max_comments=per_video, now=now)
+        except CommentsError as exc:
+            video = store.get_video(video_id)
+            title = video.title if video and video.title else video_id
+            notes.append(f'Skipped "{title}": {exc}')
+    return ChannelFetch(fetched=fetched, videos=len(ids), notes=tuple(notes))
+
+
+def unsorted_video_ids(comments: Sequence[Comment]) -> list[str]:
+    """The videos that have comments not sorted yet, in the order of their newest such comment (`comments` newest first)."""
+    seen: set[str] = set()
+    order: list[str] = []
+    for c in comments:
+        if c.category in CATEGORIES:
+            continue
+        if c.video_id not in seen:
+            seen.add(c.video_id)
+            order.append(c.video_id)
+    return order
+
+
+def sort_channel_comments(run: Callable[[str], AssistResult], video_ids: Sequence[str], *, report: Callable[[str], None] | None = None) -> ChannelSort:
+    """Sort each video in turn with `run` (one Muse Spark call per video, see `assist`). A video
+    that fails with CommentsError or ValueError is skipped with a note; the others still run."""
+    say = report or (lambda line: None)
+    ids = list(video_ids)
+    counts: dict[str, int] = {key: 0 for key in CATEGORIES}
+    drafts = 0
+    notes: list[str] = []
+    videos = 0
+    model = ""
+    input_tokens = 0
+    cached_tokens = 0
+    output_tokens = 0
+    for n, video_id in enumerate(ids, start=1):
+        say(f"Sorting comments ({n} of {len(ids)})")
+        try:
+            result = run(video_id)
+        except (CommentsError, ValueError) as exc:
+            notes.append(f"A video was skipped: {exc}")
+            continue
+        videos += 1
+        for k, v in result.counts.items():
+            counts[k] = counts.get(k, 0) + v
+        drafts += result.drafts
+        notes.extend(result.notes)
+        model = result.model
+        input_tokens += result.input_tokens
+        cached_tokens += result.cached_tokens
+        output_tokens += result.output_tokens
+    return ChannelSort(videos=videos, drafts=drafts, counts=counts, notes=tuple(notes), model=model, input_tokens=input_tokens, cached_tokens=cached_tokens, output_tokens=output_tokens)
