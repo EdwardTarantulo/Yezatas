@@ -411,3 +411,21 @@ def test_assist_with_no_comments_makes_no_call(store: Store) -> None:
     with pytest.raises(CommentsError, match="no comments"):
         assist(store, client, VID)
     assert client.calls == []
+
+
+def test_fetch_marks_comments_the_channel_replied_to(tmp_path: Path) -> None:
+    store = Store(tmp_path / "o.sqlite")
+    pull = store.begin_pull("chan0000001", now=NOW)
+    store.upsert_video(Video(video_id=VID, channel_id="chan0000001", title=TITLE, description=DESCRIPTION,
+                             privacy_status="public"), pull, now=NOW)
+    store.finish_pull(pull, 1, now=NOW)
+    mine = comment_item("cmt00000001", "Which pot size?", "2026-06-01T10:00:00Z")
+    mine["replies"] = {"comments": [{"snippet": {"authorChannelId": {"value": "chan0000001"}}}]}
+    other = comment_item("cmt00000002", "And the soil?", "2026-06-01T09:00:00Z")
+    other["replies"] = {"comments": [{"snippet": {"authorChannelId": {"value": "chanSomeoneElse"}}}]}
+    plain = comment_item("cmt00000003", "Nice video", "2026-06-01T08:00:00Z")
+    reader = FakeCommentReader({None: {"items": [mine, other, plain]}})
+    assert fetch_comments(store, reader, VID, guard=None, now=NOW) == 3
+    replied = {c.comment_id: c.owner_replied for c in store.list_comments(VID)}
+    assert replied == {"cmt00000001": True, "cmt00000002": False, "cmt00000003": False}
+    store.close()

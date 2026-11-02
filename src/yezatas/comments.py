@@ -98,7 +98,7 @@ def _as_int(value: Any) -> int:
         return 0
 
 
-def _comment_from_item(item: Any, video_id: str) -> Comment | None:
+def _comment_from_item(item: Any, video_id: str, owner: str = "") -> Comment | None:
     """One top-level comment from a commentThreads item, or None when the item is malformed."""
     if not isinstance(item, dict):
         return None
@@ -132,7 +132,22 @@ def _comment_from_item(item: Any, video_id: str) -> Comment | None:
         published_at=published if isinstance(published, str) else "",
         like_count=_as_int(top_snippet.get("likeCount")),
         reply_count=_as_int(reply_raw),
+        owner_replied=_owner_replied(item, owner),
     )
+
+
+def _owner_replied(item: dict[str, Any], owner: str) -> bool:
+    """True when one of the thread's returned replies was written by the channel `owner`."""
+    if not owner:
+        return False
+    replies = item.get("replies")
+    listed = replies.get("comments") if isinstance(replies, dict) else None
+    for reply in listed if isinstance(listed, list) else []:
+        snippet = reply.get("snippet") if isinstance(reply, dict) else None
+        author = snippet.get("authorChannelId") if isinstance(snippet, dict) else None
+        if isinstance(author, dict) and author.get("value") == owner:
+            return True
+    return False
 
 
 def fetch_comments(store: Store, reader: CommentReader, video_id: str, *,
@@ -151,6 +166,7 @@ def fetch_comments(store: Store, reader: CommentReader, video_id: str, *,
         raise ValueError("This video is not in your catalog. Pull your videos first.")
     say = report or (lambda line: None)
     say("Fetching comments")
+    owner = store.get_video(video_id).channel_id  # type: ignore[union-attr]  # checked above
     comments: list[Comment] = []
     page_token: str | None = None
     while len(comments) < max_comments:
@@ -172,7 +188,7 @@ def fetch_comments(store: Store, reader: CommentReader, video_id: str, *,
             raise
         items = page.get("items") if isinstance(page, dict) else None
         for item in items or []:
-            comment = _comment_from_item(item, video_id)
+            comment = _comment_from_item(item, video_id, owner)
             if comment is not None:
                 comments.append(comment)
                 if len(comments) >= max_comments:

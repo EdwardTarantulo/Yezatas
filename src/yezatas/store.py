@@ -390,10 +390,15 @@ _SCHEMA_V13: tuple[str, ...] = (
     "CREATE INDEX idx_shorts_finds_video ON shorts_finds(video_id, id)",
 )
 
+# v14: whether the channel itself replied to a comment (Today page).
+_SCHEMA_V14: tuple[str, ...] = (
+    "ALTER TABLE comments ADD COLUMN owner_replied INTEGER NOT NULL DEFAULT 0",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
     _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
-    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11, _SCHEMA_V12, _SCHEMA_V13,
+    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11, _SCHEMA_V12, _SCHEMA_V13, _SCHEMA_V14,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -622,6 +627,7 @@ class Comment:
     fetched_at: str = ""
     category: str = ""  # a key of comments.CATEGORIES, or "" when not classified yet
     classified_at: str = ""
+    owner_replied: bool = False  # the channel itself replied on YouTube (seen at the last fetch)
 
 
 @dataclass(frozen=True)
@@ -1819,6 +1825,7 @@ class Store:
             fetched_at=row["fetched_at"],
             category=row["category"],
             classified_at=row["classified_at"],
+            owner_replied=bool(row["owner_replied"]),
         )
 
     def upsert_comments(self, comments: Sequence[Comment], now: datetime | None = None) -> int:
@@ -1833,15 +1840,15 @@ class Store:
             self._conn.executemany(
                 """
                 INSERT INTO comments (comment_id, video_id, author, text, published_at,
-                    like_count, reply_count, fetched_at, category, classified_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    like_count, reply_count, fetched_at, category, classified_at, owner_replied)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(comment_id) DO UPDATE SET
                     video_id=excluded.video_id, author=excluded.author, text=excluded.text,
                     published_at=excluded.published_at, like_count=excluded.like_count,
-                    reply_count=excluded.reply_count, fetched_at=excluded.fetched_at
+                    reply_count=excluded.reply_count, fetched_at=excluded.fetched_at, owner_replied=excluded.owner_replied
                 """,
                 [(c.comment_id, c.video_id, c.author, c.text, c.published_at, c.like_count,
-                  c.reply_count, c.fetched_at or ts, c.category, c.classified_at) for c in items],
+                  c.reply_count, c.fetched_at or ts, c.category, c.classified_at, int(c.owner_replied)) for c in items],
             )
         return len(items)
 
@@ -1911,6 +1918,16 @@ class Store:
         """The stored comments of every video, newest first, at most `limit`."""
         rows = self._conn.execute(
             "SELECT * FROM comments ORDER BY published_at DESC, comment_id LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._row_to_comment(r) for r in rows]
+
+    def comments_to_answer(self, limit: int = 50) -> list[Comment]:
+        """Questions the channel has not replied to and whose reply draft was not used or dismissed, newest first."""
+        rows = self._conn.execute(
+            "SELECT * FROM comments c WHERE c.category = 'question' AND c.owner_replied = 0 "
+            "AND NOT EXISTS (SELECT 1 FROM comment_replies r WHERE r.comment_id = c.comment_id "
+            "AND r.status IN ('used', 'dismissed')) "
+            "ORDER BY c.published_at DESC, c.comment_id LIMIT ?", (limit,)
         ).fetchall()
         return [self._row_to_comment(r) for r in rows]
 

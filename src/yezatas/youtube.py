@@ -113,7 +113,7 @@ class GoogleCommentReader:
         return (
             self._service.commentThreads()
             .list(
-                part="snippet",
+                part="snippet,replies",
                 videoId=video_id,
                 maxResults=100,
                 textFormat="plainText",

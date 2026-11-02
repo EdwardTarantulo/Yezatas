@@ -12,7 +12,8 @@ from yezatas.store import (MIGRATIONS, AdCheck, Comment, CommentReply, CustomRul
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 # undo the newest migrations, for tests that turn a database back into an older version
-BACK_TO_V12 = "DROP TABLE shorts_finds; "
+BACK_TO_V13 = "ALTER TABLE comments DROP COLUMN owner_replied; "
+BACK_TO_V12 = BACK_TO_V13 + "DROP TABLE shorts_finds; "
 BACK_TO_V11 = BACK_TO_V12 + "DROP TABLE comments; DROP TABLE comment_replies; DROP TABLE reply_templates; DROP TABLE custom_rules; "
 BACK_TO_V10 = BACK_TO_V11 + "DROP TABLE link_checks; DROP TABLE ad_checks; "
 BACK_TO_V9 = BACK_TO_V10 + "DROP TABLE copilot_proposals; DROP TABLE copilot_turns; "
@@ -50,7 +51,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 13
+        assert s.schema_version == len(MIGRATIONS) == 14
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -60,7 +61,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -161,7 +162,7 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
                        "DROP TABLE push_runs; " + BACK_TO_V9 + "PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -315,7 +316,7 @@ def test_v8_database_upgrades_and_keeps_its_pushes(tmp_path: Path) -> None:
     conn.executescript(BACK_TO_V8 + "PRAGMA user_version = 8;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         record = s.get_push(push)
         assert record is not None and record.run_id is None and record.status == "pushed"
         assert record.before == {"title": "old"} and record.after == {"title": "new"}
@@ -332,7 +333,7 @@ def test_v9_database_upgrades_and_keeps_its_push_runs(tmp_path: Path) -> None:
     conn.executescript(BACK_TO_V9 + "PRAGMA user_version = 9;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         record = s.get_push(push)
         assert record is not None and record.run_id == run
         assert s.latest_copilot_chat_id() is None and s.next_copilot_chat_id() == 1
@@ -381,7 +382,7 @@ def test_v10_database_upgrades_to_v11_and_keeps_its_copilot_turns(tmp_path: Path
     conn.executescript(BACK_TO_V10 + "PRAGMA user_version = 10;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         assert s.get_copilot_turn(turn) is not None
         assert s.latest_link_checks() == {} and s.latest_ad_check("vid00000001") is None
 
@@ -546,7 +547,7 @@ def test_v5_database_upgrades_to_v6_and_keeps_its_data(tmp_path: Path) -> None:
                        "DROP TABLE subtitle_translations; " + BACK_TO_V8 + "PRAGMA user_version = 5;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         assert s.get_video("vid00000001") is not None and s.get_draft("vid00000001") is not None
         transcript = s.latest_transcript("vid00000001")
         assert transcript is not None and transcript.segments[0]["text"] == "Hello"
@@ -616,7 +617,7 @@ def test_v6_database_upgrades_to_v7_and_keeps_its_data(tmp_path: Path) -> None:
                        "" + BACK_TO_V8 + "PRAGMA user_version = 6;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         assert s.get_video("vid00000001") is not None
         assert len(s.list_subtitle_translations("vid00000001")) == 1
         assert s.latest_packaging_review("vid00000001") is None
@@ -663,7 +664,7 @@ def test_v7_database_upgrades_to_v8_and_keeps_its_data(tmp_path: Path) -> None:
     conn.executescript("DROP TABLE outlier_reports; " + BACK_TO_V8 + "PRAGMA user_version = 7;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         assert s.get_video("vid00000001") is not None
         assert s.latest_packaging_review("vid00000001") is not None
         assert s.latest_outlier_report() is None
@@ -805,7 +806,7 @@ def test_v12_database_upgrades_to_v13_and_keeps_its_data(tmp_path: Path) -> None
     conn.executescript(BACK_TO_V12 + "PRAGMA user_version = 12;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         assert s.list_custom_rules()[0].name == "Newsletter link"
         assert s.latest_shorts_find("vid00000001") is None
         from yezatas.store import ShortsFind
@@ -823,7 +824,7 @@ def test_v11_database_upgrades_to_v12_and_keeps_its_data(tmp_path: Path) -> None
     conn.executescript(BACK_TO_V11 + "PRAGMA user_version = 11;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 13
+        assert s.schema_version == 14
         assert s.get_copilot_turn(turn) is not None
         assert set(s.latest_link_checks()) == {"https://example.com/page"}
         assert s.list_comments("vid00000001") == [] and s.list_reply_templates() == []
@@ -847,3 +848,39 @@ def test_previous_view_counts_reads_the_snapshot_before_the_newest(store: Store)
     store.upsert_video(make_video(view_count=400), p3, now=day3)
     store.finish_pull(p3, 1, now=day3)
     assert store.previous_view_counts() == {"vid00000001": (day2.isoformat(), 250)}
+
+
+def test_v13_database_upgrades_to_v14_and_keeps_its_comments(tmp_path: Path) -> None:
+    path = tmp_path / "v13.sqlite"
+    with Store(path) as s:
+        s.upsert_comments([make_comment()], now=T0)
+    conn = sqlite3.connect(path)
+    conn.executescript(BACK_TO_V13 + "PRAGMA user_version = 13;")
+    conn.close()
+    with Store(path) as s:
+        assert s.schema_version == 14
+        kept = s.list_comments("vid00000001")
+        assert [c.comment_id for c in kept] == ["cmt00000001"] and kept[0].owner_replied is False
+
+
+def test_comments_to_answer_skips_answered_used_and_dismissed(store: Store) -> None:
+    store.upsert_comments([
+        make_comment("cmt00000001", published_at="2026-09-05T10:00:00Z"),
+        make_comment("cmt00000002", published_at="2026-09-04T10:00:00Z", owner_replied=True),
+        make_comment("cmt00000003", published_at="2026-09-03T10:00:00Z"),
+        make_comment("cmt00000004", published_at="2026-09-02T10:00:00Z"),
+        make_comment("cmt00000005", published_at="2026-09-01T10:00:00Z"),
+        make_comment("cmt00000006", published_at="2026-09-06T10:00:00Z"),
+    ], now=T0)
+    store.set_comment_categories({f"cmt0000000{n}": "question" for n in range(1, 6)}
+                                 | {"cmt00000006": "praise"}, now=T0)
+    used = store.add_comment_reply("vid00000001", "cmt00000003", "Thanks!", "m", [], now=T0)
+    store.set_comment_reply_status(used, "used")
+    gone = store.add_comment_reply("vid00000001", "cmt00000004", "Hi", "m", [], now=T0)
+    store.set_comment_reply_status(gone, "dismissed")
+    store.add_comment_reply("vid00000001", "cmt00000005", "Open draft", "m", [], now=T0)
+    assert [c.comment_id for c in store.comments_to_answer()] == ["cmt00000001", "cmt00000005"]
+    assert [c.comment_id for c in store.comments_to_answer(limit=1)] == ["cmt00000001"]
+    store.upsert_comments([make_comment("cmt00000001", published_at="2026-09-05T10:00:00Z",
+                                        owner_replied=True)], now=T0)
+    assert [c.comment_id for c in store.comments_to_answer()] == ["cmt00000005"]
