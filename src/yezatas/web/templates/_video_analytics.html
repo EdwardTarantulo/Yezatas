@@ -1,0 +1,39 @@
+{# The Analytics card of the video page: this video's last 28 days from YouTube Analytics (read-only). `vs` is the sign-in, the refresh job and the saved numbers; `vs.view` what to show. #}
+{% set va = vs.view %}
+<section class="card va-card" id="video-analytics" aria-labelledby="h-va">
+  <div class="card-title-row">
+    <h2 id="h-va">Analytics</h2>
+    <span class="muted">Last 28 days{% if va %} &middot; data up to {{ va.up_to }}{% endif %}</span>
+    {% if vs.connected %}<form class="va-refresh" method="post" action="/videos/{{ video.video_id|urlencode }}/analytics/refresh"><input type="hidden" name="csrf" value="{{ csrf }}">{% if vs.when %}<span class="muted">Read {{ vs.when }}</span>{% endif %}<button type="submit" class="button secondary"{% if vs.running or vs.busy %} disabled{% endif %}>Refresh</button></form>{% endif %}
+  </div>
+  {% if vs.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="video_stats-msg" role="status" aria-live="polite">{{ vs.message or 'Starting…' }}</span></p>
+  {% elif vs.failed %}
+  <div class="flash error" role="alert" id="video-analytics-failed">{{ vs.failed }}</div>
+  <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/analytics/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if vs.busy %}<p class="hint" id="video-analytics-busy">Another video's numbers are being read. Wait for it to finish.</p>{% endif %}
+  {% if not vs.connected %}
+  <p class="hint" id="video-analytics-connect">This video's numbers come from YouTube Analytics (read-only). <a href="/analytics">Connect Analytics on the Analytics page</a>, then refresh here.</p>
+  {% elif va %}
+  <div class="va-stats">
+    {% for s in va.stats %}<div class="va-stat"><span class="va-stat-k">{{ s.label }}</span><span class="va-stat-v">{{ s.value }}</span>{% if s.note %}<span class="va-stat-n">{{ s.note }}</span>{% endif %}</div>{% endfor %}
+  </div>
+  <div class="va-body">
+    <div class="va-chart-wrap">
+      <span class="va-h">Views per day</span>
+      <span class="va-chart" aria-hidden="true">{% for h in va.bars %}<span class="{{ h }}"></span>{% endfor %}</span>
+      <span class="va-axis"><span>{{ va.first_day }}</span><span>{{ va.last_day }}</span></span>
+    </div>
+    {% for title, rows in [("Where views came from", va.sources), ("Where viewers watch from", va.countries)] %}
+    <div class="va-share"><span class="va-h">{{ title }}</span>
+      {% if rows %}<ul class="an-rows">{% for r in rows %}<li class="an-row va-row"><span class="an-label">{{ r.label }}</span><span class="bar an" aria-hidden="true"><span class="{{ r.bar }}"></span></span><span class="an-num">{{ r.percent }}%</span></li>{% endfor %}</ul>
+      {% else %}<p class="muted">No views in these 28 days.</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-note" id="video-analytics-empty">Not read yet. Refresh reads this video's last 28 days from YouTube Analytics: three queries on the Analytics quota, not your daily Data API budget. Nothing is written to YouTube.</p>
+  {% endif %}
+  <p class="va-note">Impressions and click-through rate are not in YouTube's API: see them in YouTube Studio, under Analytics, then Reach.</p>
+</section>

@@ -30,6 +30,8 @@
 
 {% include "_video_facts.html" %}
 
+{% include "_video_analytics.html" %}
+
 <nav class="vnav" aria-label="On this page"><a href="#edit">Edit</a><a href="#h-tools">Tools</a><a href="#checks">Checklist{% if card.failed %} <span class="vnav-n">{{ card.failed|length }}</span>{% endif %}</a></nav>
 
 <div class="vbody">

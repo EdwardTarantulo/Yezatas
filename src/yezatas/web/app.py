@@ -38,6 +38,7 @@ from .. import strategy as strategy_mod
 from .. import competitors as competitors_mod
 from .. import searchgaps as searchgaps_mod
 from .. import channelstats as channelstats_mod
+from .. import videostats as videostats_mod
 from .. import links as links_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
@@ -53,9 +54,10 @@ from .. import customchecks as customchecks_mod
 from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
 from ..quota import QuotaExceeded, QuotaGuard
-from ..seo import TAGS_CHAR_LIMIT, score_catalog, tags_char_count
+from ..seo import TAGS_CHAR_LIMIT, parse_duration, score_catalog, tags_char_count
 from .videofacts import build_facts
 from .views import stale_youtube_keys
+from .video_analytics_view import build_video_analytics
 from ..store import AdCheck, OutlierReport, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
@@ -867,6 +869,10 @@ class WebState:
         self.channel_stats_job = Job(map_channel_stats_error, CHANNEL_STATS_TIMEOUT_SECONDS,
                                      CHANNEL_STATS_TIMEOUT_MESSAGE, clock)
         self._channel_stats_seen: JobSnapshot | None = None
+        self.video_stats_job = Job(map_channel_stats_error, CHANNEL_STATS_TIMEOUT_SECONDS,
+                                   CHANNEL_STATS_TIMEOUT_MESSAGE, clock)
+        self._video_stats_seen: JobSnapshot | None = None
+        self.video_stats_video = ""  # the video whose numbers the job reads (one at a time)
         self.copilot_job = Job(map_copilot_error, COPILOT_TIMEOUT_SECONDS,
                                COPILOT_TIMEOUT_MESSAGE, clock)
         self._copilot_seen: JobSnapshot | None = None
@@ -1576,6 +1582,37 @@ class WebState:
             if not snap.running:
                 self._channel_stats_seen = snap
 
+    # --- one video's numbers for its page (YouTube Analytics, read-only) ---
+    def start_video_stats(self, creds: Any, video_id: str) -> bool:
+        with self._lock:
+            if self.video_stats_job.snapshot().running:
+                return False
+            self.video_stats_video = video_id
+        return self.video_stats_job.start(lambda report: self._run_video_stats(creds, video_id, report))
+
+    def _run_video_stats(self, creds: Any, video_id: str, report: Report) -> "videostats_mod.VideoStats":
+        report("Starting…")
+        if self._channel_reader is None:
+            reader: Any = channelstats_mod.GoogleChannelReader(creds)
+        else:
+            reader = self._channel_reader(creds)
+        stats = videostats_mod.fetch_video_stats(reader, video_id, report=report)
+        videostats_mod.save_video_stats(self.config.home, stats)
+        return stats
+
+    def video_stats_state(self) -> JobSnapshot:
+        snap = self.video_stats_job.snapshot()
+        with self._lock:
+            if snap is self._video_stats_seen:
+                snap = JobSnapshot("idle")
+        return snap
+
+    def dismiss_video_stats(self) -> None:
+        snap = self.video_stats_job.snapshot()
+        with self._lock:
+            if not snap.running:
+                self._video_stats_seen = snap
+
     # --- copilot: questions about the channel -----------------------------------------------------
     def copilot_chat(self, store: Store) -> int | None:
         """The chat on screen: the one picked with "New chat", else the newest (None: no turns)."""
@@ -2232,6 +2269,19 @@ def create_app(
             "poll": snap.running or signin.running,
         }
 
+    def video_stats_card(video_id: str, duration: int | None) -> dict[str, Any]:
+        """The video page's Analytics card: the sign-in, the refresh job (one video at a time), the saved numbers."""
+        snap = state.video_stats_state()
+        mine = state.video_stats_video == video_id
+        saved = videostats_mod.load_video_stats(config.home, video_id)
+        return {
+            "connected": auth.can_read_analytics(config),
+            "running": snap.running and mine, "busy": snap.running and not mine, "message": snap.message,
+            "failed": snap.message if snap.status == "failed" and mine else "",
+            "when": _local_time(saved.fetched_at) if saved else "",
+            "view": build_video_analytics(saved, duration),
+        }
+
     @app.get("/")
     def index(request: Request) -> Response:
         data = catalog_data()
@@ -2341,6 +2391,7 @@ def create_app(
         with Store(config.catalog_db) as store:
             stored_check = store.latest_ad_check(video_id)
             current_hash = adcheck_mod.current_source_hash(store, video_id)
+        vs = video_stats_card(video_id, parse_duration(video.duration))
         return render(request, "video.html", {
             "ac": ac, "av": build_adcheck_view(stored_check, current_hash, _local_time),
             "sp": sh, "sr": build_shorts_view(video_id, stored_shorts, transcript.id if transcript else 0,
@@ -2348,6 +2399,7 @@ def create_app(
             "cm": cm, "am": am, "cv": cv,
             "outlier_line": outlier_line(score),
             "facts": build_facts(video, entry.card),
+            "vs": vs,
             "change": card,
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
             "tag_count": len(text[2]), "tag_chars": tags_char_count(text[2]), "tags_limit": TAGS_CHAR_LIMIT,
@@ -2374,7 +2426,7 @@ def create_app(
                      or pk["variants"]["running"] or pk["variants"]["busy"]
                      or ac["running"] or ac["busy"]
                      or sh["running"] or sh["busy"]
-                     or cm["running"] or cm["busy"] or am["running"] or am["busy"]),
+                     or cm["running"] or cm["busy"] or am["running"] or am["busy"] or vs["running"]),
         })
 
     def usable_variant(video_id: str, raw: str) -> ThumbnailVariant | None:
@@ -2890,6 +2942,7 @@ def create_app(
             "searchgaps": _job_json(state.searchgaps_job.snapshot()),
             "searchgaps_rank": _job_json(state.searchgaps_rank_job.snapshot()),
             "channel_stats": _job_json(state.channel_stats_job.snapshot()),
+            "video_stats": _job_json(state.video_stats_job.snapshot()),
             "copilot": _job_json(state.copilot_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),
@@ -4088,6 +4141,31 @@ def create_app(
         state.dismiss_chapters_result()
         video_id = str(form.get("video_id") or "")
         return see_other(f"/videos/{quote(video_id)}#transcript" if video_id else "/")
+
+    @app.post("/videos/{video_id}/analytics/refresh")
+    async def refresh_video_analytics(request: Request, video_id: str) -> Response:
+        await read_form(request)
+
+        def exists() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.get_video(video_id) is not None
+
+        if not await run_in_threadpool(exists):
+            flash(request, "error", "This video is not in your catalog. Pull your videos first.")
+            return see_other("/videos")
+        creds = await run_in_threadpool(state.analytics_credentials)
+        if creds is None:
+            flash(request, "error", "Reading this video's numbers needs the YouTube Analytics sign-in. "
+                        "Connect Analytics on the Analytics page first.")
+        elif not state.start_video_stats(creds, video_id):
+            flash(request, "error", "Another video's numbers are being read. Wait for it to finish.")
+        return see_other(f"/videos/{quote(video_id)}#video-analytics")
+
+    @app.post("/videos/{video_id}/analytics/done")
+    async def dismiss_video_analytics(request: Request, video_id: str) -> Response:
+        await read_form(request)
+        state.dismiss_video_stats()
+        return see_other(f"/videos/{quote(video_id)}#video-analytics")
 
     @app.post("/videos/{video_id}/subtitles")
     async def translate_video_subtitles(request: Request, video_id: str) -> Response:
