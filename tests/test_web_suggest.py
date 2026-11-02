@@ -512,3 +512,14 @@ def test_new_pages_have_no_inline_script_or_style(tmp_path: Path) -> None:
         html = ui.client.get(path).text
         assert "style=" not in html and html.count("<script") == html.count("<script src="), path
         assert not re.search(r"\son\w+=", html), path
+
+
+def test_editing_a_draft_says_so(tmp_path: Path) -> None:
+    ui, _ = make_suggest_ui(tmp_path)
+    html = ui.client.get(f"/videos/{V1}").text
+    assert 'id="edit-draft-note"' not in html and "Saving makes a draft." in html
+    draft(ui, V1)
+    html = ui.client.get(f"/videos/{V1}").text
+    assert 'id="edit-draft-note"' in html and "You are editing your draft." in html
+    changes = ui.client.get("/changes").text
+    assert f'href="/videos/{V1}#edit">Edit draft</a>' in changes

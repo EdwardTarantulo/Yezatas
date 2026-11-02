@@ -123,13 +123,13 @@
 {% if r.changes %}
 <h3 class="run-h">What changed</h3>
 <ul class="run-list">
-  {% for c in r.changes %}<li><strong>{{ c.field }}</strong> &middot; {{ c.check }}: {{ c.reason }}</li>{% endfor %}
+  {% for field, items in r.changes|groupby('field') %}<li><strong>{{ field }}</strong><ul class="run-sub">{% for c in items %}<li>{{ c.reason }}{% if c.check %}<span class="run-check">{{ c.check }}</span>{% endif %}</li>{% endfor %}</ul></li>{% endfor %}
 </ul>
 {% endif %}
 {% if r.not_fixed %}
 <h3 class="run-h">Left for you</h3>
 <ul class="run-list">
-  {% for c in r.not_fixed %}<li><strong>{{ c.check }}</strong>: {{ c.reason }}</li>{% endfor %}
+  {% for c in r.not_fixed %}<li><strong>{{ c.check }}</strong><span class="run-check">{{ c.reason }}</span></li>{% endfor %}
 </ul>
 {% endif %}
 {% endmacro %}
