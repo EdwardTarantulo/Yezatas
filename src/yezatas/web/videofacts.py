@@ -14,6 +14,7 @@ from .views import format_count, format_duration
 FACT_CHECKS: dict[str, str] = {
     "language": "default_language", "chapters": "description_chapters",
     "hashtags": "description_hashtags", "translations": "localizations",
+    "category": "category",
 }
 
 

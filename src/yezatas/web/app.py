@@ -39,6 +39,7 @@ from .. import competitors as competitors_mod
 from .. import searchgaps as searchgaps_mod
 from .. import channelstats as channelstats_mod
 from .. import videostats as videostats_mod
+from .. import categorycheck as categorycheck_mod
 from .. import links as links_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
@@ -54,11 +55,12 @@ from .. import customchecks as customchecks_mod
 from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
 from ..quota import QuotaExceeded, QuotaGuard
-from ..seo import TAGS_CHAR_LIMIT, parse_duration, score_catalog, tags_char_count
+from ..seo import TAGS_CHAR_LIMIT, CategoryJudgment, parse_duration, score_catalog, tags_char_count, video_category_id
 from .videofacts import build_facts
 from .views import stale_youtube_keys
 from .video_analytics_view import build_video_analytics
-from ..store import AdCheck, OutlierReport, ShortsFind, Store, ThumbnailVariant
+from .category_view import build_category_view
+from ..store import AdCheck, CategoryCheck, OutlierReport, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
                        GoogleYouTubeWriter, YouTubeReader, YouTubeWriter,
@@ -175,6 +177,9 @@ ADCHECK_TIMEOUT_SECONDS = 3 * 60.0
 ADCHECK_TIMEOUT_MESSAGE = (
     "The advertiser-friendly check took more than 3 minutes, so Yezatas stopped waiting. Try again."
 )
+CATEGORY_TIMEOUT_SECONDS = 2 * 60.0
+CATEGORY_TIMEOUT_MESSAGE = (
+    "Checking the category took more than 2 minutes, so Yezatas stopped waiting. Try again.")
 COMMENTS_TIMEOUT_SECONDS = 120.0
 COMMENTS_TIMEOUT_MESSAGE = (
     "Reading the comments took more than 2 minutes, so Yezatas stopped waiting. Try again."
@@ -214,6 +219,8 @@ ChaptersFn = Callable[[Store, str, Report], "chapters_mod.ChaptersResult"]
 CopilotFn = Callable[[Store, str, int, datetime, Report], int]
 # (store, video id, the time now, report) -> the stored check (a failed one included)
 AdcheckFn = Callable[[Store, str, datetime, Report], "AdCheck"]
+# (store, video id, the time now, report) -> the stored category check (a failed one included)
+CategoryFn = Callable[[Store, str, datetime, Report], "CategoryCheck"]
 # (store, video id, the time now, report) -> the stored Shorts finder run (a failed one included)
 ShortsFn = Callable[[Store, str, datetime, Report], "ShortsFind"]
 # The three packaging clients (None without a Meta API key); the real one reads the key from the config.
@@ -566,6 +573,29 @@ def make_default_adcheck(config: Config) -> AdcheckFn:
     return run
 
 
+def map_category_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if type(exc) is ValueError:  # the plain sentence of the check's own guard
+        return "category", str(exc)
+    return "category", f"The category check stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def make_default_category(config: Config) -> CategoryFn:
+    """The real check: Muse Spark through Meta's Model API, one client per check."""
+
+    def run(store: Store, video_id: str, now: datetime, report: Report) -> "CategoryCheck":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        return categorycheck_mod.judge_category(store, client, video_id, now=now, report=report)
+
+    return run
+
+
 def map_comments_error(exc: BaseException) -> tuple[str, str]:
     if isinstance(exc, comments_mod.CommentsError):
         return "comments", str(exc)
@@ -776,6 +806,7 @@ class WebState:
         competitor_reader: CompetitorReaderFactory | None = None,
         competitor_explain: CompetitorExplainFn | None = None,
         channel_reader: ChannelReaderFactory | None = None,
+        category_fn: CategoryFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -790,6 +821,7 @@ class WebState:
         self._chapters = chapters_fn or make_default_chapters(config)
         self._copilot = copilot_fn or make_default_copilot(config)
         self._adcheck = adcheck_fn or make_default_adcheck(config)
+        self._category = category_fn or make_default_category(config)
         self._comment_reader_factory = comment_reader
         self._comments_assist = comments_assist or make_default_comments_assist(config)
         self._rule_maker = rule_maker or make_default_rule_maker(config)
@@ -883,6 +915,10 @@ class WebState:
                                clock)
         self._adcheck_seen: JobSnapshot | None = None
         self._adcheck_video = ""
+        self.category_job = Job(map_category_error, CATEGORY_TIMEOUT_SECONDS, CATEGORY_TIMEOUT_MESSAGE,
+                                clock)
+        self._category_seen: JobSnapshot | None = None
+        self._category_video = ""
         self.shorts_job = Job(map_shorts_error, SHORTS_TIMEOUT_SECONDS, SHORTS_TIMEOUT_MESSAGE, clock)
         self._shorts_seen: JobSnapshot | None = None
         self._shorts_video = ""
@@ -1727,6 +1763,34 @@ class WebState:
             with self._lock:
                 self._adcheck_seen = snap
 
+    # --- the category check of one video (V7) --------------------------------------------------------
+    def start_category(self, video_id: str) -> bool:
+        """Check one video's category in the one category job; the check stores its verdict itself."""
+        if not self.category_job.start(lambda report: self._run_category(video_id, report)):
+            return False
+        with self._lock:
+            self._category_video = video_id
+        return True
+
+    def _run_category(self, video_id: str, report: Report) -> "CategoryCheck":
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            return self._category(store, video_id, datetime.now(timezone.utc), report)
+
+    def category_state(self) -> tuple[JobSnapshot, str]:
+        """(job snapshot, the video id it works on). A finished job the creator dismissed is idle."""
+        snap = self.category_job.snapshot()
+        with self._lock:
+            if snap is self._category_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._category_video
+
+    def dismiss_category_result(self) -> None:
+        snap = self.category_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._category_seen = snap
+
     # --- comments on one video (G4, G5) -----------------------------------------------------------
     def _make_comment_reader(self, creds: Any) -> CommentReader:
         factory = self._comment_reader_factory
@@ -1897,6 +1961,7 @@ def create_app(
     competitor_reader: CompetitorReaderFactory | None = None,
     competitor_explain: CompetitorExplainFn | None = None,
     channel_reader: ChannelReaderFactory | None = None,
+    category: CategoryFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1914,7 +1979,8 @@ def create_app(
                      strategy_fn=strategy, shorts_fn=shorts,
                      competitor_reader=competitor_reader, competitor_explain=competitor_explain,
                      analytics_sign_in=analytics_sign_in, analytics_credentials_loader=analytics_credentials_loader,
-                     analytics_reader=analytics_reader, gap_rank=gap_rank, channel_reader=channel_reader)
+                     analytics_reader=analytics_reader, gap_rank=gap_rank, channel_reader=channel_reader,
+                     category_fn=category)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -2001,10 +2067,13 @@ def create_app(
             # Translations on YouTube made from an older title or description do not count for the score.
             stale = {v.video_id: keys for v in videos if v.localizations
                      and (keys := stale_youtube_keys(v, store.latest_translations(v.video_id)))}
+            # Muse Spark's finished category checks; a video without one is not judged.
+            judged = {vid: CategoryJudgment(c.current_id, c.suggested_id, bool(c.confirmed_at), c.reason)
+                      for vid, c in store.category_checks().items() if c.status == "done"}
             guard = QuotaGuard(store, config.daily_quota_budget)
             used, remaining = guard.used(), guard.remaining()
             pull = store.latest_pull()
-        entries = make_entries(videos, score_catalog(videos, stale))
+        entries = make_entries(videos, score_catalog(videos, stale, judged))
         return {
             "entries": entries, "as_of": pull_moment(pull) if pull is not None else None,
             "latest_pull": {"videos": latest[0], "when": _local_time(latest[1])},
@@ -2193,6 +2262,13 @@ def create_app(
         panel.update({"has_key": has_key, "model": config.model})
         return panel
 
+    def category_panel(video_id: str, has_key: bool) -> dict[str, Any]:
+        """What the category check job is doing, for one video page."""
+        snap, job_video = state.category_state()
+        panel = job_panel(snap, job_video, video_id)
+        panel["has_key"] = has_key
+        return panel
+
     def comments_panel(video_id: str, has_write: bool) -> dict[str, Any]:
         snap, job_video = state.comments_state()
         panel = job_panel(snap, job_video, video_id)
@@ -2377,6 +2453,7 @@ def create_app(
                 else (video.title, video.description, tuple(video.tags)))
         score = next((s for s in outlier_scores(data) if s.video_id == video_id), None)
         ac = adcheck_panel(video_id, pk["has_tools"])  # one key check per page load
+        ct = category_panel(video_id, pk["has_tools"])
         with Store(config.catalog_db) as store:
             stored_shorts = store.latest_shorts_find(video_id)
             transcript = store.latest_transcript(video_id)
@@ -2390,6 +2467,7 @@ def create_app(
         am = assist_panel(video_id, pk["has_tools"], bool(all_comments))
         with Store(config.catalog_db) as store:
             stored_check = store.latest_ad_check(video_id)
+            category_record = store.category_check(video_id)
             current_hash = adcheck_mod.current_source_hash(store, video_id)
         vs = video_stats_card(video_id, parse_duration(video.duration))
         return render(request, "video.html", {
@@ -2400,6 +2478,9 @@ def create_app(
             "outlier_line": outlier_line(score),
             "facts": build_facts(video, entry.card),
             "vs": vs,
+            "ct": ct, "cg": build_category_view(
+                video_category_id(video), category_record,
+                next((c for c in entry.card.checks if c.check_id == "category"), None), _local_time),
             "change": card,
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
             "tag_count": len(text[2]), "tag_chars": tags_char_count(text[2]), "tags_limit": TAGS_CHAR_LIMIT,
@@ -2426,7 +2507,7 @@ def create_app(
                      or pk["variants"]["running"] or pk["variants"]["busy"]
                      or ac["running"] or ac["busy"]
                      or sh["running"] or sh["busy"]
-                     or cm["running"] or cm["busy"] or am["running"] or am["busy"] or vs["running"]),
+                     or cm["running"] or cm["busy"] or am["running"] or am["busy"] or vs["running"] or ct["running"]),
         })
 
     def usable_variant(video_id: str, raw: str) -> ThumbnailVariant | None:
@@ -2946,6 +3027,7 @@ def create_app(
             "copilot": _job_json(state.copilot_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),
+            "category": _job_json(state.category_job.snapshot()),
             "shorts": _job_json(state.shorts_job.snapshot()),
             "comments": _job_json(state.comments_job.snapshot()),
             "assist": _job_json(state.assist_job.snapshot()),
@@ -4309,6 +4391,44 @@ def create_app(
         state.dismiss_shorts_result()
         video_id = str(form.get("video_id") or "")
         return see_other(f"/videos/{quote(video_id)}#shorts" if video_id else "/")
+
+    # --- the category check (V7) -------------------------------------------------------------------
+    @app.post("/videos/{video_id}/category/check")
+    async def check_video_category(request: Request, video_id: str) -> Response:
+        await read_form(request)
+
+        def exists() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.get_video(video_id) is not None
+
+        if not await run_in_threadpool(exists):
+            return video_not_found(request)
+        if not await run_in_threadpool(has_packaging_key):
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif not state.start_category(video_id):
+            flash(request, "error", "A category check is already running. Wait for it to finish.")
+        return see_other(f"/videos/{quote(video_id)}#category")
+
+    @app.post("/videos/{video_id}/category/correct")
+    async def confirm_video_category(request: Request, video_id: str) -> Response:
+        await read_form(request)
+
+        def confirm() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.confirm_category(video_id)
+
+        if await run_in_threadpool(confirm):
+            flash(request, "ok", "Marked the category as correct. The check passes now.")
+        else:
+            flash(request, "error", "Check the category first: there is no finished check to mark as correct.")
+        return see_other(f"/videos/{quote(video_id)}#category")
+
+    @app.post("/category/done")
+    async def dismiss_category(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_category_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#category" if video_id else "/")
 
     @app.post("/adcheck/done")
     async def dismiss_adcheck(request: Request) -> Response:
