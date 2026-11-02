@@ -470,6 +470,9 @@ as it lands; the git history is the detailed record.
   two drafts with a tick on the front one. The dashboard's **Fix next** card now says how it ranks videos:
   views times points missing, and that "To fix" names the check that costs the most points. Checked in the
   browser at desktop and phone width, light and dark; all theme contrast tests pass.
+- **2026-11-02**: **One undo button where one is enough**, built by **Muse Spark Open** on Baseten (one
+  round). History shows **Undo this push** only when a push changed more than one video; for a single video
+  its own **Restore this text** does the same thing.
 
 ---
 
