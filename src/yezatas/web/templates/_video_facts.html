@@ -1,0 +1,5 @@
+{# Quick info on the video page: one tile per fact from the stored pull; a warm edge where a check costs points. #}
+<ul class="vfacts" id="video-facts" aria-label="Quick info">
+  {% for f in facts %}<li class="vfact" id="fact-{{ f.key }}"{% if f.tone %} data-tone="{{ f.tone }}"{% endif %}><span class="vfact-k">{{ f.label }}</span><span class="vfact-v">{{ f.value }}</span></li>
+  {% endfor %}
+</ul>

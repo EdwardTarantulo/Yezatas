@@ -54,6 +54,7 @@ from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
 from ..quota import QuotaExceeded, QuotaGuard
 from ..seo import TAGS_CHAR_LIMIT, score_catalog, tags_char_count
+from .videofacts import build_facts
 from ..store import AdCheck, OutlierReport, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
@@ -2342,6 +2343,7 @@ def create_app(
                             _local_time),
             "cm": cm, "am": am, "cv": cv,
             "outlier_line": outlier_line(score),
+            "facts": build_facts(video, entry.card),
             "change": card,
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
             "tag_count": len(text[2]), "tag_chars": tags_char_count(text[2]), "tags_limit": TAGS_CHAR_LIMIT,

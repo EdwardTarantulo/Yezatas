@@ -8,7 +8,7 @@
   <div class="vhead-thumb">{{ thumb(big_thumb, 'lg') }}</div>
   <div class="vhead-info">
     <h1 class="video-title">{{ video.title }}</h1>
-    <p class="muted vmeta"><span class="pill">{{ entry.visibility or 'Unknown visibility' }}</span>{% if published %}<span>Published {{ published }}</span>{% endif %}<span>{{ views }} views &middot; {{ likes }} likes &middot; {{ comments }} comments</span></p>
+    <p class="muted vmeta"><span class="pill">{{ entry.visibility or 'Unknown visibility' }}</span>{% if published %}<span>Published {{ published }}</span>{% endif %}</p>
     {% if outlier_line %}<p class="muted" id="video-outlier">{% if outlier_line.link %}<a href="{{ outlier_line.link }}">{{ outlier_line.text }}</a>{% else %}{{ outlier_line.text }}{% endif %}</p>{% endif %}
     <p class="vactions">
       <a class="button secondary" href="https://studio.youtube.com/video/{{ video.video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">Edit in YouTube Studio</a>
@@ -27,6 +27,8 @@
     </div>
   </div>
 </section>
+
+{% include "_video_facts.html" %}
 
 <nav class="vnav" aria-label="On this page"><a href="#edit">Edit</a><a href="#h-tools">Tools</a><a href="#checks">Checklist{% if card.failed %} <span class="vnav-n">{{ card.failed|length }}</span>{% endif %}</a></nav>
 

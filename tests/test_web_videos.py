@@ -179,7 +179,9 @@ def test_video_page_header_and_links(tmp_path: Path) -> None:
                                               published_at="2026-10-30T10:00:00Z")])
     html = ui.client.get("/videos/vid000007").text
     assert 'href="/videos"' in html and "Content" in html
-    assert "21.1K views" in html and "1.5K likes" in html and "12 comments" in html
+    facts = html[html.index('id="video-facts"'):html.index("</ul>", html.index('id="video-facts"'))]
+    for key, value in (("views", "21.1K"), ("likes", "1.5K"), ("comments", "12")):
+        assert re.search(rf'id="fact-{key}"><span class="vfact-k">[^<]+</span><span class="vfact-v">{value}</span>', facts)
     assert "Oct 30, 2026" in html
     assert re.search(r'<a class="button secondary" href="https://studio.youtube.com/video/vid000007/edit" '
                      r'target="_blank" rel="noopener noreferrer">Edit in YouTube Studio</a>', html)
@@ -306,3 +308,28 @@ def test_what_to_fix_links_each_fix_to_where_it_is_made(tmp_path: Path) -> None:
     failed = ui.cards[vid].failed
     if len(failed) > 4:
         assert f"Show {len(failed) - 4} more" in part
+
+
+def test_quick_info_tiles_come_from_the_stored_pull(tmp_path: Path) -> None:
+    raw = {"snippet": {"categoryId": "26"}, "contentDetails": {"caption": "true", "definition": "hd"}}
+    video = make_video(8, duration="PT1H2M3S", default_language="en", raw=raw,
+                       localizations={"en": {}, "fr": {}, "de": {}},
+                       description="0:00 Intro\n1:00 Soil\n2:00 Pot\n#cactus #garden")
+    ui = seeded(tmp_path, videos=[video])
+    html = ui.client.get("/videos/vid000008").text
+    tiles = dict(re.findall(r'id="fact-([a-z]+)"[^>]*><span class="vfact-k">[^<]+</span>'
+                            r'<span class="vfact-v">([^<]*)</span>', html))
+    assert tiles == {"views": tiles["views"], "likes": "8", "comments": "3", "duration": "1:02:03",
+                     "category": "Howto &amp; Style", "language": "English", "chapters": "3",
+                     "hashtags": "2", "captions": "Yes", "translations": "2", "quality": "HD"}
+
+
+def test_quick_info_marks_tiles_whose_check_fails(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, videos=[make_video(9, description="No tags here.")])
+    html = ui.client.get("/videos/vid000009").text
+    assert 'id="fact-hashtags" data-tone="warn"' in html
+    assert 'id="fact-translations" data-tone="warn"' in html
+    assert 'id="fact-language" data-tone="warn"' in html
+    assert 'id="fact-views" data-tone' not in html
+    for key in ("category", "captions", "quality"):
+        assert re.search(rf'id="fact-{key}"><span class="vfact-k">[^<]+</span><span class="vfact-v">Not known</span>', html)
