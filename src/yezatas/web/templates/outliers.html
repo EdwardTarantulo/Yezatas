@@ -39,7 +39,8 @@
 
 {% block content %}
 {% set lim = ov.limits %}
-<h1 class="page-title">Outliers: videos that beat your channel's norm for their age</h1>
+<h1 class="page-title">Outliers</h1>
+<p class="page-sub">Videos that beat your channel's norm for their age</p>
 
 <p class="muted" id="outliers-about">Each video is compared with the median views of the {{ lim.peers }} public videos published nearest to it. Views as of your last pull on {{ as_of }}. Videos younger than {{ lim.min_age }} days, private or unlisted videos and live streams are left out: <span id="outliers-left-out">{{ ov.left_out }} left out</span>.</p>
 

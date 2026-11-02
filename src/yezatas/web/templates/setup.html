@@ -1,6 +1,6 @@
 {% extends "shell.html" %}
 
-{% block title %}Set up - Yezatas{% endblock %}
+{% block title %}Setup - Yezatas{% endblock %}
 
 {% macro card(step) %}
 <section class="card {{ step.status }}{% if current == step.key %} current{% endif %}{% if not step.enabled %} locked{% endif %}" id="step-{{ step.key }}">
@@ -101,7 +101,7 @@
 
 {% block content %}
 <div class="narrow">
-<h1 class="page-title">Set up Yezatas</h1>
+<h1 class="page-title">Setup</h1>
 <p class="intro">Connect your channel in eight short steps. Yezatas only <strong>reads</strong> your
   channel here. Nothing is changed on YouTube. Use the Google account that owns the channel for every step.</p>
 

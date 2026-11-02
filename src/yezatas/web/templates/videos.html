@@ -1,8 +1,8 @@
 {% extends "shell.html" %}
-{% from "_macros.html" import score_badge, thumb %}
-{% block title %}Channel content - Yezatas{% endblock %}
+{% from "_macros.html" import icon, score_badge, thumb %}
+{% block title %}Videos - Yezatas{% endblock %}
 {% block content %}
-<h1 class="page-title">Channel content</h1>
+<div class="page-head"><h1 class="page-title">Videos</h1><a class="button secondary" id="bulk-link" href="/bulk" title="Find and replace, or add a block, in many descriptions at once (drafts only)">{{ icon('bulk') }}<span>Bulk edit</span></a></div>
 
 <div class="filters">
   <div class="chip-row" role="group" aria-label="Visibility">
@@ -15,7 +15,6 @@
   <div class="chip-row" role="group" aria-label="Sort by">
     <span class="chip-label">Sort by</span>
     {% for chip in listing.sort_chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }}</a>{% endfor %}
-    <a class="chip bulk-chip" id="bulk-link" href="/bulk" title="Find and replace, or add a block, in many descriptions at once (drafts only)">Bulk edit&hellip;</a>
   </div>
   {% if listing.check %}
   <div class="chip-row">

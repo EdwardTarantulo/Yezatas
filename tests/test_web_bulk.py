@@ -269,7 +269,7 @@ def test_links_on_changes_and_content_pages(ui: Any) -> None:
     content = ui.client.get("/videos").text
     assert 'href="/bulk"' in content and "Bulk edit" in content
     nav = re.search(r"<nav.*?</nav>", ui.client.get("/bulk").text, re.S)
-    assert nav and "/bulk" not in nav.group(0)
+    assert nav and re.findall(r'class="nav-item active" href="([^"]+)"', nav.group(0)) == ["/bulk"]
 
 
 def test_post_to_bulk_apply_without_a_catalog_still_answers(tmp_path: Path) -> None:

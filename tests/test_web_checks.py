@@ -125,8 +125,8 @@ def check_row(html_text: str, rule_id: int) -> str:
 def test_page_renders_the_ask_box(tmp_path: Path) -> None:
     ui = make_checks_ui(tmp_path)
     html = page(ui)
-    assert "<title>Custom checks - Yezatas</title>" in html
-    assert "Custom checks" in html
+    assert "<title>Checks - Yezatas</title>" in html
+    assert "<h1 class=\"page-title\">Checks</h1>" in html
     assert 'id="checks-about"' in html
     assert "The model only picks a rule from a fixed list; the check itself is code." in html
     assert 'id="checks-ask"' in html and "Ask for a check" in html

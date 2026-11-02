@@ -36,7 +36,7 @@ def listed(ui: Any, query: str = "") -> list[str]:
 def test_content_page_renders_rows_with_all_columns(tmp_path: Path) -> None:
     ui = seeded(tmp_path)
     html = ui.client.get("/videos").text
-    assert "Channel content" in html
+    assert "<h1 class=\"page-title\">Videos</h1>" in html
     assert f"{len(ui.videos)} videos" in html
     ids = row_ids(html)
     assert sorted(ids) == sorted(ui.videos)
@@ -178,7 +178,7 @@ def test_video_page_header_and_links(tmp_path: Path) -> None:
                                               comment_count=12,
                                               published_at="2026-10-30T10:00:00Z")])
     html = ui.client.get("/videos/vid000007").text
-    assert 'href="/videos"' in html and "Content" in html
+    assert 'href="/videos"' in html and "<span>Videos</span>" in html
     facts = html[html.index('id="video-facts"'):html.index("</ul>", html.index('id="video-facts"'))]
     for key, value in (("views", "21.1K"), ("likes", "1.5K"), ("comments", "12")):
         assert re.search(rf'id="fact-{key}"><span class="vfact-k">[^<]+</span><span class="vfact-v">{value}</span>', facts)

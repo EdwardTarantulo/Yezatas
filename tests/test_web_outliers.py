@@ -130,7 +130,7 @@ def section(html: str, marker: str, end: str = "</section>") -> str:
 def test_page_shows_the_line_the_outliers_and_the_collapsed_below_norm_rows(tmp_path: Path) -> None:
     ui, _, _ = make_ol_ui(tmp_path)
     html = page(ui)
-    assert "Outliers: videos that beat your channel's norm for their age" in html
+    assert "Videos that beat your channel's norm for their age" in html
     about = section(html, 'id="outliers-about"', "</p>")
     assert f"median views of the {outliers.PEERS} public videos published nearest to it" in about
     assert f"Views as of your last pull on {web_app._local_time(PULLED.isoformat())}." in about

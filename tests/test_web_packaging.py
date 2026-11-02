@@ -203,9 +203,9 @@ def test_the_card_renders_before_any_check(tmp_path: Path) -> None:
     assert "Cactus repotting guide" in section
     assert f"https://i.ytimg.com/vi/{V1}/mqdefault.jpg" in section  # the current thumbnail
     assert f'action="/videos/{V1}/packaging"' in section and 'name="csrf"' in section
-    assert re.search(r'class="button primary">Check packaging<', section)
+    assert re.search(r'class="button primary">Research thumbnail<', section)
     assert section.count(KEEP_SENTENCE) == 1
-    assert "packaging-result" not in section and "Make 2" not in section and "Variant ideas" not in section
+    assert "packaging-result" not in section and "Generate 2" not in section and "Variant ideas" not in section
     assert "packaging-no-key" not in section
     assert f'href="/videos/{V1}/packaging"' in section  # preview link
     assert fetch.urls == []
@@ -234,7 +234,7 @@ def test_a_check_runs_the_job_and_the_card_shows_what_was_found(tmp_path: Path) 
     assert "Text on the picture: &ldquo;REPOT IT&rdquo;" in section
     assert "Title that was checked: Cactus repotting guide" in section
     assert "muse-spark-1.3, sam-test" in section and "Cost " in section
-    assert re.search(r'class="button primary">Make 2 variant ideas<', section)
+    assert re.search(r'class="button primary">Generate 2 thumbnail options<', section)
     assert "packaging-problems" not in section
     with Store(ui.config.catalog_db) as store:
         review = store.latest_packaging_review(V1)
@@ -272,7 +272,7 @@ def test_a_failed_check_shows_its_sentence_and_no_facts(tmp_path: Path) -> None:
     section = card(page(ui))
     assert 'class="flash error" role="status" id="packaging-done"' in section
     assert "The thumbnail could not be downloaded (HTTP 404)." in section
-    assert "packaging-facts" not in section and "Make 2" not in section
+    assert "packaging-facts" not in section and "Generate 2" not in section
     assert nf(ui, "/packaging/done", data={"video_id": V1}).status_code == 303
     section = card(page(ui))  # dismissed: the stored failure still shows once
     assert 'id="packaging-error"' in section and "HTTP 404" in section
@@ -315,7 +315,7 @@ def test_without_a_key_the_post_says_so_and_starts_nothing(tmp_path: Path) -> No
     ui, _, fetch = make_pk_ui(tmp_path, tools=None)
     html = page(ui)
     assert 'id="packaging-no-key"' in card(html) and 'href="/setup#step-ai"' in card(html)
-    assert re.search(r'class="button primary" disabled>Check packaging<', card(html))
+    assert re.search(r'class="button primary" disabled>Research thumbnail<', card(html))
     resp = nf(ui, f"/videos/{V1}/packaging")
     assert resp.status_code == 303
     assert NO_PACKAGING_KEY in page(ui)
@@ -364,7 +364,7 @@ def test_a_running_check_shows_its_message_and_blocks_a_second_one(tmp_path: Pat
     assert ui.client.get("/api/status").json()["packaging"]["status"] == "running"
     other = page(ui, V2)
     assert 'data-poll="1"' in other and 'id="packaging-busy"' in card(other)
-    assert re.search(r'class="button primary" disabled>Check packaging<', card(other))
+    assert re.search(r'class="button primary" disabled>Research thumbnail<', card(other))
     nf(ui, f"/videos/{V2}/packaging")
     assert "already running" in page(ui, V2)
     gate.set()
@@ -396,7 +396,7 @@ def test_the_variants_button_needs_a_check_with_ideas(tmp_path: Path) -> None:
     # a check without ideas has no button either
     ui2, _, _ = make_pk_ui(tmp_path / "b", Tools([reading(), critique(ideas=[])]))
     run_check(ui2)
-    assert "Make 2" not in card(page(ui2))
+    assert "Generate 2" not in card(page(ui2))
     nf(ui2, f"/videos/{V1}/packaging/variants")
     assert "no packaging check with ideas" in page(ui2)
     assert ui2.web.variants_job.snapshot().status == "idle"
@@ -421,7 +421,7 @@ def test_making_variants_stores_them_and_the_card_shows_each_one(tmp_path: Path)
     assert 'href="/videos/%s/packaging/variants/1.jpg?download=1">Download .jpg<' % V1 in first
     assert 'href="/videos/%s/packaging?variant=1">Preview in a feed<' % V1 in first
     assert "Text matches" in second and "cactus guide" in second
-    assert "Make 2 more variant ideas" in section
+    assert "Generate 2 more thumbnail options" in section
 
 
 def test_a_variant_whose_text_differs_is_flagged_with_what_was_read(tmp_path: Path) -> None:

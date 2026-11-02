@@ -189,6 +189,12 @@ code {
 .nav-promise { margin: 6px 0 0; padding: 0 10px; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
 .main { flex: 1 1 0; min-width: 0; max-width: 1312px; padding: 24px 32px 64px; }
 .page-title { font-size: 26px; font-weight: 600; line-height: 1.25; margin: 0 0 20px; }
+.page-title:has(+ .page-sub) { margin-bottom: 4px; }
+.page-sub { margin: 0 0 20px; color: var(--muted); font-size: 15px; }
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 20px; }
+.page-head .page-title { margin: 0; }
+.page-head .button { display: inline-flex; align-items: center; gap: 8px; }
+.page-head .button .icon { width: 18px; height: 18px; }
 .narrow { max-width: 760px; }
 .intro { margin: 0 0 20px; }
 

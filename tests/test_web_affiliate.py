@@ -85,8 +85,8 @@ def test_page_shows_rules_table_add_form_and_the_plain_promises(ui: Any) -> None
     resp = ui.client.get("/affiliate")
     assert resp.status_code == 200
     html = resp.text
-    assert "<title>Affiliate links - Yezatas</title>" in html
-    assert '<h1 class="page-title">Affiliate links</h1>' in html
+    assert "<title>Affiliate - Yezatas</title>" in html
+    assert '<h1 class="page-title">Affiliate</h1>' in html
     assert 'id="affiliate-about"' in html
     assert "No program is built in: these rules are your own." in html
     assert ("Only drafts are made. Nothing reaches YouTube until you approve and push "

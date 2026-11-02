@@ -213,7 +213,7 @@ def test_page_loads_do_not_build_the_packaging_tools(tmp_path: Path, key: bool) 
     packaging_card = video.split('id="packaging"')[1].split("</section>")[0]
     assert ('id="packaging-no-key"' in packaging_card) is (not key)
     assert ('id="outliers-no-key"' in outlier_page) is (not key)
-    assert (" disabled" in button_after(packaging_card, "Check packaging")) is (not key)
+    assert (" disabled" in button_after(packaging_card, "Research thumbnail")) is (not key)
     assert (" disabled" in button_after(outlier_page, "Explain with Muse Spark")) is (not key)
 
 

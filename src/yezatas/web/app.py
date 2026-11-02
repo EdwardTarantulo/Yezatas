@@ -3534,7 +3534,7 @@ def create_app(
     def bulk_data(form: Any, error: str, preview: Any, proposal: Any = None,
                   ask_preview: bool = False, ask_request: str = "",
                   ask_plan_json: str = "") -> dict[str, Any]:
-        return {"active": "changes", "form": form, "error": error, "preview": preview,
+        return {"active": "bulk", "form": form, "error": error, "preview": preview,
                 "hidden": form.pairs(), "max_bulk": bulk.MAX_BULK,
                 "has_key": has_packaging_key(), "model": config.model,
                 "request_max": bulkask_mod.REQUEST_MAX, "ask_proposal": proposal,
