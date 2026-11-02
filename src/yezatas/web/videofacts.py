@@ -15,6 +15,7 @@ FACT_CHECKS: dict[str, str] = {
     "language": "default_language", "chapters": "description_chapters",
     "hashtags": "description_hashtags", "translations": "localizations",
     "category": "category",
+    "pinned": "pinned_comment",
 }
 
 
@@ -45,6 +46,9 @@ def build_facts(video: Video, card: Scorecard) -> tuple[Fact, ...]:
     chapters = len(parse_chapters(video.description))
     hashtags = len({t.casefold() for t in _HASHTAG.findall(video.description)})
     language = video.default_language or video.default_audio_language or ""
+    pinned = next((c for c in card.checks if c.check_id == "pinned_comment"), None)
+    pinned_value = ("Not fetched" if pinned is None or not pinned.applicable
+                    else "Yes" if pinned.passed else "None found")
     values = [
         ("views", "Views", format_count(video.view_count)),
         ("likes", "Likes", format_count(video.like_count)),
@@ -57,6 +61,7 @@ def build_facts(video: Video, card: Scorecard) -> tuple[Fact, ...]:
         ("captions", "Captions", {"true": "Yes", "false": "None"}.get(caption, "Not known")),
         ("translations", "Translations", str(own_translations(video)) or "0"),
         ("quality", "Quality", {"hd": "HD", "sd": "SD"}.get(definition, "Not known")),
+        ("pinned", "Pinned comment", pinned_value),
     ]
     return tuple(Fact(key, label, value, "warn" if FACT_CHECKS.get(key) in failed else "")
                  for key, label, value in values)

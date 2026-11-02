@@ -40,6 +40,7 @@ from .. import searchgaps as searchgaps_mod
 from .. import channelstats as channelstats_mod
 from .. import videostats as videostats_mod
 from .. import categorycheck as categorycheck_mod
+from .. import pinnedcomment as pinnedcomment_mod
 from .. import links as links_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
@@ -60,7 +61,8 @@ from .videofacts import build_facts
 from .views import stale_youtube_keys
 from .video_analytics_view import build_video_analytics
 from .category_view import build_category_view
-from ..store import AdCheck, CategoryCheck, OutlierReport, ShortsFind, Store, ThumbnailVariant
+from .pinned_view import build_pinned_view
+from ..store import AdCheck, CategoryCheck, OutlierReport, PinnedComment, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
                        GoogleYouTubeWriter, YouTubeReader, YouTubeWriter,
@@ -180,6 +182,9 @@ ADCHECK_TIMEOUT_MESSAGE = (
 CATEGORY_TIMEOUT_SECONDS = 2 * 60.0
 CATEGORY_TIMEOUT_MESSAGE = (
     "Checking the category took more than 2 minutes, so Yezatas stopped waiting. Try again.")
+PINNED_TIMEOUT_SECONDS = 2 * 60.0
+PINNED_TIMEOUT_MESSAGE = (
+    "Writing the pinned comment took more than 2 minutes, so Yezatas stopped waiting. Try again.")
 COMMENTS_TIMEOUT_SECONDS = 120.0
 COMMENTS_TIMEOUT_MESSAGE = (
     "Reading the comments took more than 2 minutes, so Yezatas stopped waiting. Try again."
@@ -221,6 +226,8 @@ CopilotFn = Callable[[Store, str, int, datetime, Report], int]
 AdcheckFn = Callable[[Store, str, datetime, Report], "AdCheck"]
 # (store, video id, the time now, report) -> the stored category check (a failed one included)
 CategoryFn = Callable[[Store, str, datetime, Report], "CategoryCheck"]
+# (store, video id, the time now, report) -> the stored pinned comment with its newest suggestion
+PinnedFn = Callable[[Store, str, datetime, Report], "PinnedComment"]
 # (store, video id, the time now, report) -> the stored Shorts finder run (a failed one included)
 ShortsFn = Callable[[Store, str, datetime, Report], "ShortsFind"]
 # The three packaging clients (None without a Meta API key); the real one reads the key from the config.
@@ -596,6 +603,29 @@ def make_default_category(config: Config) -> CategoryFn:
     return run
 
 
+def map_pinned_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if type(exc) is ValueError:
+        return "pinned", str(exc)
+    return "pinned", f"The pinned comment suggestion stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def make_default_pinned(config: Config) -> PinnedFn:
+    """The real suggestion: Muse Spark through Meta's Model API, one client per call."""
+
+    def run(store: Store, video_id: str, now: datetime, report: Report) -> "PinnedComment":
+        key = agent.load_api_key(config)
+        if not key:
+            raise agent.ModelError("auth", NO_PACKAGING_KEY)
+        from ..modelclient import MetaModelClient
+
+        client = MetaModelClient(key, config.model)
+        return pinnedcomment_mod.suggest_pinned(store, client, video_id, now=now, report=report)
+
+    return run
+
+
 def map_comments_error(exc: BaseException) -> tuple[str, str]:
     if isinstance(exc, comments_mod.CommentsError):
         return "comments", str(exc)
@@ -807,6 +837,7 @@ class WebState:
         competitor_explain: CompetitorExplainFn | None = None,
         channel_reader: ChannelReaderFactory | None = None,
         category_fn: CategoryFn | None = None,
+        pinned_fn: PinnedFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -822,6 +853,7 @@ class WebState:
         self._copilot = copilot_fn or make_default_copilot(config)
         self._adcheck = adcheck_fn or make_default_adcheck(config)
         self._category = category_fn or make_default_category(config)
+        self._pinned = pinned_fn or make_default_pinned(config)
         self._comment_reader_factory = comment_reader
         self._comments_assist = comments_assist or make_default_comments_assist(config)
         self._rule_maker = rule_maker or make_default_rule_maker(config)
@@ -919,6 +951,9 @@ class WebState:
                                 clock)
         self._category_seen: JobSnapshot | None = None
         self._category_video = ""
+        self.pinned_job = Job(map_pinned_error, PINNED_TIMEOUT_SECONDS, PINNED_TIMEOUT_MESSAGE, clock)
+        self._pinned_seen: JobSnapshot | None = None
+        self._pinned_video = ""
         self.shorts_job = Job(map_shorts_error, SHORTS_TIMEOUT_SECONDS, SHORTS_TIMEOUT_MESSAGE, clock)
         self._shorts_seen: JobSnapshot | None = None
         self._shorts_video = ""
@@ -1791,6 +1826,34 @@ class WebState:
             with self._lock:
                 self._category_seen = snap
 
+    # --- the pinned comment suggestion of one video (V8) ---------------------------------------------
+    def start_pinned(self, video_id: str) -> bool:
+        """Ask for one video's pinned comment in the one pinned job; the suggestion is stored by itself."""
+        if not self.pinned_job.start(lambda report: self._run_pinned(video_id, report)):
+            return False
+        with self._lock:
+            self._pinned_video = video_id
+        return True
+
+    def _run_pinned(self, video_id: str, report: Report) -> "PinnedComment":
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            return self._pinned(store, video_id, datetime.now(timezone.utc), report)
+
+    def pinned_state(self) -> tuple[JobSnapshot, str]:
+        """(job snapshot, the video id it works on). A finished job the creator dismissed is idle."""
+        snap = self.pinned_job.snapshot()
+        with self._lock:
+            if snap is self._pinned_seen:
+                snap = JobSnapshot("idle")
+            return snap, self._pinned_video
+
+    def dismiss_pinned_result(self) -> None:
+        snap = self.pinned_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._pinned_seen = snap
+
     # --- comments on one video (G4, G5) -----------------------------------------------------------
     def _make_comment_reader(self, creds: Any) -> CommentReader:
         factory = self._comment_reader_factory
@@ -1962,6 +2025,7 @@ def create_app(
     competitor_explain: CompetitorExplainFn | None = None,
     channel_reader: ChannelReaderFactory | None = None,
     category: CategoryFn | None = None,
+    pinned: PinnedFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1980,7 +2044,7 @@ def create_app(
                      competitor_reader=competitor_reader, competitor_explain=competitor_explain,
                      analytics_sign_in=analytics_sign_in, analytics_credentials_loader=analytics_credentials_loader,
                      analytics_reader=analytics_reader, gap_rank=gap_rank, channel_reader=channel_reader,
-                     category_fn=category)
+                     category_fn=category, pinned_fn=pinned)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -2070,10 +2134,12 @@ def create_app(
             # Muse Spark's finished category checks; a video without one is not judged.
             judged = {vid: CategoryJudgment(c.current_id, c.suggested_id, bool(c.confirmed_at), c.reason)
                       for vid, c in store.category_checks().items() if c.status == "done"}
+            # A comment from the channel among the fetched ones, or the user's "I pinned one already".
+            pinned_states = store.pinned_states()
             guard = QuotaGuard(store, config.daily_quota_budget)
             used, remaining = guard.used(), guard.remaining()
             pull = store.latest_pull()
-        entries = make_entries(videos, score_catalog(videos, stale, judged))
+        entries = make_entries(videos, score_catalog(videos, stale, judged, pinned_states))
         return {
             "entries": entries, "as_of": pull_moment(pull) if pull is not None else None,
             "latest_pull": {"videos": latest[0], "when": _local_time(latest[1])},
@@ -2269,6 +2335,13 @@ def create_app(
         panel["has_key"] = has_key
         return panel
 
+    def pinned_panel(video_id: str, has_key: bool) -> dict[str, Any]:
+        """What the pinned comment job is doing, for one video page."""
+        snap, job_video = state.pinned_state()
+        panel = job_panel(snap, job_video, video_id)
+        panel["has_key"] = has_key
+        return panel
+
     def comments_panel(video_id: str, has_write: bool) -> dict[str, Any]:
         snap, job_video = state.comments_state()
         panel = job_panel(snap, job_video, video_id)
@@ -2454,6 +2527,7 @@ def create_app(
         score = next((s for s in outlier_scores(data) if s.video_id == video_id), None)
         ac = adcheck_panel(video_id, pk["has_tools"])  # one key check per page load
         ct = category_panel(video_id, pk["has_tools"])
+        pt = pinned_panel(video_id, pk["has_tools"])
         with Store(config.catalog_db) as store:
             stored_shorts = store.latest_shorts_find(video_id)
             transcript = store.latest_transcript(video_id)
@@ -2468,6 +2542,7 @@ def create_app(
         with Store(config.catalog_db) as store:
             stored_check = store.latest_ad_check(video_id)
             category_record = store.category_check(video_id)
+            pinned_record = store.pinned_comment(video_id)
             current_hash = adcheck_mod.current_source_hash(store, video_id)
         vs = video_stats_card(video_id, parse_duration(video.duration))
         return render(request, "video.html", {
@@ -2481,6 +2556,9 @@ def create_app(
             "ct": ct, "cg": build_category_view(
                 video_category_id(video), category_record,
                 next((c for c in entry.card.checks if c.check_id == "category"), None), _local_time),
+            "pt": pt, "pn": build_pinned_view(
+                pinned_record, next((c for c in entry.card.checks if c.check_id == "pinned_comment"), None),
+                _local_time),
             "change": card,
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
             "tag_count": len(text[2]), "tag_chars": tags_char_count(text[2]), "tags_limit": TAGS_CHAR_LIMIT,
@@ -2507,7 +2585,7 @@ def create_app(
                      or pk["variants"]["running"] or pk["variants"]["busy"]
                      or ac["running"] or ac["busy"]
                      or sh["running"] or sh["busy"]
-                     or cm["running"] or cm["busy"] or am["running"] or am["busy"] or vs["running"] or ct["running"]),
+                     or cm["running"] or cm["busy"] or am["running"] or am["busy"] or vs["running"] or ct["running"] or pt["running"]),
         })
 
     def usable_variant(video_id: str, raw: str) -> ThumbnailVariant | None:
@@ -3028,6 +3106,7 @@ def create_app(
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),
             "category": _job_json(state.category_job.snapshot()),
+            "pinned": _job_json(state.pinned_job.snapshot()),
             "shorts": _job_json(state.shorts_job.snapshot()),
             "comments": _job_json(state.comments_job.snapshot()),
             "assist": _job_json(state.assist_job.snapshot()),
@@ -4422,6 +4501,46 @@ def create_app(
         else:
             flash(request, "error", "Check the category first: there is no finished check to mark as correct.")
         return see_other(f"/videos/{quote(video_id)}#category")
+
+    # --- the pinned comment (V8) -------------------------------------------------------------------
+    @app.post("/videos/{video_id}/pinned/suggest")
+    async def suggest_pinned_comment(request: Request, video_id: str) -> Response:
+        await read_form(request)
+
+        def exists() -> bool:
+            with Store(config.catalog_db) as store:
+                return store.get_video(video_id) is not None
+
+        if not await run_in_threadpool(exists):
+            return video_not_found(request)
+        if not await run_in_threadpool(has_packaging_key):
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif not state.start_pinned(video_id):
+            flash(request, "error", "A pinned comment is already being written. Wait for it to finish.")
+        return see_other(f"/videos/{quote(video_id)}#pinned-comment")
+
+    @app.post("/videos/{video_id}/pinned/mark")
+    async def mark_pinned_comment(request: Request, video_id: str) -> Response:
+        await read_form(request)
+
+        def mark() -> bool:
+            with Store(config.catalog_db) as store:
+                if store.get_video(video_id) is None:
+                    return False
+                store.mark_pinned(video_id)
+                return True
+
+        if not await run_in_threadpool(mark):
+            return video_not_found(request)
+        flash(request, "ok", "Marked: a pinned comment is up. The check passes now.")
+        return see_other(f"/videos/{quote(video_id)}#pinned-comment")
+
+    @app.post("/pinned/done")
+    async def dismiss_pinned(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_pinned_result()
+        video_id = str(form.get("video_id") or "")
+        return see_other(f"/videos/{quote(video_id)}#pinned-comment" if video_id else "/")
 
     @app.post("/category/done")
     async def dismiss_category(request: Request) -> Response:

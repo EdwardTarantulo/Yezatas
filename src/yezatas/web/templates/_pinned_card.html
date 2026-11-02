@@ -1,0 +1,34 @@
+{# The Pinned comment card of the video page: is a comment from the channel there, and Muse Spark's suggestion to post. `pt` is the job and key state, `pn` the view. #}
+<section class="card pinned-card" id="pinned-comment" aria-labelledby="h-pinned">
+  <div class="card-title-row">
+    <div class="pin-head"><h2 id="h-pinned">Pinned comment</h2><p class="muted">A comment from you at the top of the comments</p></div>
+    <span class="pill {{ pn.tone }}" id="pinned-chip">{{ pn.chip }}</span>
+  </div>
+  <p id="pinned-detail">{{ pn.detail }}</p>
+  {% if pn.error %}<div class="flash error" role="alert" id="pinned-error">{{ pn.error }}</div>{% endif %}
+  {% if pt.running %}
+  <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="pinned-msg" role="status" aria-live="polite">{{ pt.message or 'Starting…' }}</span></p>
+  {% elif pt.failed %}
+  <div class="flash error" role="alert" id="pinned-failed">{{ pt.failed }}</div>
+  <form class="inline" method="post" action="/pinned/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
+  {% endif %}
+  {% if pt.busy %}<p class="hint" id="pinned-busy">Muse Spark is writing a pinned comment for another video. Wait for it to finish.</p>{% endif %}
+  {% if pn.suggestion %}
+  <div class="pin-box" id="pinned-suggestion">
+    <p class="pin-label">Suggested by Muse Spark</p>
+    <p class="pin-text" id="pin-suggestion-text">{{ pn.suggestion }}</p>
+    <div class="pin-actions">
+      <button type="button" class="button primary" data-copy-target="pin-suggestion-text" aria-label="Copy the suggested pinned comment">Copy</button>
+      {% if pt.has_key %}<form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/pinned/suggest"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary"{% if pt.running or pt.busy %} disabled{% endif %}>Suggest another</button></form>{% endif %}
+      {% if not pn.marked %}<form class="inline pin-mark" method="post" action="/videos/{{ video.video_id|urlencode }}/pinned/mark"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="pin-link">I pinned one already</button></form>{% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="pin-actions">
+    {% if pt.has_key %}<form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/pinned/suggest"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button {{ 'primary' if pn.state in ('none', 'unknown') else 'secondary' }}"{% if pt.running or pt.busy %} disabled{% endif %}>Suggest a pinned comment</button></form>
+    {% else %}<p class="hint" id="pinned-no-key">Suggestions need a Meta API key. Add one in <a href="/setup">Setup</a>.</p>{% endif %}
+    {% if not pn.marked %}<form class="inline pin-mark" method="post" action="/videos/{{ video.video_id|urlencode }}/pinned/mark"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="pin-link">I pinned one already</button></form>{% endif %}
+  </div>
+  {% endif %}
+  <p class="hint pin-note">Post it in YouTube Studio and pin it there. Yezatas does not post comments.{% if pn.when %} Suggested {{ pn.when }}.{% endif %}</p>
+</section>

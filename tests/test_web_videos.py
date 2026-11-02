@@ -321,7 +321,7 @@ def test_quick_info_tiles_come_from_the_stored_pull(tmp_path: Path) -> None:
                             r'<span class="vfact-v">([^<]*)</span>', html))
     assert tiles == {"views": tiles["views"], "likes": "8", "comments": "3", "duration": "1:02:03",
                      "category": "Howto &amp; Style", "language": "English", "chapters": "3",
-                     "hashtags": "2", "captions": "Yes", "translations": "2", "quality": "HD"}
+                     "hashtags": "2", "captions": "Yes", "translations": "2", "quality": "HD", "pinned": "Not fetched"}
 
 
 def test_quick_info_marks_tiles_whose_check_fails(tmp_path: Path) -> None:

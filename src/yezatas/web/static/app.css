@@ -775,6 +775,21 @@ button.gbtn { cursor: pointer; }
 .cat-actions form.inline { margin: 0; }
 .cat-actions .hint { margin: 0; }
 .cat-when { margin: 10px 0 0; }
+.pinned-card .card-title-row { align-items: flex-start; }
+.pinned-card .card-title-row .pill { margin-left: auto; }
+.pin-head h2 { margin: 0; }
+.pin-head p { margin: 2px 0 0; font-size: var(--fs-sm); }
+.pin-box { margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.pin-label { margin: 0 0 6px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.pin-text { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pin-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 12px; }
+.pin-box .pin-actions { margin-top: 0; }
+.pin-actions form.inline { margin: 0; }
+.pin-actions .hint { margin: 0; }
+.pin-mark { margin-left: auto !important; }
+.pin-link { padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-weight: 500; cursor: pointer; }
+.pin-link:hover { text-decoration: underline; }
+.pin-note { margin: 12px 0 0; }
 .tr-select { grid-column: 1 / -1; margin: 0 0 4px; font-size: var(--fs-sm); color: var(--muted); }
 .tr-select:not([hidden]) { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
 .tr-select button { padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-weight: 500; cursor: pointer; }

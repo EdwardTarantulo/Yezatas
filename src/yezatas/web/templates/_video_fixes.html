@@ -7,7 +7,7 @@
   {% if card.failed %}
   <p class="muted">{{ card.failed|length }} check{{ '' if card.failed|length == 1 else 's' }} to fix, +{{ card.missing }} points possible.</p>
   <ul class="vfix-list">
-    {% set go_map = {'description_chapters': ('#tool-transcript', 'Transcript and chapters'), 'localizations': ('#tool-translations', 'Translations'), 'thumbnail_hd': ('#tool-packaging', 'Thumbnail'), 'category': ('#category', 'Category'), 'title': ('#f-title', 'Edit title'), 'description': ('#f-description', 'Edit description'), 'tags': ('#f-tags', 'Edit tags')} %}
+    {% set go_map = {'description_chapters': ('#tool-transcript', 'Transcript and chapters'), 'localizations': ('#tool-translations', 'Translations'), 'thumbnail_hd': ('#tool-packaging', 'Thumbnail'), 'category': ('#category', 'Category'), 'pinned_comment': ('#pinned-comment', 'Pinned comment'), 'title': ('#f-title', 'Edit title'), 'description': ('#f-description', 'Edit description'), 'tags': ('#f-tags', 'Edit tags')} %}
     {% for c in card.failed %}{% set go = go_map.get(c.check_id) or go_map.get(c.category) %}{% if loop.index == 5 %}</ul><details class="vfix-more"><summary>Show {{ card.failed|length - 4 }} more</summary><ul class="vfix-list">{% endif %}
     <li class="vfix-item">
       <span class="vfix-points">+{{ c.max_points - c.points }}</span>
