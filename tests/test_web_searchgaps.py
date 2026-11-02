@@ -66,7 +66,7 @@ def test_nav(tmp_path: Path) -> None:
     ui, _ = make_sg_ui(tmp_path)
     html = ui.client.get("/search-gaps").text
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/search-gaps") == items.index("/competitors") + 1
+    assert items.index("/search-gaps") == items.index("/outliers") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/search-gaps"]
     assert 'id="searchgaps-about"' in html
 

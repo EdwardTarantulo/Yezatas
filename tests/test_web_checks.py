@@ -407,7 +407,7 @@ def test_checks_is_in_the_nav_right_after_strategy(tmp_path: Path) -> None:
     ui = make_checks_ui(tmp_path)
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/checks") == items.index("/strategy") + 1
+    assert items.index("/checks") == items.index("/seo") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/checks"]
 
 

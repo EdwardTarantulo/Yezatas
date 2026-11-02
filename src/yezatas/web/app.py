@@ -37,6 +37,7 @@ from .. import copilot as copilot_mod
 from .. import strategy as strategy_mod
 from .. import competitors as competitors_mod
 from .. import searchgaps as searchgaps_mod
+from .. import channelstats as channelstats_mod
 from .. import links as links_mod
 from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
@@ -63,6 +64,7 @@ from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
 from .competitors_view import build_competitor_cards, build_insight_view
 from .searchgaps_view import build_gap_rows, build_ranking_view
+from .today_view import build_today
 from .thumbswap_view import build_swap_rows
 from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
@@ -142,6 +144,11 @@ ANALYTICS_DISABLED = ("The YouTube Analytics API is not enabled in your Google C
                       "it (APIs & Services, Library, YouTube Analytics API), wait a minute, then try again.")
 ANALYTICS_SIGN_IN = ("Google did not accept the search-terms sign-in. Click Connect search terms and "
                      "sign in again.")
+CHANNEL_STATS_TIMEOUT_SECONDS = 5 * 60.0
+CHANNEL_STATS_TIMEOUT_MESSAGE = ("Reading the channel's numbers took more than 5 minutes, so Yezatas "
+                                 "stopped waiting. Try again.")
+ANALYTICS_SIGN_IN_CHANNEL = ("Google did not accept the YouTube Analytics sign-in. Click Connect "
+                             "Analytics and sign in again.")
 STRATEGY_TIMEOUT_MESSAGE = (
     "The strategy report took more than 5 minutes, so Yezatas stopped waiting. Try again."
 )
@@ -219,6 +226,7 @@ CompetitorReaderFactory = Callable[[Any], "competitors_mod.PublicChannelReader"]
 CompetitorExplainFn = Callable[[list["competitors_mod.CompetitorChannel"], Report],
                                "competitors_mod.CompetitorInsight"]
 AnalyticsReaderFactory = Callable[[Any], "searchgaps_mod.AnalyticsReader"]
+ChannelReaderFactory = Callable[[Any], "channelstats_mod.ChannelReader"]
 GapRankFn = Callable[["searchgaps_mod.SearchTerms", list["searchgaps_mod.SearchGap"], Report],
                      "searchgaps_mod.GapRanking"]
 # (store, the creator's words) -> the proposed bulk plan
@@ -464,6 +472,15 @@ def map_searchgaps_error(exc: BaseException) -> tuple[str, str]:
         return (kind, ANALYTICS_DISABLED)
     if kind == "auth":
         return (kind, ANALYTICS_SIGN_IN)
+    return (kind, text)
+
+
+def map_channel_stats_error(exc: BaseException) -> tuple[str, str]:
+    kind, text = map_api_error(exc)
+    if kind == "api_disabled":
+        return (kind, ANALYTICS_DISABLED)
+    if kind == "auth":
+        return (kind, ANALYTICS_SIGN_IN_CHANNEL)
     return (kind, text)
 
 
@@ -753,6 +770,7 @@ class WebState:
         gap_rank: GapRankFn | None = None,
         competitor_reader: CompetitorReaderFactory | None = None,
         competitor_explain: CompetitorExplainFn | None = None,
+        channel_reader: ChannelReaderFactory | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -778,6 +796,7 @@ class WebState:
         self._analytics_sign_in = analytics_sign_in or sign_in_with_analytics_access
         self._analytics_credentials_loader = analytics_credentials_loader or load_analytics_credentials
         self._analytics_reader = analytics_reader  # None: the real YouTube Analytics reader
+        self._channel_reader = channel_reader  # None: the real YouTube Analytics reader
         self._gap_rank = gap_rank or make_default_gap_rank(config)
         self._link_fetch = link_fetch  # None: the real visit, links_mod.fetch_url
         self.packaging_tools = packaging_tools
@@ -842,6 +861,9 @@ class WebState:
         self._searchgaps_seen: JobSnapshot | None = None
         self._searchgaps_rank_seen: JobSnapshot | None = None
         self._searchgaps_signin_seen: JobSnapshot | None = None
+        self.channel_stats_job = Job(map_channel_stats_error, CHANNEL_STATS_TIMEOUT_SECONDS,
+                                     CHANNEL_STATS_TIMEOUT_MESSAGE, clock)
+        self._channel_stats_seen: JobSnapshot | None = None
         self.copilot_job = Job(map_copilot_error, COPILOT_TIMEOUT_SECONDS,
                                COPILOT_TIMEOUT_MESSAGE, clock)
         self._copilot_seen: JobSnapshot | None = None
@@ -1522,6 +1544,35 @@ class WebState:
             if not rank_snap.running:
                 self._searchgaps_rank_seen = rank_snap
 
+    # --- the channel's numbers for Today (YouTube Analytics, read-only) ---
+    def start_channel_stats(self, creds: Any) -> bool:
+        return self.channel_stats_job.start(lambda report: self._run_channel_stats(creds, report))
+
+    def _run_channel_stats(self, creds: Any, report: Report) -> "channelstats_mod.ChannelStats":
+        report("Starting…")
+        if self._channel_reader is None:
+            reader: Any = channelstats_mod.GoogleChannelReader(creds)
+        else:
+            reader = self._channel_reader(creds)
+        with Store(self.config.catalog_db) as store:
+            videos = store.list_videos("video_id") if store.latest_pull() is not None else []
+        stats = channelstats_mod.fetch_stats(reader, videos, report=report)
+        channelstats_mod.save_stats(self.config.home, stats)
+        return stats
+
+    def channel_stats_state(self) -> JobSnapshot:
+        snap = self.channel_stats_job.snapshot()
+        with self._lock:
+            if snap is self._channel_stats_seen:
+                snap = JobSnapshot("idle")
+        return snap
+
+    def dismiss_channel_stats(self) -> None:
+        snap = self.channel_stats_job.snapshot()
+        with self._lock:
+            if not snap.running:
+                self._channel_stats_seen = snap
+
     # --- copilot: questions about the channel -----------------------------------------------------
     def copilot_chat(self, store: Store) -> int | None:
         """The chat on screen: the one picked with "New chat", else the newest (None: no turns)."""
@@ -1805,6 +1856,7 @@ def create_app(
     gap_rank: GapRankFn | None = None,
     competitor_reader: CompetitorReaderFactory | None = None,
     competitor_explain: CompetitorExplainFn | None = None,
+    channel_reader: ChannelReaderFactory | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1822,7 +1874,7 @@ def create_app(
                      strategy_fn=strategy, shorts_fn=shorts,
                      competitor_reader=competitor_reader, competitor_explain=competitor_explain,
                      analytics_sign_in=analytics_sign_in, analytics_credentials_loader=analytics_credentials_loader,
-                     analytics_reader=analytics_reader, gap_rank=gap_rank)
+                     analytics_reader=analytics_reader, gap_rank=gap_rank, channel_reader=channel_reader)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -2163,6 +2215,33 @@ def create_app(
     # --- pages ------------------------------------------------------------------------------
     @app.get("/")
     def index(request: Request) -> Response:
+        data = catalog_data()
+        if data is None:
+            return back_to_setup()
+        with Store(config.catalog_db) as store:
+            previous = store.previous_view_counts()
+            to_answer = store.comments_to_answer(limit=500)
+            drafts = {r.comment_id for r in store.list_open_comment_replies() if r.comment_id}
+        entries = data["entries"]
+        fix_next = dashboard_model(entries)["fix_next"]
+        stats = channelstats_mod.load_stats(config.home)
+        today = build_today(entries, previous, to_answer, drafts,
+                            {e.video.video_id: e.video for e in entries}, stats,
+                            fix_next[0] if fix_next else None, datetime.now(timezone.utc))
+        snap = state.channel_stats_state()
+        signin = state.searchgaps_signin_job.snapshot()
+        return render(request, "today.html", {
+            "active": "today", "today": today, "latest_pull": data["latest_pull"],
+            "connected": auth.can_read_analytics(config),
+            "stats_when": _local_time(stats.fetched_at) if stats else "",
+            "stats_running": snap.running, "stats_message": snap.message,
+            "stats_failed": snap.message if snap.status == "failed" else "",
+            "signin_running": signin.running, "signin_message": signin.message,
+            "poll": snap.running or signin.running,
+        })
+
+    @app.get("/seo")
+    def seo_overview(request: Request) -> Response:
         data = catalog_data()
         if data is None:
             return back_to_setup()
@@ -2636,6 +2715,37 @@ def create_app(
         state.dismiss_searchgaps_results()
         return see_other("/search-gaps")
 
+    def analytics_back(form: Any) -> str:
+        back = str(form.get("back") or "")
+        return back if back in ("/", "/analytics") else "/"
+
+    @app.post("/analytics/connect")
+    async def connect_analytics(request: Request) -> Response:
+        form = await read_form(request)
+        client, _ = read_saved_client(config)
+        if client is None:
+            flash(request, "error", "Add the OAuth client file first, in Setup (step 5).")
+        elif not state.start_analytics_sign_in():
+            flash(request, "error", "A sign-in is already waiting for you in the browser.")
+        return see_other(analytics_back(form))
+
+    @app.post("/analytics/refresh")
+    async def refresh_analytics(request: Request) -> Response:
+        form = await read_form(request)
+        creds = await run_in_threadpool(state.analytics_credentials)
+        if creds is None:
+            flash(request, "error", "Reading the channel's numbers needs the YouTube Analytics sign-in. "
+                        "Click Connect Analytics first.")
+        elif not state.start_channel_stats(creds):
+            flash(request, "error", "The channel's numbers are already being read. Wait for it to finish.")
+        return see_other(analytics_back(form))
+
+    @app.post("/analytics/done")
+    async def dismiss_analytics(request: Request) -> Response:
+        form = await read_form(request)
+        state.dismiss_channel_stats()
+        return see_other(analytics_back(form))
+
     @app.get("/competitors")
     def competitors_page(request: Request) -> Response:
         cards = build_competitor_cards(competitors_mod.load_channels(config.home), _local_time)
@@ -2749,6 +2859,7 @@ def create_app(
             "searchgaps_signin": _job_json(state.searchgaps_signin_job.snapshot()),
             "searchgaps": _job_json(state.searchgaps_job.snapshot()),
             "searchgaps_rank": _job_json(state.searchgaps_rank_job.snapshot()),
+            "channel_stats": _job_json(state.channel_stats_job.snapshot()),
             "copilot": _job_json(state.copilot_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),
@@ -3684,7 +3795,7 @@ def create_app(
     @app.post("/suggest/fix-next")
     async def suggest_fix_next(request: Request) -> Response:
         form = await read_form(request)
-        back = see_other("/")
+        back = see_other("/seo")
         raw = str(form.get("count") or "")
         count = int(raw) if raw.isdigit() and int(raw) in FIX_NEXT_COUNTS else 0
         if not count:
@@ -3707,7 +3818,7 @@ def create_app(
         form = await read_form(request)
         state.dismiss_suggest_result()
         video_id = str(form.get("video_id") or "")
-        return see_other(f"/videos/{quote(video_id)}" if video_id else "/")
+        return see_other(f"/videos/{quote(video_id)}" if video_id else "/seo")
 
     @app.get("/agent")
     def agent_page(request: Request) -> Response:

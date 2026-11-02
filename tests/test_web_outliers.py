@@ -200,8 +200,8 @@ def test_nav_has_an_outliers_item_after_affiliate(tmp_path: Path) -> None:
     ui, _, _ = make_ol_ui(tmp_path)
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/outliers") == items.index("/affiliate") + 1
-    assert items.index("/strategy") == items.index("/outliers") + 1
+    assert items.index("/outliers") == items.index("/replies") + 1
+    assert items.index("/strategy") == items.index("/competitors") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/outliers"]
     assert re.findall(r'class="nav-item active" href="([^"]+)"', page(ui, "/videos")) == ["/videos"]
 
@@ -375,11 +375,11 @@ def test_the_video_page_line_for_a_new_video_and_for_one_left_out(tmp_path: Path
 
 def test_the_dashboard_counts_the_outliers(tmp_path: Path) -> None:
     ui, _, _ = make_ol_ui(tmp_path)
-    line = section(page(ui, "/"), 'id="dash-outliers"', "</p>")
+    line = section(page(ui, "/seo"), 'id="dash-outliers"', "</p>")
     assert '<a href="/outliers">2 outliers</a>' in line and "10× or more" in line
 
 
 def test_the_dashboard_says_one_outlier_in_the_singular(tmp_path: Path) -> None:
     ui, _, _ = make_ol_ui(tmp_path, seeded=False)
     seed(ui.config, [v for v in catalog() if v.video_id != vid(MID)])
-    assert '<a href="/outliers">1 outlier</a>' in page(ui, "/")
+    assert '<a href="/outliers">1 outlier</a>' in page(ui, "/seo")

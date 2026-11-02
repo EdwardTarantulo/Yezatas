@@ -29,17 +29,17 @@ def fix_rows(html: str) -> list[str]:
 
 def test_pages_redirect_to_setup_before_any_pull(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
-    for path in ("/", "/videos", "/videos?sort=score", "/videos/vid000001"):
+    for path in ("/", "/seo", "/videos", "/videos?sort=score", "/videos/vid000001"):
         resp = ui.client.get(path, follow_redirects=False)
         assert resp.status_code == 303 and resp.headers["location"] == "/setup", path
 
 
 def test_dashboard_renders_four_cards_and_the_heading(tmp_path: Path) -> None:
     ui, _ = seeded_ui(tmp_path)
-    resp = ui.client.get("/")
+    resp = ui.client.get("/seo")
     assert resp.status_code == 200
     html = resp.text
-    assert "Channel dashboard" in html
+    assert "SEO overview" in html
     for card_id, title in (("card-seo", "SEO score"), ("card-fix", "Fix next"),
                            ("card-problems", "Most common problems"), ("card-catalog", "Catalog")):
         assert f'id="{card_id}"' in html and f">{title}<" in html
@@ -52,7 +52,7 @@ def test_seo_card_shows_the_average_over_public_videos(tmp_path: Path) -> None:
     cards = score_catalog(videos)
     public = [cards[v.video_id].score for v in videos if v.privacy_status == "public"]
     expected = int(sum(public) / len(public) + 0.5)
-    html = ui.client.get("/").text
+    html = ui.client.get("/seo").text
     assert re.search(rf'<span class="avg">{expected}</span><span class="out-of"> / 100', html)
     assert f"Average over {len(public)} public videos scored." in html
     rows = re.findall(r'class="band-label">([^<]+?) <span class="muted">[^<]*</span></span>'
@@ -68,7 +68,7 @@ def test_fix_next_follows_fix_priority_and_is_capped(tmp_path: Path) -> None:
     cards = score_catalog(videos)
     ranked = sorted((v for v in videos if cards[v.video_id].failed),
                     key=lambda v: fix_priority(v, cards[v.video_id]), reverse=True)
-    html = ui.client.get("/").text
+    html = ui.client.get("/seo").text
     shown = fix_rows(html)
     assert 0 < len(shown) <= 8
     priorities = [fix_priority(next(v for v in videos if v.video_id == i), cards[i]) for i in shown]
@@ -97,7 +97,7 @@ def test_common_problems_link_to_the_filtered_list(tmp_path: Path) -> None:
         for c in cards[v.video_id].checks:
             if c.applicable and not c.passed:
                 counts[c.check_id] = counts.get(c.check_id, 0) + 1
-    html = ui.client.get("/").text
+    html = ui.client.get("/seo").text
     found = re.findall(r'class="problem-row" href="/videos\?check=([^"]+)">.*?'
                        r'class="problem-count">(\d+) video', html, flags=re.S)
     assert 0 < len(found) <= 6
@@ -109,7 +109,7 @@ def test_common_problems_link_to_the_filtered_list(tmp_path: Path) -> None:
 
 def test_catalog_card_counts_pull_time_and_quota(tmp_path: Path) -> None:
     ui, videos = seeded_ui(tmp_path)
-    html = ui.client.get("/").text
+    html = ui.client.get("/seo").text
     pub = sum(v.privacy_status == "public" for v in videos)
     unl = sum(v.privacy_status == "unlisted" for v in videos)
     prv = sum(v.privacy_status == "private" for v in videos)
@@ -170,7 +170,7 @@ def test_shell_marks_the_active_nav_item(tmp_path: Path) -> None:
     assert active("/videos") == ["/videos"]
     assert active("/videos/vid000001") == ["/videos"]
     assert active("/setup") == ["/setup"]
-    html = ui.client.get("/").text
+    html = ui.client.get("/seo").text
     assert 'aria-current="page"' in html
     assert 'action="/videos" method="get"' in html and 'name="q"' in html
     assert "YouTube Studio" not in html  # we only borrow the style, not the name
@@ -184,7 +184,7 @@ def test_search_box_keeps_the_current_query(tmp_path: Path) -> None:
 
 def test_pages_have_no_inline_scripts_or_styles(tmp_path: Path) -> None:
     ui, _ = seeded_ui(tmp_path)
-    for path in ("/", "/videos", "/videos/vid000001", "/setup"):
+    for path in ("/", "/seo", "/videos", "/videos/vid000001", "/setup"):
         html = ui.client.get(path).text
         assert " style=" not in html, path
         assert not re.search(r"<script(?![^>]*\bsrc=)", html), path
@@ -215,6 +215,6 @@ def test_error_pages_have_no_shell(tmp_path: Path) -> None:
 
 def test_fix_next_says_how_it_is_ranked(tmp_path: Path) -> None:
     ui, _ = seeded_ui(tmp_path)
-    html = ui.client.get("/").text
+    html = ui.client.get("/seo").text
     assert "Ranked by views &times; points missing (100 minus the SEO score)" in html
     assert "names the check that costs that video the most points" in html

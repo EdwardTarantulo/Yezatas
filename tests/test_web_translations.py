@@ -57,7 +57,7 @@ def test_page_renders_no_terms_hint_and_nav(tmp_path: Path) -> None:
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
     # /translations right after /replies
     assert "/replies" in items and "/translations" in items
-    assert items.index("/translations") == items.index("/replies") + 1
+    assert items.index("/translations") == items.index("/copilot") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/translations"]
 
 

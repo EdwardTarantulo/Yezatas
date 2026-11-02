@@ -236,13 +236,13 @@ def test_an_unexpected_error_is_reported_without_details(tmp_path: Path) -> None
 # --- fix next on the dashboard --------------------------------------------------------------------
 def test_dashboard_form_with_a_key_and_a_link_without(tmp_path: Path) -> None:
     ui, _ = make_suggest_ui(tmp_path)
-    html = ui.client.get("/").text
+    html = ui.client.get("/seo").text
     assert 'action="/suggest/fix-next"' in html and "Suggest fixes for the top" in html
     assert re.search(r'<option value="3" selected>3</option>', html)
     assert all(f'<option value="{n}"' in html for n in (1, 3, 5, 10))
     assert "Meta's Model API" in html and 'id="suggest-no-key"' not in html
     ui2, _ = make_suggest_ui(tmp_path / "other", key=False)
-    html = ui2.client.get("/").text
+    html = ui2.client.get("/seo").text
     assert "/suggest/fix-next" not in html
     assert 'id="suggest-no-key"' in html and 'href="/setup#step-ai"' in html
 
@@ -256,15 +256,15 @@ def test_fix_next_takes_the_top_public_videos_without_a_draft_in_order(tmp_path:
     nf(ui, "/suggest/fix-next", data={"count": "3"})
     finish(ui)
     assert fake.calls == [V5, V3, V1]
-    html = ui.client.get("/").text
+    html = ui.client.get("/seo").text
     result = html.split('id="suggest-result"')[1].split("</section>")[0]
     assert "3 drafts made" in result
     assert re.findall(r'id="sr-(\w+)"', result) == [V5, V3, V1]
     assert "Draft made for review." in result and 'href="/changes"' in result
     # dismissing clears the card
     resp = nf(ui, "/suggest/done", follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/"
-    assert 'id="suggest-result"' not in ui.client.get("/").text
+    assert resp.status_code == 303 and resp.headers["location"] == "/seo"
+    assert 'id="suggest-result"' not in ui.client.get("/seo").text
 
 
 def test_fix_next_shows_progress_with_the_position(tmp_path: Path) -> None:
@@ -272,7 +272,7 @@ def test_fix_next_shows_progress_with_the_position(tmp_path: Path) -> None:
     fake.gate = threading.Event()
     nf(ui, "/suggest/fix-next", data={"count": "3"})
     assert fake.entered.wait(10)
-    html = ui.client.get("/").text
+    html = ui.client.get("/seo").text
     assert "1 of 3: Cactus video 4 (Reading the scorecard)" in html
     assert 'data-poll="1"' in html and 'id="suggest-progress"' in html
     fake.gate.set()
@@ -285,7 +285,7 @@ def test_fix_next_stops_after_an_auth_failure(tmp_path: Path) -> None:
     nf(ui, "/suggest/fix-next", data={"count": "5"})
     finish(ui)
     assert fake.calls == [V4, V2]
-    result = ui.client.get("/").text.split('id="suggest-result"')[1].split("</section>")[0]
+    result = ui.client.get("/seo").text.split('id="suggest-result"')[1].split("</section>")[0]
     assert "Stopped early: The Meta API key was refused." in result
     assert result.count("Not attempted") >= 3 and "1 failed" in result
     assert "1 draft made" in result
@@ -298,7 +298,7 @@ def test_fix_next_does_not_stop_after_other_failures_and_lists_skips(tmp_path: P
     nf(ui, "/suggest/fix-next", data={"count": "3"})
     finish(ui)
     assert fake.calls == [V4, V2, V5]
-    result = ui.client.get("/").text.split('id="suggest-result"')[1].split("</section>")[0]
+    result = ui.client.get("/seo").text.split('id="suggest-result"')[1].split("</section>")[0]
     assert "1 draft made, 1 needed no change, 1 skipped." in result
     assert "This video already has a draft." in result
 
@@ -307,11 +307,11 @@ def test_fix_next_needs_a_valid_count_and_a_key(tmp_path: Path) -> None:
     ui, fake = make_suggest_ui(tmp_path)
     for bad in ("2", "", "abc", "-3", "100"):
         nf(ui, "/suggest/fix-next", data={"count": bad})
-        assert "Choose 1, 3, 5 or 10 videos." in ui.client.get("/").text
+        assert "Choose 1, 3, 5 or 10 videos." in ui.client.get("/seo").text
     assert fake.calls == []
     ui2, fake2 = make_suggest_ui(tmp_path / "nokey", key=False)
     nf(ui2, "/suggest/fix-next", data={"count": "3"})
-    html = ui2.client.get("/").text
+    html = ui2.client.get("/seo").text
     assert "Add a Meta API key first." in html and 'href="/setup#step-ai"' in html
     assert fake2.calls == [] and ui2.web.suggest_job.snapshot().status == "idle"
 
@@ -320,7 +320,7 @@ def test_fix_next_with_nothing_to_fix_says_so(tmp_path: Path) -> None:
     ui, fake = make_suggest_ui(tmp_path, count=1)
     draft(ui, V1)
     nf(ui, "/suggest/fix-next", data={"count": "3"})
-    assert "No public video needs a fix" in ui.client.get("/").text
+    assert "No public video needs a fix" in ui.client.get("/seo").text
     assert fake.calls == []
 
 
@@ -445,7 +445,7 @@ def test_a_key_from_the_environment_hides_the_form(tmp_path: Path, monkeypatch: 
     nf(ui, "/setup/model-key", data={"api_key": "FAKE-OTHER-KEY"})
     assert not ui.config.model_key_path.exists()
     assert "so nothing was saved" in ui.setup_html()
-    assert 'action="/suggest/fix-next"' in ui.client.get("/").text  # the key counts
+    assert 'action="/suggest/fix-next"' in ui.client.get("/seo").text  # the key counts
 
 
 # --- the real suggest function --------------------------------------------------------------------

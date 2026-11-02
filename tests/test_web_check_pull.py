@@ -125,7 +125,7 @@ def test_pull_stores_videos_and_charges_the_ledger(tmp_path: Path) -> None:
     html = ui.setup_html()
     assert "<strong>120</strong> videos stored" in html and "7 quota units used" in html
     assert "done" in step_class(html, "pull")
-    home = ui.client.get("/", follow_redirects=False)
+    home = ui.client.get("/seo", follow_redirects=False)
     assert home.status_code == 200 and "120 videos were pulled" in home.text
 
 

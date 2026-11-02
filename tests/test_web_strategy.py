@@ -262,7 +262,7 @@ def test_nav_has_a_strategy_item_right_after_outliers(tmp_path: Path) -> None:
     ui = make_strategy_ui(tmp_path)
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/strategy") == items.index("/outliers") + 1
+    assert items.index("/strategy") == items.index("/competitors") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/strategy"]
 
 

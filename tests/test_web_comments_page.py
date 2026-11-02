@@ -22,8 +22,8 @@ def test_nav_has_comments_after_copilot(tmp_path: Path) -> None:
     ui = make_comments_ui(tmp_path)
     html = ui.client.get("/").text
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/comments") == items.index("/copilot") + 1
-    assert items.index("/replies") == items.index("/comments") + 1
+    assert items.index("/comments") == items.index("/") + 1
+    assert items.index("/replies") == items.index("/affiliate") + 1
     html2 = ui.client.get("/comments").text
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html2) == ["/comments"]
 

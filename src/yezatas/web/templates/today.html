@@ -1,0 +1,98 @@
+{% extends "shell.html" %}
+{% from "_macros.html" import thumb %}
+{% block title %}Today - Yezatas{% endblock %}
+{% block content %}
+<div class="td-head">
+  <div>
+    <h1 class="page-title">Today</h1>
+    <p class="muted td-intro">Pulled {{ latest_pull.when }} &middot; {{ latest_pull.videos }} video{{ '' if latest_pull.videos == 1 else 's' }}</p>
+  </div>
+  <a class="button secondary" href="/setup#step-pull">Pull again</a>
+</div>
+
+{% if draft_count %}
+<p class="flash" id="drafts-note">{{ draft_count }} change{{ '' if draft_count == 1 else 's' }} waiting for review <a href="/changes">Review changes</a></p>
+{% endif %}
+
+<div class="td-grid">
+  <section class="card td-latest" id="today-latest" aria-labelledby="h-latest">
+    <div class="card-title-row"><h2 id="h-latest">Your latest videos</h2><span class="muted">Views since the last pull</span></div>
+    {% if today.latest %}
+    <ol class="td-rows">
+      {% for r in today.latest %}
+      <li><a class="td-vrow" href="/videos/{{ r.video_id|urlencode }}">
+        {{ thumb(r.thumb, 'sm') }}
+        <span class="td-vtext"><span class="td-vtitle">{{ r.title }}</span><span class="muted">{{ r.age_text }} &middot; {{ r.views_text }} views</span></span>
+        <span class="td-gain">{% if r.gain_text %}<span class="td-gain-n">{{ r.gain_text }}</span>{% else %}<span class="muted td-gain-none">No earlier pull</span>{% endif %}{% if r.vs_text %}<span class="td-vs {{ r.vs_class }}">{{ r.vs_text }}</span>{% endif %}</span>
+      </a></li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="empty-note">No public videos yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="card td-comments" id="today-comments" aria-labelledby="h-comments">
+    <div class="card-title-row"><h2 id="h-comments">Comments to answer</h2><span class="td-count">{{ today.comment_total }}</span></div>
+    {% if today.comment_total %}
+    <p class="muted td-sub">{{ today.comment_total }} question{{ '' if today.comment_total == 1 else 's' }} without a reply &middot; {{ today.comment_new }} new since yesterday</p>
+    <ol class="td-crows">
+      {% for c in today.comments %}
+      <li class="td-crow">
+        <span class="td-ctext"><span class="td-cwho">{{ c.author }}{% if c.video_title %} <span class="muted">&middot; {{ c.video_title }}</span>{% endif %}</span><span class="td-cbody">{{ c.text }}</span></span>
+        <span class="pill{{ ' done' if c.has_draft else '' }}">{{ 'Draft ready' if c.has_draft else 'No draft' }}</span>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="empty-note">No questions waiting. Fetch and sort comments on the Comments page; questions without your reply show here.</p>
+    {% endif %}
+    <p class="td-foot"><a class="button secondary" href="/comments?c=question">Open Comments</a></p>
+  </section>
+
+  <section class="card td-week" id="today-week" aria-labelledby="h-week">
+    <div class="card-title-row"><h2 id="h-week">Channel this week</h2>{% if today.week %}<span class="muted">YouTube Analytics &middot; data up to {{ today.week.up_to }}</span>{% endif %}</div>
+    {% if stats_running %}
+    <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="channel_stats-msg" role="status" aria-live="polite">{{ stats_message or 'Starting…' }}</span></p>
+    {% elif stats_failed %}
+    <div class="flash error" role="alert" id="today-week-failed">{{ stats_failed }}</div>
+    <form class="inline" method="post" action="/analytics/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/"><button type="submit" class="button secondary">Dismiss</button></form>
+    {% endif %}
+    {% if not connected %}
+    <p class="hint" id="today-week-connect">These numbers come from YouTube Analytics (read-only). Enable the YouTube Analytics API in your Google Cloud project, then connect: Google asks once more, and the access you gave stays.</p>
+    {% if signin_running %}
+    <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="searchgaps_signin-msg" role="status" aria-live="polite">{{ signin_message or 'Starting…' }}</span></p>
+    {% else %}
+    <form class="inline" method="post" action="/analytics/connect"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/"><button type="submit" class="button primary">Connect Analytics</button></form>
+    {% endif %}
+    {% elif today.week %}
+    <div class="td-stats">
+      {% for s in today.week.stats %}
+      <div class="td-stat">
+        <span class="td-stat-label">{{ s.label }}</span>
+        <span class="td-stat-value">{{ s.value }}</span>
+        {% if s.delta_text %}<span class="td-delta {{ s.delta_class }}">{{ s.delta_text }}<span class="td-delta-vs"> vs the 7 days before</span></span>{% endif %}
+        {% if loop.first %}<span class="td-spark" aria-hidden="true">{% for h in today.week.bars %}<span class="h-{{ h }}{{ ' last' if loop.last else '' }}"></span>{% endfor %}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% if today.week.sources %}
+    <p class="td-sources"><span class="muted">Where views came from (28 days)</span>{% for label, pct in today.week.sources %} <span class="td-src"><b>{{ label }}</b> {{ pct }}%</span>{% endfor %}</p>
+    {% endif %}
+    {% else %}
+    <p class="empty-note" id="today-week-empty">Not read yet. Refresh reads the last two weeks from YouTube Analytics. Nothing is written to YouTube.</p>
+    {% endif %}
+    {% if connected %}
+    <form class="td-refresh" method="post" action="/analytics/refresh"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/"><button type="submit" class="button secondary"{% if stats_running %} disabled{% endif %}>Refresh</button>{% if stats_when %}<span class="muted">Read {{ stats_when }}</span>{% endif %}</form>
+    {% endif %}
+  </section>
+
+  {% if today.fix %}{% set e = today.fix %}
+  <section class="card td-fix" id="today-fix" aria-labelledby="h-fix1">
+    <h2 id="h-fix1" class="td-fix-label">One thing to fix</h2>
+    <a class="td-fix-main" href="/videos/{{ e.video.video_id|urlencode }}">{{ thumb(e.thumb, 'sm') }}<span class="td-vtext"><span class="td-vtitle">{{ e.video.title }}</span><span class="muted">+{{ e.card.missing }} points possible{% if e.top_failed %} &middot; {{ e.top_failed }}{% endif %}</span></span></a>
+    <span class="td-fix-actions"><a class="button secondary" href="/videos?sort=fix">See all</a><a class="button primary" href="/videos/{{ e.video.video_id|urlencode }}">Fix it</a></span>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

@@ -429,7 +429,7 @@ def test_the_nav_has_a_links_item_after_content(tmp_path: Path) -> None:
     ui = make_links_ui(tmp_path)
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/links") == items.index("/videos") + 1
+    assert items.index("/links") == items.index("/translations") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/links"]
     assert re.findall(r'class="nav-item active" href="([^"]+)"', ui.client.get("/videos").text) == ["/videos"]
     assert not re.search(r"<script(?![^>]*\bsrc=)", html) and "style=" not in html
