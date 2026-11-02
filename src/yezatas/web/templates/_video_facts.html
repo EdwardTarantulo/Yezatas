@@ -1,5 +1,6 @@
 {# Quick info on the video page: one tile per fact from the stored pull; a warm edge where a check costs points. #}
+{% from "_macros.html" import icon %}
 <ul class="vfacts" id="video-facts" aria-label="Quick info">
-  {% for f in facts %}<li class="vfact" id="fact-{{ f.key }}"{% if f.tone %} data-tone="{{ f.tone }}"{% endif %}><span class="vfact-k">{{ f.label }}</span><span class="vfact-v">{{ f.value }}</span></li>
+  {% for f in facts %}<li class="vfact{% if f.href %} vfact-linked{% endif %}" id="fact-{{ f.key }}"{% if f.tone %} data-tone="{{ f.tone }}"{% endif %}><span class="vfact-k">{{ f.label }}</span><span class="vfact-v">{{ f.value }}</span>{% if f.href %}{% if f.tone == 'warn' %}<span class="vfact-fix">Fix</span>{% endif %}<a class="vfact-go" href="{{ f.href }}" aria-label="{{ f.go }}" title="{{ f.go }}">{{ icon('chevron') }}</a>{% endif %}</li>
   {% endfor %}
 </ul>

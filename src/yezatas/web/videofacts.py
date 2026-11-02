@@ -19,12 +19,25 @@ FACT_CHECKS: dict[str, str] = {
 }
 
 
+# Tiles that open the place where their subject is changed: key -> (link target on the page, the place's name).
+FACT_LINKS: dict[str, tuple[str, str]] = {
+    "category": ("#category", "Category"),
+    "pinned": ("#pinned-comment", "Pinned comment"),
+    "chapters": ("#tool-transcript", "Transcript and chapters"),
+    "hashtags": ("#f-description", "the description"),
+    "captions": ("#tool-subtitles", "Subtitles"),
+    "translations": ("#tool-translations", "Translations"),
+}
+
+
 @dataclass(frozen=True)
 class Fact:
     key: str  # "views", "category", ...: the tile's id is "fact-<key>"
     label: str
     value: str
     tone: str = ""  # "warn" when a failed check is about this tile, else ""
+    href: str = ""  # where the tile leads, or "" for a plain fact
+    go: str = ""  # the link's accessible name, e.g. "Go to Subtitles"
 
 
 def _part(video: Video, name: str) -> dict[str, Any]:
@@ -63,5 +76,9 @@ def build_facts(video: Video, card: Scorecard) -> tuple[Fact, ...]:
         ("quality", "Quality", {"hd": "HD", "sd": "SD"}.get(definition, "Not known")),
         ("pinned", "Pinned comment", pinned_value),
     ]
-    return tuple(Fact(key, label, value, "warn" if FACT_CHECKS.get(key) in failed else "")
-                 for key, label, value in values)
+    facts = []
+    for key, label, value in values:
+        href, place = FACT_LINKS.get(key, ("", ""))
+        facts.append(Fact(key, label, value, "warn" if FACT_CHECKS.get(key) in failed else "",
+                          href, f"Go to {place}" if place else ""))
+    return tuple(facts)

@@ -8,7 +8,7 @@
   <div class="vhead-thumb">{{ thumb(big_thumb, 'lg') }}</div>
   <div class="vhead-info">
     <h1 class="video-title">{{ video.title }}</h1>
-    <p class="muted vmeta"><span class="pill">{{ entry.visibility or 'Unknown visibility' }}</span>{% if published %}<span>Published {{ published }}</span>{% endif %}</p>
+    <p class="muted vmeta"><span class="pill">{{ entry.visibility or 'Unknown visibility' }}</span>{% if published %}<span>Published {{ published }}</span>{% endif %}<span class="vid-chip" id="video-id-chip"><span class="vid-k">ID</span><code id="video-id">{{ video.video_id }}</code><button type="button" class="vid-copy" data-copy-target="video-id" aria-label="Copy the video ID" title="Copy the video ID">{{ icon('copy') }}</button></span></p>
     {% if outlier_line %}<p class="muted" id="video-outlier">{% if outlier_line.link %}<a href="{{ outlier_line.link }}">{{ outlier_line.text }}</a>{% else %}{{ outlier_line.text }}{% endif %}</p>{% endif %}
     <p class="vactions">
       <a class="button secondary" href="https://studio.youtube.com/video/{{ video.video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">Edit in YouTube Studio</a>

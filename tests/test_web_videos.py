@@ -364,3 +364,32 @@ def test_quick_info_marks_tiles_whose_check_fails(tmp_path: Path) -> None:
     assert 'id="fact-views" data-tone' not in html
     for key in ("category", "captions", "quality"):
         assert re.search(rf'id="fact-{key}"><span class="vfact-k">[^<]+</span><span class="vfact-v">Not known</span>', html)
+
+
+def test_the_video_id_sits_beside_the_date_with_a_copy_button(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, videos=[make_video(7, published_at="2026-10-30T10:00:00Z")])
+    html = ui.client.get("/videos/vid000007").text
+    meta = html.split('class="muted vmeta"')[1].split("</p>")[0]
+    assert meta.index("Published Oct 30, 2026") < meta.index('<code id="video-id">vid000007</code>')
+    assert 'data-copy-target="video-id" aria-label="Copy the video ID"' in meta
+
+
+def test_quick_info_tiles_link_to_where_they_are_fixed(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, videos=[make_video(9, description="No tags here.")])
+    html = ui.client.get("/videos/vid000009").text
+    facts = html[html.index('id="video-facts"'):html.index("</ul>", html.index('id="video-facts"'))]
+    tiles = dict(re.findall(r'<li class="vfact[^"]*" id="fact-([a-z]+)"[^>]*>(.*?)</li>', facts))
+    links = {"category": "#category", "pinned": "#pinned-comment", "chapters": "#tool-transcript",
+             "hashtags": "#f-description", "captions": "#tool-subtitles", "translations": "#tool-translations"}
+    for key, target in links.items():
+        assert f'<a class="vfact-go" href="{target}"' in tiles[key], key
+        assert f'id="fact-{key}"' in facts and f'class="vfact vfact-linked" id="fact-{key}"' in facts
+    for key in ("views", "likes", "comments", "duration", "language", "quality"):
+        assert "vfact-go" not in tiles[key] and "vfact-fix" not in tiles[key], key
+    assert '<span class="vfact-fix">Fix</span>' in tiles["hashtags"]  # no hashtags costs points
+    assert "vfact-fix" not in tiles["captions"]  # captions are not a scored check
+    for key in links:
+        if 'id="fact-' + key + '" data-tone="warn"' in facts:
+            assert "vfact-fix" in tiles[key], key
+    for target in links.values():
+        assert f'id="{target[1:]}"' in html, target  # every link lands on something on the page
