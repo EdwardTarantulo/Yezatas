@@ -494,6 +494,11 @@ as it lands; the git history is the detailed record.
   counts, or your "I pinned one already"; Muse Spark suggests one to post, with no link that isn't in the
   description and no number that isn't in the title or description). A check that has never run costs no
   points. The scorecard is now 27 checks. Checked in the browser with made-up videos and a scripted model.
+- **2026-11-02**: **The sidebar says where you are needed**, mocked up first as still pictures and then built by
+  **Muse Spark Open** on Baseten (one round, about 7K tokens). A number sits beside a menu item only when
+  something is waiting there: blue for work for you (questions to answer, drafts to review), amber for what
+  costs points or is broken (videos scoring under 50, translations out of date, broken links). Its tooltip says
+  what it counts. The numbers are recounted only when the catalog changes.
 
 ---
 
