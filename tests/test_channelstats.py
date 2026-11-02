@@ -149,10 +149,10 @@ def test_fetch_stats_saves_and_loads_back(tmp_path):
     reader = FakeReader({("day", ""): daily_answer([["2026-06-17", 70, 300, 9, 1]])})
     said = []
     stats = fetch_stats(reader, videos, now=NOW, report=said.append)
-    assert stats.end_date == "2026-06-17" and stats.calls == 2
+    assert stats.end_date == "2026-06-17" and stats.calls == 3
     assert stats.fetched_at == NOW.isoformat()
     assert stats.latest == (SameAge("new1", "too_new", 2, 0, None, 0),)
-    assert said == ["Reading the channel's daily numbers", "Reading where views came from",
+    assert said == ["Reading the channel's daily numbers", "Reading where views came from", "Reading where viewers watch from",
                     "Comparing the newest uploads"]
     path = save_stats(tmp_path, stats)
     assert path == tmp_path / "analytics" / "channel.json"
@@ -165,6 +165,32 @@ def test_load_stats_none_when_missing_or_broken(tmp_path):
     (tmp_path / "analytics" / "channel.json").write_text("{not json", encoding="utf-8")
     assert load_stats(tmp_path) is None
     (tmp_path / "analytics" / "channel.json").write_text('{"fetched_at": 1}', encoding="utf-8")
+    assert load_stats(tmp_path) is None
+
+
+def test_countries_sorted_named_and_saved(tmp_path):
+    from yezatas.channelstats import country_name, fetch_countries
+
+    reader = FakeReader({("country", ""): {
+        "columnHeaders": [{"name": "country"}, {"name": "views"}],
+        "rows": [["de", 40], ["US", 90], ["ZZ", 5], ["FR", 0], ["", 3], ["GB", "x"]],
+    }})
+    countries = fetch_countries(reader, END)
+    assert countries == (("US", 90), ("DE", 40), ("ZZ", 5))
+    assert reader.calls == [("2026-03-20", "2026-06-17", "views", "country", "", "-views")]
+    assert [country_name(c) for c, _ in countries] == ["United States", "Germany", "ZZ"]
+    stats = ChannelStats("2026-06-20T12:00:00+00:00", "2026-06-17", (), (), (), 3, countries)
+    save_stats(tmp_path, stats)
+    assert load_stats(tmp_path) == stats
+
+
+def test_load_stats_reads_a_file_saved_before_countries(tmp_path):
+    stats = ChannelStats("2026-06-20T12:00:00+00:00", "2026-06-17", (), (("YT_SEARCH", 5),), (), 2)
+    path = save_stats(tmp_path, stats)
+    text = path.read_text(encoding="utf-8").replace('"countries": []', '"unused": []')
+    path.write_text(text, encoding="utf-8")
+    assert load_stats(tmp_path) == stats
+    path.write_text(text.replace('"unused": []', '"countries": [["US", true]]'), encoding="utf-8")
     assert load_stats(tmp_path) is None
 
 

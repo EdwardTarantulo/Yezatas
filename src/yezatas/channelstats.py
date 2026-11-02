@@ -22,6 +22,8 @@ LAG_DAYS = 3  # Analytics runs 2 to 3 days behind; the newest day read is today 
 DAYS = 14  # two weeks: the last 7 days and the 7 before
 WEEK_DAYS = 7
 SOURCE_DAYS = 28
+COUNTRY_DAYS = 90
+TOP_COUNTRIES = 8
 LATEST = 3  # newest uploads compared
 EARLIER = 10  # uploads before each one that make "your usual"
 MIN_EARLIER = 3  # fewer earlier uploads of the same kind: no comparison
@@ -44,6 +46,22 @@ SOURCE_LABELS = {
     "YT_OTHER_PAGE": "Other YouTube pages",
     "HASHTAGS": "Hashtag pages",
     "ADVERTISING": "YouTube ads",
+}
+
+
+COUNTRY_NAMES = {
+    "US": "United States", "GB": "United Kingdom", "CA": "Canada", "AU": "Australia", "NZ": "New Zealand",
+    "IE": "Ireland", "DE": "Germany", "AT": "Austria", "CH": "Switzerland", "FR": "France", "BE": "Belgium",
+    "NL": "Netherlands", "LU": "Luxembourg", "ES": "Spain", "PT": "Portugal", "IT": "Italy", "GR": "Greece",
+    "DK": "Denmark", "NO": "Norway", "SE": "Sweden", "FI": "Finland", "IS": "Iceland", "PL": "Poland",
+    "CZ": "Czechia", "SK": "Slovakia", "HU": "Hungary", "RO": "Romania", "BG": "Bulgaria", "HR": "Croatia",
+    "SI": "Slovenia", "RS": "Serbia", "UA": "Ukraine", "LT": "Lithuania", "LV": "Latvia", "EE": "Estonia",
+    "TR": "Turkey", "IL": "Israel", "AE": "United Arab Emirates", "SA": "Saudi Arabia", "EG": "Egypt",
+    "ZA": "South Africa", "NG": "Nigeria", "KE": "Kenya", "MA": "Morocco", "IN": "India", "PK": "Pakistan",
+    "BD": "Bangladesh", "LK": "Sri Lanka", "JP": "Japan", "KR": "South Korea", "CN": "China", "TW": "Taiwan",
+    "HK": "Hong Kong", "SG": "Singapore", "MY": "Malaysia", "TH": "Thailand", "VN": "Vietnam",
+    "PH": "Philippines", "ID": "Indonesia", "MX": "Mexico", "BR": "Brazil", "AR": "Argentina", "CL": "Chile",
+    "CO": "Colombia", "PE": "Peru",
 }
 
 
@@ -219,6 +237,28 @@ def source_label(code: str) -> str:
     return code.replace("_", " ").capitalize()
 
 
+def fetch_countries(reader: ChannelReader, end: date) -> tuple[tuple[str, int], ...]:
+    """Views by viewer country over COUNTRY_DAYS days ending `end`: ONE query, most views first."""
+    start = end - timedelta(days=COUNTRY_DAYS - 1)
+    resp = reader.query(start.isoformat(), end.isoformat(), "views", "country", "", "-views")
+    pairs: list[tuple[str, int]] = []
+    for code, views_raw in table(resp, ("country", "views")):
+        if not isinstance(code, str) or not code.strip():
+            continue
+        try:
+            v = int(views_raw)
+        except Exception:
+            continue
+        if v > 0:
+            pairs.append((code.strip().upper(), v))
+    pairs.sort(key=lambda x: (-x[1], x[0]))
+    return tuple(pairs)
+
+
+def country_name(code: str) -> str:
+    return COUNTRY_NAMES.get(code.upper(), code.upper())
+
+
 def source_shares(sources: Sequence[tuple[str, int]], top: int = 3) -> list[tuple[str, int]]:
     total = sum(v for _, v in sources)
     if total == 0:
@@ -383,6 +423,7 @@ class ChannelStats:
     sources: tuple[tuple[str, int], ...]
     latest: tuple[SameAge, ...]
     calls: int
+    countries: tuple[tuple[str, int], ...] = ()  # (country code, views), 90 days
 
 
 def fetch_stats(reader: ChannelReader, videos: Sequence[Video], *, now: datetime | None = None,
@@ -397,9 +438,12 @@ def fetch_stats(reader: ChannelReader, videos: Sequence[Video], *, now: datetime
         report("Reading where views came from")
     sources = fetch_sources(reader, end)
     if report is not None:
+        report("Reading where viewers watch from")
+    countries = fetch_countries(reader, end)
+    if report is not None:
         report("Comparing the newest uploads")
     latest_list, comp_calls = compare_latest(reader, videos, end)
-    calls = 2 + comp_calls
+    calls = 3 + comp_calls
     fetched_at = _utc(now).isoformat()
     return ChannelStats(
         fetched_at=fetched_at,
@@ -408,6 +452,7 @@ def fetch_stats(reader: ChannelReader, videos: Sequence[Video], *, now: datetime
         sources=sources,
         latest=tuple(latest_list),
         calls=calls,
+        countries=countries,
     )
 
 
@@ -427,6 +472,7 @@ def save_stats(home: Path, stats: ChannelStats) -> Path:
             for s in stats.latest
         ],
         "calls": stats.calls,
+        "countries": [[c, v] for c, v in stats.countries],
     }
     text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     fd, tmp_name = tempfile.mkstemp(dir=str(dest.parent), prefix="channel.", suffix=".tmp")
@@ -528,6 +574,15 @@ def load_stats(home: Path) -> ChannelStats | None:
             if not _is_int_strict(compared):
                 return None
             latest.append(SameAge(video_id=vid, status=status, age_days=age_days, views=views, usual=usual, compared=compared))
+        countries_raw = data.get("countries", [])  # files saved before countries existed have none
+        if not isinstance(countries_raw, list):
+            return None
+        countries: list[tuple[str, int]] = []
+        for item in countries_raw:
+            if (not isinstance(item, list) or len(item) != 2 or not isinstance(item[0], str)
+                    or not _is_int_strict(item[1])):
+                return None
+            countries.append((item[0], item[1]))
         return ChannelStats(
             fetched_at=fetched_at,
             end_date=end_date,
@@ -535,6 +590,7 @@ def load_stats(home: Path) -> ChannelStats | None:
             sources=tuple(sources),
             latest=tuple(latest),
             calls=calls,
+            countries=tuple(countries),
         )
     except Exception:
         return None
