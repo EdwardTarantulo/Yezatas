@@ -1,6 +1,6 @@
 {# Our own simple line icons and small building blocks. No third-party artwork. #}
 
-{% macro mark() %}<svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="30" height="30" rx="8"/><path d="M9 9l7 8 7-8M16 17v7"/><circle cx="24" cy="8" r="1.6"/></svg>{% endmacro %}
+{% macro mark() %}<svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect class="mark-back" x="9" y="4" width="20" height="15" rx="4"/><rect class="mark-front" x="3" y="11" width="21" height="16" rx="4.5"/><path d="M8.8 19l3.6 3.6 6.8-7"/></svg>{% endmacro %}
 
 {% macro icon(name) %}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
 {%- if name == 'dashboard' -%}<rect x="3.5" y="3.5" width="7" height="9" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="5" rx="1.5"/><rect x="13.5" y="11.5" width="7" height="9" rx="1.5"/><rect x="3.5" y="15.5" width="7" height="5" rx="1.5"/>

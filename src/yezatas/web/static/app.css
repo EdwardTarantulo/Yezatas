@@ -3,18 +3,18 @@
    (the creator's choice, else the system setting). */
 :root {
   color-scheme: light;
-  --bg: #fafafa;
+  --bg: #f9f9f9;
   --surface: #ffffff;
-  --line: #e4e4e7;
-  --line-strong: #d4d4d8;
-  --hover: #f4f4f5;
-  --text: #111827;
-  --muted: #5f6672;
-  --link: #0b6b58;
-  --brand: #0e7c66;
+  --line: #e5e5e5;
+  --line-strong: #cccccc;
+  --hover: #f2f2f2;
+  --text: #0f0f0f;
+  --muted: #606060;
+  --link: #065fd4;
+  --brand: #e8152f;
   --brand-text: #ffffff;
-  --primary-bg: #0e7c66;
-  --brand-soft: #e7f3f0;
+  --primary-bg: #065fd4;
+  --brand-soft: #def1ff;
   --fs-xs: 12px; --fs-sm: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 24px; --radius-sm: 6px; --radius-lg: 14px;
   --radius: 10px;
   --primary-text: #ffffff;
@@ -59,21 +59,21 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #09090b;
-  --surface: #111114;
-  --line: #27272a;
-  --line-strong: #3f3f46;
-  --hover: #1b1b1f;
-  --text: #f4f4f5;
-  --muted: #b4b4bc;
-  --link: #3cc4a6;
-  --brand: #12927a;
+  --bg: #0f0f0f;
+  --surface: #212121;
+  --line: #3d3d3d;
+  --line-strong: #4f4f4f;
+  --hover: #272727;
+  --text: #f1f1f1;
+  --muted: #aaaaaa;
+  --link: #3ea6ff;
+  --brand: #ff3b4e;
   --brand-text: #ffffff;
-  --primary-bg: #12927a;
-  --brand-soft: #0f2a24;
+  --primary-bg: #3ea6ff;
+  --brand-soft: #263850;
   --fs-xs: 12px; --fs-sm: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 24px; --radius-sm: 6px; --radius-lg: 14px;
   --radius: 10px;
-  --primary-text: #04130f;
+  --primary-text: #0f0f0f;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
   --good: #4cc764;
   --good-bg: #15301d;
@@ -131,8 +131,9 @@ code {
 .icon { width: 24px; height: 24px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .mark { width: 28px; height: 28px; flex: none; }
 .mark rect { fill: var(--brand); }
-.mark path { fill: none; stroke: var(--brand-text); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.mark circle { fill: var(--brand-text); }
+.mark .mark-back { opacity: 0.4; }
+.mark .mark-front { stroke: var(--surface); stroke-width: 2; paint-order: stroke; }
+.mark path { fill: none; stroke: var(--brand-text); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 
 /* --- bare layout (not signed in) --- */
 .column { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
@@ -260,7 +261,7 @@ code {
 .button {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: 36px; padding: 0 16px;
-  border: 1px solid transparent; border-radius: 8px;
+  border: 1px solid transparent; border-radius: 18px;
   font: inherit; font-weight: 500; text-decoration: none; white-space: nowrap;
   cursor: pointer;
 }
@@ -379,11 +380,11 @@ form.inline { display: inline; }
 .chip-label { color: var(--muted); font-size: 13px; margin-right: 2px; }
 .chip {
   display: inline-flex; align-items: center; height: 32px; padding: 0 12px;
-  border-radius: 8px; background: var(--hover); color: var(--text);
+  border-radius: 16px; background: var(--hover); color: var(--text);
   text-decoration: none; font-weight: 500; font-size: 14px;
 }
 a.chip:hover { background: var(--line); }
-.chip.active { background: var(--primary-bg); color: var(--primary-text); overflow-wrap: anywhere; }
+.chip.active { background: var(--text); color: var(--surface); overflow-wrap: anywhere; }
 .result-count { color: var(--muted); margin: 0 0 8px; }
 .vtable { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .vtable th { text-align: left; font-weight: 500; color: var(--muted); font-size: 13px; padding: 10px 8px; border-bottom: 1px solid var(--line); }
