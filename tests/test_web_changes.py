@@ -575,3 +575,30 @@ def test_pages_need_a_signed_in_browser(tmp_path: Path) -> None:
     ui, _ = make_push_ui(tmp_path, signed_in_browser=False)
     for path in ("/changes", "/changes/push", "/history"):
         assert ui.client.get(path).status_code == 403, path
+
+
+def test_a_new_title_with_old_translations_gets_a_warning(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    ui, _ = make_push_ui(tmp_path)
+    loc = {"fr": {"title": "Titre", "description": "Texte"}, "de": {"title": "Titel", "description": "Text"}}
+    with Store(ui.config.catalog_db) as store:
+        video = store.get_video(V1)
+        store.upsert_video(replace(video, localizations=loc), store.begin_pull("UC_fake_channel"))
+    save(ui, V1, tags=["only", "tags"], title=None)
+    html = ui.client.get("/changes").text
+    assert "made from the old text: German, French" in html or "made from the old text: French, German" in html
+    assert "goes to YouTube with 2 translations" in html
+
+
+def test_changing_only_the_tags_does_not_warn_about_translations(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    ui, _ = make_push_ui(tmp_path)
+    loc = {"fr": {"title": "Titre", "description": "Texte"}}
+    with Store(ui.config.catalog_db) as store:
+        video = store.get_video(V1)
+        store.upsert_video(replace(video, localizations=loc), store.begin_pull("UC_fake_channel"))
+        title, description = video.title, video.description
+    save(ui, V1, title=title, description=description, tags=["only", "tags"])
+    assert "made from the old text" not in ui.client.get("/changes").text

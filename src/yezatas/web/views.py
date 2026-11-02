@@ -571,6 +571,17 @@ def build_change_card(row: DraftRow, video: Video) -> ChangeCard:
     if own is not None and diff.localizations.kept:
         kept = tuple(k for k in diff.localizations.kept if not same_language(k, own))
         diff = replace(diff, localizations=replace(diff.localizations, kept=kept))
+    if diff.title_changed or diff.description.changed:
+        untouched = list(row.base_localizations) if row.localizations is None else list(diff.localizations.kept)
+        untouched = [k for k in untouched if own is None or not same_language(k, own)]
+        if untouched:
+            n = len(untouched)
+            warnings = warnings + (Issue(
+                "localizations", "translations_out_of_date", "warning",
+                f"The new title or description goes to YouTube with {n} translation{'' if n == 1 else 's'} "
+                f"made from the old text: {', '.join(lang_name(k) for k in untouched)}. Translate "
+                f"{'it' if n == 1 else 'them'} again on the video page first, or "
+                f"{'it stays' if n == 1 else 'they stay'} out of date."),)
     origin = row.note or ORIGIN_LABELS.get(row.source, row.source.capitalize())
     return ChangeCard(
         row=row, video=video, diff=diff, errors=errors, warnings=warnings, stale=stale,
