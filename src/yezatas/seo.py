@@ -128,10 +128,22 @@ class Scorecard:
 
 
 @dataclass(frozen=True)
+class CategoryJudgment:
+    """Muse Spark's category verdict on one video, as the category check needs it."""
+
+    current_id: str  # the video's category when it was checked
+    suggested_id: str  # the category Muse Spark named
+    confirmed: bool  # the user said the category it was checked with is correct
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class ChannelContext:
     title_counts: dict[str, int] = field(default_factory=dict)  # normalized title -> videos
     # video id -> its translations on YouTube made from an older title or description: they do not count
     stale_localizations: dict[str, frozenset[str]] = field(default_factory=dict)
+    # video id -> its finished category check; a video without one is not judged (no points lost)
+    category_checks: dict[str, CategoryJudgment] = field(default_factory=dict)
 
 
 def normalize_title(title: str) -> str:
@@ -560,6 +572,36 @@ def check_localizations(video: Video, context: ChannelContext | None) -> CheckRe
     return _result("localizations", "details", title, 8, points, detail, fix)
 
 
+def video_category_id(video: Video) -> str:
+    """The video's category id from the stored pull (snippet.categoryId), or ""."""
+    snippet = video.raw.get("snippet") if isinstance(video.raw, dict) else None
+    value = snippet.get("categoryId") if isinstance(snippet, dict) else None
+    return str(value) if value else ""
+
+
+def check_category(video: Video, context: ChannelContext | None) -> CheckResult:
+    title = "Category fits the video"
+    current = video_category_id(video)
+    if not current:
+        return _skip("category", "details", title, 6, "No category in the stored data. Pull your videos again.")
+    judgment = context.category_checks.get(video.video_id) if context else None
+    if judgment is None:
+        return _skip("category", "details", title, 6, "Not checked yet. Press Check category on the video page.")
+    name = CATEGORY_NAMES.get(current, f"category {current}")
+    suggested = CATEGORY_NAMES.get(judgment.suggested_id, judgment.suggested_id)
+    if judgment.suggested_id == current:
+        return _result("category", "details", title, 6, 6, f"Set as {name}; Muse Spark agrees.")
+    if judgment.current_id != current:
+        return _skip("category", "details", title, 6,
+                     f"The category changed to {name} since Muse Spark checked it. Check again.")
+    if judgment.confirmed:
+        return _result("category", "details", title, 6, 6, f"Set as {name}; you marked it as correct.")
+    return _result("category", "details", title, 6, 0,
+                   f"Set as {name}. Muse Spark reads the title and description as {suggested}.",
+                   f"Change the category to {suggested} in YouTube Studio, or press \"It's correct\" on the "
+                   f"video page if {name} is right.")
+
+
 def check_thumbnail_hd(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "A sharp thumbnail is available"
     if not video.thumbnails:
@@ -597,6 +639,7 @@ CHECKS: tuple[CheckFn, ...] = (
     check_default_language,
     check_audio_language,
     check_localizations,
+    check_category,
     check_thumbnail_hd,
 )
 
@@ -610,12 +653,15 @@ def score_video(video: Video, context: ChannelContext | None = None) -> Scorecar
 
 
 def score_catalog(videos: Iterable[Video],
-                  stale_localizations: Mapping[str, frozenset[str]] | None = None) -> dict[str, Scorecard]:
-    """`stale_localizations`: video id -> translations on YouTube made from older text (not counted)."""
+                  stale_localizations: Mapping[str, frozenset[str]] | None = None,
+                  category_checks: Mapping[str, CategoryJudgment] | None = None) -> dict[str, Scorecard]:
+    """`stale_localizations`: video id -> translations on YouTube made from older text (not counted).
+    `category_checks`: video id -> its finished category check."""
     videos = list(videos)
     context = channel_context(videos)
-    if stale_localizations:
-        context = ChannelContext(context.title_counts, dict(stale_localizations))
+    if stale_localizations or category_checks:
+        context = ChannelContext(context.title_counts, dict(stale_localizations or {}),
+                                 dict(category_checks or {}))
     return {v.video_id: score_video(v, context) for v in videos}
 
 

@@ -395,10 +395,37 @@ _SCHEMA_V14: tuple[str, ...] = (
     "ALTER TABLE comments ADD COLUMN owner_replied INTEGER NOT NULL DEFAULT 0",
 )
 
+# v15: the category check's verdict per video, and the pinned comment (mark and suggestion) per video.
+_SCHEMA_V15: tuple[str, ...] = (
+    """CREATE TABLE category_checks (
+        video_id TEXT PRIMARY KEY,
+        checked_at TEXT NOT NULL,
+        model TEXT NOT NULL,
+        status TEXT NOT NULL,
+        current_id TEXT NOT NULL DEFAULT '',
+        suggested_id TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        confirmed_at TEXT NOT NULL DEFAULT '',
+        error TEXT NOT NULL DEFAULT '',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0
+    )""",
+    """CREATE TABLE pinned_comments (
+        video_id TEXT PRIMARY KEY,
+        marked_at TEXT NOT NULL DEFAULT '',
+        suggestion TEXT NOT NULL DEFAULT '',
+        suggested_at TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        error TEXT NOT NULL DEFAULT '',
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0
+    )""",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
     _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
-    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11, _SCHEMA_V12, _SCHEMA_V13, _SCHEMA_V14,
+    _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11, _SCHEMA_V12, _SCHEMA_V13, _SCHEMA_V14, _SCHEMA_V15,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -592,6 +619,23 @@ class AdCheck:
     error: str
     input_tokens: int
     cached_tokens: int
+    output_tokens: int
+
+
+@dataclass(frozen=True)
+class CategoryCheck:
+    """Muse Spark's view of which YouTube category fits one video (the newest check only)."""
+
+    video_id: str
+    checked_at: str
+    model: str
+    status: str  # "done" | "failed"
+    current_id: str  # the video's category id when it was checked ("" when it had none)
+    suggested_id: str  # the category id Muse Spark named ("" when failed)
+    reason: str
+    confirmed_at: str  # when the user said the current category is correct ("" when not)
+    error: str
+    input_tokens: int
     output_tokens: int
 
 
@@ -1476,6 +1520,46 @@ class Store:
             "SELECT * FROM ad_checks WHERE video_id = ? ORDER BY id DESC LIMIT 1", (video_id,)
         ).fetchone()
         return self._row_to_ad_check(row) if row else None
+
+    # --- category checks (V7) ---
+    @staticmethod
+    def _row_to_category_check(row: sqlite3.Row) -> CategoryCheck:
+        return CategoryCheck(
+            video_id=row["video_id"], checked_at=row["checked_at"], model=row["model"],
+            status=row["status"], current_id=row["current_id"], suggested_id=row["suggested_id"],
+            reason=row["reason"], confirmed_at=row["confirmed_at"], error=row["error"],
+            input_tokens=row["input_tokens"], output_tokens=row["output_tokens"],
+        )
+
+    def save_category_check(self, record: CategoryCheck, now: datetime | None = None) -> None:
+        """Store the video's check in place of the one before (`checked_at` is set here; a new check
+        clears an earlier "It's correct")."""
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO category_checks (video_id, checked_at, model, status, current_id, "
+                "suggested_id, reason, confirmed_at, error, input_tokens, output_tokens) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)",
+                (record.video_id, _iso(now), record.model, record.status, record.current_id,
+                 record.suggested_id, record.reason, record.error, record.input_tokens,
+                 record.output_tokens),
+            )
+
+    def category_check(self, video_id: str) -> CategoryCheck | None:
+        row = self._conn.execute("SELECT * FROM category_checks WHERE video_id = ?", (video_id,)).fetchone()
+        return self._row_to_category_check(row) if row else None
+
+    def category_checks(self) -> dict[str, CategoryCheck]:
+        """Every video's check, by video id."""
+        rows = self._conn.execute("SELECT * FROM category_checks").fetchall()
+        return {row["video_id"]: self._row_to_category_check(row) for row in rows}
+
+    def confirm_category(self, video_id: str, now: datetime | None = None) -> bool:
+        """The user says the video's category is correct; False when there is no finished check."""
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE category_checks SET confirmed_at = ? WHERE video_id = ? AND status = 'done'",
+                (_iso(now), video_id))
+        return cur.rowcount > 0
 
     # --- Shorts finder (D5) ---
     @staticmethod
