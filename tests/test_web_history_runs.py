@@ -44,19 +44,19 @@ def draft_of(ui: Any, video_id: str) -> Any:
 def test_history_groups_rows_by_run_newest_first_with_an_undo_button(tmp_path: Path) -> None:
     ui, writer = make_push_ui(tmp_path)
     seed_push(ui, None, V3, "Old three")  # an older push, from before runs existed
-    first = seed_run(ui, [(V1, "Old one", "pushed"), (V2, "Old two", "conflict")])
+    first = seed_run(ui, [(V1, "Old one", "pushed"), (V2, "Old two", "conflict"), (V3, "Old three", "pushed")])
     second = seed_run(ui, [(V2, "Older two", "pushed")])
     html = ui.client.get("/history").text
     assert "undo a whole push: both make drafts with the text from before the push." in html
     assert "Nothing changes on YouTube until you approve and push them." in html
     assert html.index(f'id="run-{second}"') < html.index(f'id="run-{first}"')  # newest run first
     assert html.index(f'id="run-{first}"') < html.index('id="p-1"')  # the old push comes last
-    assert re.search(r"Push of [^<]+ · 2 videos · 1 changed", html)
+    assert re.search(r"Push of [^<]+ · 3 videos · 2 changed", html)
     assert re.search(r"Push of [^<]+ · 1 video · 1 changed", html)
-    assert html.count(UNDO) == 2  # one per run; the old push is restored one by one
-    assert f'action="/history/runs/{first}/undo"' in html
+    assert html.count(UNDO) == 1  # only the run that changed two videos; one video has its own Restore
+    assert f'action="/history/runs/{first}/undo"' in html and f'action="/history/runs/{second}/undo"' not in html
     assert 'action="/history/runs/' not in html.split('id="p-1"')[1]
-    assert html.count("Restore this text") == 4  # every row keeps its own Restore
+    assert html.count("Restore this text") == 5  # every row keeps its own Restore
     assert writer.calls == []
 
 
@@ -176,3 +176,12 @@ def test_titles_in_the_summary_are_escaped(tmp_path: Path, title: str) -> None:
     run = seed_run(ui, [(V1, "Old one", "failed")])
     html = ui.post(f"/history/runs/{run}/undo").text
     assert "<b>Bold</b>" not in html
+
+
+def test_a_run_that_changed_one_video_has_no_undo_button(tmp_path: Path) -> None:
+    ui, _ = make_push_ui(tmp_path)
+    run = seed_run(ui, [(V1, "Old one", "pushed"), (V2, "Old two", "failed")])
+    html = ui.client.get("/history").text
+    assert f'id="run-{run}"' in html and "1 changed" in html
+    assert UNDO not in html and "/undo" not in html
+    assert html.count("Restore this text") == 2

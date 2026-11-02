@@ -660,7 +660,7 @@ class HistoryGroup:
 
     run_id: int | None
     header: str  # "Push of <time> · N videos · K changed"; "" without a run
-    can_undo: bool  # at least one row of the run reached YouTube
+    can_undo: bool  # more than one row of the run reached YouTube (one video has its own Restore)
     rows: list[HistoryRow]
 
 
@@ -694,7 +694,7 @@ def history_groups(records: Iterable[PushRecord], runs: Mapping[int, PushRun],
         count = run.video_count if run is not None and run.video_count else len(members)
         groups.append(HistoryGroup(
             record.run_id, f"Push of {started} · {_videos(count)} · {changed} changed",
-            changed > 0, history_rows(members, titles, fmt_time, draft_ids)))
+            changed > 1, history_rows(members, titles, fmt_time, draft_ids)))
     return groups
 
 
