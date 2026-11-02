@@ -184,11 +184,11 @@ def test_an_empty_chat_shows_the_intro_the_starters_and_the_safety_line(tmp_path
     assert "Meta's terms apply (<a href=\"/setup#ai-data\">what Meta may do with it</a>)." in html and "Nothing is sent to YouTube." in html
 
 
-def test_the_nav_has_a_copilot_item_after_checks(tmp_path: Path) -> None:
+def test_the_nav_has_a_copilot_item_after_bulk_edit(tmp_path: Path) -> None:
     ui, _ = make_cp_ui(tmp_path)
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/copilot") == items.index("/checks") + 1
+    assert items.index("/copilot") == items.index("/bulk") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/copilot"]
 
 
