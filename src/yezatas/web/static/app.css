@@ -958,6 +958,7 @@ button.gbtn { cursor: pointer; }
 /* --- Today (/): the daily home page ---------------------------------------------------------- */
 .td-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .td-head .page-title { margin-bottom: 4px; }
+.td-pull { margin: 0; flex: none; }
 .td-intro { margin: 0; font-size: var(--fs-sm); }
 .td-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
 .td-grid .card { margin: 0; }
@@ -1006,11 +1007,7 @@ button.gbtn { cursor: pointer; }
 .td-src { color: var(--muted); }
 .td-src b { color: var(--text); font-weight: 600; margin-right: 4px; }
 .td-refresh { display: flex; align-items: center; gap: 12px; margin: 12px 0 0; }
-.td-fix { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; padding-top: 12px; padding-bottom: 12px; }
-.td-fix-label { margin: 0; font-size: var(--fs-sm); padding-right: 14px; border-right: 1px solid var(--line); align-self: stretch; display: flex; align-items: center; }
-.td-fix-main { display: flex; align-items: center; gap: 14px; min-width: 0; color: inherit; text-decoration: none; }
-.td-fix-main .thumb.sm { width: 80px; }
-.td-fix-actions { display: flex; gap: 6px; }
+.td-pts { font-size: var(--fs-xs); white-space: nowrap; }
 @media (max-width: 999px) { .td-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 520px) {
   .td-head { align-items: center; }
@@ -1019,7 +1016,7 @@ button.gbtn { cursor: pointer; }
   .td-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .td-stat, .td-stat:first-child { padding: 10px; min-height: 0; }
   .td-stat-value { font-size: var(--fs-lg); }
-  .td-delta-vs, .td-spark, .td-sources, .td-fix, .td-hide-sm { display: none; }
+  .td-delta-vs, .td-spark, .td-sources, .td-hide-sm { display: none; }
   .td-vs { white-space: normal; max-width: 96px; text-align: center; }
 }
 

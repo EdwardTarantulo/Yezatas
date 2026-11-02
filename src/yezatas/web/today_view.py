@@ -62,7 +62,7 @@ class TodayView:
     comment_total: int
     comment_new: int  # published in the 24 hours before `now`
     week: WeekView | None
-    fix: Entry | None
+    fixes: tuple[Entry, ...]  # up to FIXES videos, in the SEO overview's Fix next order (views x points)
 
 
 def age_text(published_at: str, now: datetime) -> str:
@@ -235,6 +235,9 @@ def build_week(stats: ChannelStats | None) -> WeekView | None:
     )
 
 
+FIXES = 5  # videos in the "Videos to fix" card
+
+
 def build_today(
     entries: Sequence[Entry],
     previous: Mapping[str, tuple[str, int]],
@@ -242,7 +245,7 @@ def build_today(
     draft_ids: frozenset[str] | set[str],
     videos: Mapping[str, Video],
     stats: ChannelStats | None,
-    fix: Entry | None,
+    fixes: Sequence[Entry],
     now: datetime,
 ) -> TodayView:
     latest = build_latest(entries, previous, stats, now)
@@ -254,5 +257,5 @@ def build_today(
         comment_total=comment_total,
         comment_new=comment_new,
         week=week,
-        fix=fix,
+        fixes=tuple(fixes[:FIXES]),
     )

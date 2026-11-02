@@ -35,8 +35,17 @@ def test_home_is_today_with_its_cards(tmp_path: Path) -> None:
     for card_id in ("today-latest", "today-comments", "today-week", "today-fix"):
         assert f'id="{card_id}"' in html, card_id
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/"]
-    assert 'href="/setup#step-pull"' in html and ">Pull again<" in html
+    assert 'action="/setup/pull"' in html and 'name="back" value="/"' in html and ">Pull again<" in html
     assert " style=" not in html and "<style" not in html
+
+
+def test_fix_card_lists_up_to_five_videos(tmp_path: Path) -> None:
+    ui, _ = make_today_ui(tmp_path)
+    card = section(ui.client.get("/").text, "today-fix")
+    assert ">Videos to fix<" in card and 'href="/videos?sort=fix"' in card
+    rows = re.findall(r'class="td-vrow" href="(/videos/[^"]+)"', card)
+    assert len(rows) == 5 and len(set(rows)) == 5
+    assert card.count("points possible") == 5
 
 
 def test_seo_overview_is_the_old_dashboard(tmp_path: Path) -> None:

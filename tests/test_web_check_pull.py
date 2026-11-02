@@ -187,6 +187,27 @@ def test_pull_refused_when_estimate_exceeds_remaining_quota(tmp_path: Path) -> N
     assert "disabled" in resp.text
 
 
+def test_pull_from_today_comes_back_to_today(tmp_path: Path) -> None:
+    ui = ready_ui(tmp_path)
+    ui.post("/setup/check")
+    resp = ui.post("/setup/pull", data={"back": "/"}, follow_redirects=False)
+    assert resp.status_code == 303 and resp.headers["location"] == "/"
+    ui.web.pull_job.wait()
+    html = ui.client.get("/").text
+    assert '<h1 class="page-title">Today</h1>' in html and "120 videos" in html
+    assert 'id="pull-msg"' not in html and 'id="today-pull-failed"' not in html
+
+
+def test_pull_from_today_refused_still_comes_back(tmp_path: Path) -> None:
+    ui = ready_ui(tmp_path, config=replace(make_config(tmp_path), daily_quota_budget=5))
+    ui.post("/setup/check")
+    resp = ui.post("/setup/pull", data={"back": "/"}, follow_redirects=False)
+    assert resp.status_code == 303 and resp.headers["location"] == "/"
+    assert ui.web.pull_job.snapshot().status == "idle"
+    other = ui.post("/setup/pull", data={"back": "https://example.com/"}, follow_redirects=False)
+    assert other.headers["location"] == "/setup#step-pull"
+
+
 def test_pull_failure_is_reported_on_the_step(tmp_path: Path) -> None:
     ui = ready_ui(tmp_path)
     ui.post("/setup/check")

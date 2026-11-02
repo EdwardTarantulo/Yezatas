@@ -116,7 +116,7 @@ def test_build_week_stats_bars_and_sources():
 def test_build_today_puts_it_together():
     vids = [video("new", "2026-06-18T10:00:00Z", 100)]
     fix = entries(vids)[0]
-    today = build_today(entries(vids), {}, [], set(), {}, None, fix, NOW)
+    today = build_today(entries(vids), {}, [], set(), {}, None, [fix] * 7, NOW)
     assert [r.video_id for r in today.latest] == ["new"]
     assert (today.comments, today.comment_total, today.comment_new) == ((), 0, 0)
-    assert today.week is None and today.fix is fix
+    assert today.week is None and today.fixes == (fix,) * 5

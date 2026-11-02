@@ -2241,10 +2241,15 @@ def create_app(
         stats = channelstats_mod.load_stats(config.home)
         today = build_today(entries, previous, to_answer, drafts,
                             {e.video.video_id: e.video for e in entries}, stats,
-                            fix_next[0] if fix_next else None, datetime.now(timezone.utc))
+                            fix_next, datetime.now(timezone.utc))
+        card = week_card(stats, "/", "today-week")
+        pull = state.pull_job.snapshot()
         return render(request, "today.html", {
             "active": "today", "today": today, "latest_pull": data["latest_pull"], "week": today.week,
-            **week_card(stats, "/", "today-week"),
+            **card,
+            "pull_running": pull.running, "pull_message": pull.message,
+            "pull_failed": pull.message if pull.status == "failed" else "",
+            "poll": card["poll"] or pull.running,
         })
 
     @app.get("/analytics")
@@ -2980,25 +2985,30 @@ def create_app(
 
     @app.post("/setup/pull")
     async def start_pull(request: Request) -> Response:
-        await read_form(request)
+        form = await read_form(request)
         sid = request.state.session_id
+        from_today = str(form.get("back") or "") == "/"  # Today's "Pull again"
+
+        def go_back(step: str) -> RedirectResponse:
+            return see_other("/") if from_today else back_to_setup(step)
+
         check = state.check
         if check is None and config.token_path.is_file():
             # After a restart: check again on its own (1 quota unit), then pull.
             check = await run_in_threadpool(state.run_check)
         if check is None or not check.ok or not check.has_uploads:
             state.add_flash(sid, "error", "Check the connection first (step 7).", "check")
-            return back_to_setup("check")
+            return go_back("check")
         remaining = await run_in_threadpool(remaining_quota)
         needed = estimate_pull_units(check.video_count)
         if needed > remaining:
             state.add_flash(sid, "error",
                             f"The pull needs about {needed} quota units but only {remaining} are "
                             "left today. Quota resets at midnight Pacific time.", "pull")
-            return back_to_setup("pull")
+            return go_back("pull")
         if not state.start_pull():
             state.add_flash(sid, "error", "A pull is already running.", "pull")
-        return back_to_setup("pull")
+        return go_back("pull")
 
     # --- edit, review, push, history -----------------------------------------------------------
     def why_runs(cards: Sequence[Any]) -> dict[str, RunView]:
