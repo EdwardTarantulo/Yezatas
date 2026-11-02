@@ -499,6 +499,14 @@ as it lands; the git history is the detailed record.
   something is waiting there: blue for work for you (questions to answer, drafts to review), amber for what
   costs points or is broken (videos scoring under 50, translations out of date, broken links). Its tooltip says
   what it counts. The numbers are recounted only when the catalog changes.
+- **2026-11-02**: **Pages that say what they are, and a video page that leads somewhere**, mocked up first as
+  still pictures and built by **Muse Spark Open** on Baseten in five rounds. Every page heading now matches its
+  sidebar item (a test locks it), Bulk edit has its own item, and the Videos table sorts by clicking a column
+  title (again to reverse) instead of a row of sort chips. On the video page the ID sits beside the publish date
+  with a copy button; the Category, Pinned comment, Chapters, Hashtags, Captions and Translations tiles open the
+  place where each is changed, marked "Fix" while their check costs points; Analytics reads itself on opening
+  when its numbers are older than 12 hours (read-only); and Category and Pinned comment moved into a new Details
+  section above Tools, which shows the channel's own newest comment when one was fetched.
 
 ---
 
