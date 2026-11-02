@@ -55,6 +55,7 @@ TEXT_PAIRS = [
     ("bad", "bad-bg"), ("info-text", "info-bg"), ("text", "info-bg"), ("text", "warn-bg"), ("text", "code-bg"),
     ("diff-add-text", "diff-add-bg"), ("diff-del-text", "diff-del-bg"), ("text", "diff-add-mark"),
     ("text", "diff-del-mark"), ("muted", "diff-gap-bg"),
+    ("link", "brand-soft"), ("warn", "surface"),  # the redesigned active nav item and fix-points chips
     ("g-text", "g-bg"), ("g-muted", "g-bg"),  # the mock YouTube pages of the packaging preview
 ]
 
