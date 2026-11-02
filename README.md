@@ -49,7 +49,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | Area | Pages | What it does |
 |---|---|---|
 | **Setup** | Setup | An 8-step guided connection to YouTube, a connection check with specific fixes, and a read-only catalog pull with its quota cost shown first. |
-| **Audit** | Dashboard, Content, Video | A 25-check SEO scorecard per video with a one-line fix for each, **Fix next** ranked by views × missing points, and a searchable, sortable content table. |
+| **Audit** | Dashboard, Content, Video | A 27-check SEO scorecard per video with a one-line fix for each, **Fix next** ranked by views × missing points, and a searchable, sortable content table. |
 | **Edit safely** | Changes, History | Drafts shown as diffs, approved one by one, pushed with a quota preview; a backup before every update, restore one video or undo a whole push. |
 | **Suggest** | Video, Copilot | A suggestion agent with read-only tools and a fact guard, and a channel copilot with the whole catalog in one context. Edits are only ever proposals. |
 | **Translate** | Translate, Subtitles, Translations | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. A glossary of the creator's terms (kept as they are or with a fixed translation), checked by code, and a list of every translation made from older text. |
@@ -480,6 +480,20 @@ as it lands; the git history is the detailed record.
   turned off is skipped with a note. **Sort new comments** runs the existing Muse Spark sort once per video that
   has unsorted comments. Each draft can be copied, opened on YouTube, marked as used or dismissed without
   leaving the page. Comments are only read: you post replies on YouTube yourself.
+- **2026-11-02**: **A video page that shows what you need first**, built by **Muse Spark Open** on Baseten
+  (11 rounds, about 123K tokens; moving Subtitles into its own section was a hand edit). The tabs are now
+  Tools, Checklist and Thumbnail, and the tags box shows every tag. **Quick-info tiles** at the top (views,
+  likes, comments, length, category, language, chapters, hashtags, captions, translations, quality, pinned
+  comment) come from the stored pull and turn warm
+  where a check costs points. An **Analytics** card shows the video's last 28 days from YouTube Analytics.
+  Translations show a state per language, and a translation made from an older title or description is marked
+  "Out of date" and stops counting; the push page warns before a changed title goes out with old
+  translations. Chapters are checked on every video longer than a minute. Two new checks: **Category**
+  (Muse Spark says whether the category fits; an unknown id is refused; "It's correct" overrides it) and
+  **Pinned comment** (YouTube's API can't say which comment is pinned, so a comment written by the channel
+  counts, or your "I pinned one already"; Muse Spark suggests one to post, with no link that isn't in the
+  description and no number that isn't in the title or description). A check that has never run costs no
+  points. The scorecard is now 27 checks. Checked in the browser with made-up videos and a scripted model.
 
 ---
 
