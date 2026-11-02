@@ -830,3 +830,20 @@ def test_v11_database_upgrades_to_v12_and_keeps_its_data(tmp_path: Path) -> None
         assert s.list_custom_rules() == []
         assert s.upsert_comments([make_comment()], now=T0) == 1
         assert s.save_reply_template("Thanks", "Thanks, {name}!", now=T0) > 0
+
+
+def test_previous_view_counts_reads_the_snapshot_before_the_newest(store: Store) -> None:
+    p1 = store.begin_pull("chan0000001", now=T0)
+    store.upsert_video(make_video(view_count=100), p1, now=T0)
+    store.upsert_video(make_video("vid00000002", view_count=7), p1, now=T0)
+    store.finish_pull(p1, 2, now=T0)
+    assert store.previous_view_counts() == {}  # one pull: nothing to compare with
+    day2 = T0 + timedelta(days=1)
+    p2 = store.begin_pull("chan0000001", now=day2)
+    store.upsert_video(make_video(view_count=250), p2, now=day2)
+    store.finish_pull(p2, 1, now=day2)
+    day3 = T0 + timedelta(days=2)
+    p3 = store.begin_pull("chan0000001", now=day3)
+    store.upsert_video(make_video(view_count=400), p3, now=day3)
+    store.finish_pull(p3, 1, now=day3)
+    assert store.previous_view_counts() == {"vid00000001": (day2.isoformat(), 250)}

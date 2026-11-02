@@ -948,6 +948,19 @@ class Store:
             for r in rows
         ]
 
+    def previous_view_counts(self) -> dict[str, tuple[str, int]]:
+        """Each video's view count in its second-newest snapshot, as video id -> (taken_at, view_count).
+
+        Videos with fewer than two snapshots are left out: there is no earlier pull to compare with.
+        """
+        rows = self._conn.execute(
+            "SELECT video_id, taken_at, json_extract(data_json, '$.view_count') AS views FROM ("
+            " SELECT video_id, taken_at, data_json, ROW_NUMBER() OVER ("
+            "  PARTITION BY video_id ORDER BY taken_at DESC, id DESC) AS n FROM snapshots"
+            ") WHERE n = 2"
+        ).fetchall()
+        return {r["video_id"]: (r["taken_at"], int(r["views"] or 0)) for r in rows}
+
     # --- quota ledger ----------------------------------------------------
     def add_quota_entries(
         self,
