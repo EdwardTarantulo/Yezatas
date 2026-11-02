@@ -28,7 +28,7 @@
   </div>
 </section>
 
-<nav class="vnav" aria-label="On this page"><a href="#what-to-fix">What to fix{% if card.failed %} <span class="vnav-n">{{ card.failed|length }}</span>{% endif %}</a><a href="#edit">Edit</a><a href="#h-tools">AI tools</a><a href="#checks">All checks</a></nav>
+<nav class="vnav" aria-label="On this page"><a href="#edit">Edit</a><a href="#h-tools">Tools</a><a href="#checks">Checklist{% if card.failed %} <span class="vnav-n">{{ card.failed|length }}</span>{% endif %}</a></nav>
 
 <div class="vbody">
 {% include "_video_fixes.html" %}
@@ -56,8 +56,9 @@
     </div>
     <div class="field">
       <label for="f-tags">Tags</label>
-      <input id="f-tags" type="text" name="tags" value="{{ form.tags }}" autocomplete="off">
-      <p class="hint">Separate tags with commas, like in YouTube Studio.</p>
+      <p class="hint" id="c-tags">{{ tag_count }} tag{{ '' if tag_count == 1 else 's' }} &middot; {{ tag_chars }} of {{ tags_limit }} characters</p>
+      <textarea id="f-tags" name="tags" rows="{{ tags_rows }}" autocomplete="off" spellcheck="false">{{ form.tags }}</textarea>
+      <p class="hint tags-note">Separate tags with commas, like in YouTube Studio.</p>
     </div>
     <div class="actions"><button type="submit" class="button primary">Save as draft</button></div>
   </form>
@@ -66,7 +67,7 @@
 {% include "_video_tools.html" %}
 
 <details class="all-checks" id="checks" data-keep>
-  <summary><span class="tool-name">All checks</span><span class="tool-what">{{ card.score }}/100 &middot; every check with its points</span><span class="tool-groups">{% for group in groups %}<span class="pill">{{ group.label }}</span>{% endfor %}</span></summary>
+  <summary><span class="tool-name">Checklist</span><span class="tool-what">{{ card.score }}/100 &middot; every check with its points</span><span class="tool-groups">{% for group in groups %}<span class="pill">{{ group.label }}</span>{% endfor %}</span></summary>
 {% for group in groups %}
 <section class="card check-group" id="group-{{ group.key }}" aria-labelledby="g-{{ group.key }}">
   <div class="card-title-row">

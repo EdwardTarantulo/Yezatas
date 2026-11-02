@@ -1,7 +1,7 @@
-{# AI tools on the video page: folded tool cards. #}
+{# Tools on the video page: folded tool cards. #}
 {% from "_macros.html" import icon %}
 <section class="vtools" aria-labelledby="h-tools">
-  <h2 id="h-tools">AI tools</h2>
+  <h2 id="h-tools">Tools</h2>
   <p class="muted">Each tool makes a draft or advice. Nothing goes to YouTube until you approve it. Open a tool to use it.</p>
   <div class="vtools-grid">
   <details class="tool" id="tool-suggest" data-keep>
@@ -17,7 +17,7 @@
     {% include "_transcript_card.html" %}
   </details>
   <details class="tool" id="tool-packaging" data-keep>
-    <summary><span class="tool-icon">{{ icon('dashboard') }}</span><span class="tool-text"><span class="tool-name">Packaging</span><span class="tool-what">How the title and thumbnail work together</span></span>{% if pk.check.running or pk.variants.running %}<span class="tool-state">Running</span>{% endif %}</summary>
+    <summary><span class="tool-icon">{{ icon('dashboard') }}</span><span class="tool-text"><span class="tool-name">Thumbnail</span><span class="tool-what">How the title and thumbnail work together, and variants</span></span>{% if pk.check.running or pk.variants.running %}<span class="tool-state">Running</span>{% endif %}</summary>
     {% include "_packaging_card.html" %}
   </details>
   <details class="tool" id="tool-shorts" data-keep>

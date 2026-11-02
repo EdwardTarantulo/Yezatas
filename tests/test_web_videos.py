@@ -228,6 +228,32 @@ def test_unknown_video_is_a_404_page(tmp_path: Path) -> None:
     assert 'class="topbar"' in ui.client.get("/videos/nope").text  # shown inside the shell
 
 
+def test_video_page_menu_and_section_names(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 40)
+    vid = next(i for i, card in ui.cards.items() if card.failed)
+    html = ui.client.get(f"/videos/{vid}").text
+    start = html.index('<nav class="vnav"')
+    nav = html[start:html.index("</nav>", start)]
+    assert re.findall(r'href="(#[a-z-]+)"', nav) == ["#edit", "#h-tools", "#checks"]
+    assert ">Tools</a>" in nav and ">Checklist" in nav and "What to fix" not in nav
+    assert '<h2 id="h-tools">Tools</h2>' in html and "AI tools" not in html
+    assert '<span class="tool-name">Checklist</span>' in html and "All checks" not in html
+    assert '<span class="tool-name">Thumbnail</span>' in html and ">Packaging<" not in html
+
+
+def test_tags_box_shows_every_tag_with_counts(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 40)
+    vid = next(i for i, v in ui.videos.items() if len(v.tags) >= 2)
+    tags = ui.videos[vid].tags
+    html = ui.client.get(f"/videos/{vid}").text
+    box = re.search(r'<textarea id="f-tags" name="tags" rows="(\d+)"[^>]*>([^<]*)</textarea>', html)
+    assert box is not None and int(box.group(1)) >= 2
+    assert box.group(2) == ", ".join(tags)
+    hint = re.search(r'<p class="hint" id="c-tags">(\d+) tags &middot; (\d+) of 500 characters</p>', html)
+    assert hint is not None and int(hint.group(1)) == len(tags)
+    assert int(hint.group(2)) == sum(len(t) + (2 if " " in t else 0) for t in tags) + len(tags) - 1
+
+
 def test_video_page_puts_the_edit_form_first_and_folds_the_tools(tmp_path: Path) -> None:
     ui = seeded(tmp_path, 40)
     vid = next(i for i, card in ui.cards.items() if card.failed)

@@ -1,10 +1,10 @@
-{# The "Packaging" card of the video page. `pk` is the tools and job state, `pv` the newest check and its variants. #}
+{# The "Thumbnail" card of the video page. `pk` is the tools and job state, `pv` the newest check and its variants. #}
 {% from "_macros.html" import thumb %}
 {% set cj = pk.check %}
 {% set vj = pk.variants %}
 <section class="card packaging-card" id="packaging" aria-labelledby="h-packaging">
   <div class="card-title-row">
-    <h2 id="h-packaging">Packaging: title and thumbnail together</h2>
+    <h2 id="h-packaging">Thumbnail: title and thumbnail together</h2>
     <a class="button secondary" href="{{ pv.preview_url }}">Preview in a feed</a>
   </div>
   <p class="muted">Viewers meet the title and the thumbnail together. Code measures the thumbnail, {{ pk.vision }} reads it and writes a short critique, and {{ pk.segmenter }} measures how much of the picture the subject takes. Every number comes from code; the models only write words. Yezatas does not upload thumbnails; download one and upload it in YouTube Studio.</p>

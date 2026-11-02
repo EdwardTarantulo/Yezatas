@@ -138,7 +138,7 @@
   setTimeout(poll, 1000);
 })();
 
-// Video page: the AI tools and the full check list are folded <details data-keep>. The page reloads when a job
+// Video page: the tools and the checklist are folded <details data-keep>. The page reloads when a job
 // finishes, so remember which ones the creator opened (per page, this tab only). Also open the one a link points
 // into, and any that shows a running job or an error.
 (function () {

@@ -199,7 +199,7 @@ def test_the_card_renders_before_any_check(tmp_path: Path) -> None:
     ui, _, fetch = make_pk_ui(tmp_path)
     html = page(ui)
     section = card(html)
-    assert "Packaging: title and thumbnail together" in section
+    assert "Thumbnail: title and thumbnail together" in section
     assert "Cactus repotting guide" in section
     assert f"https://i.ytimg.com/vi/{V1}/mqdefault.jpg" in section  # the current thumbnail
     assert f'action="/videos/{V1}/packaging"' in section and 'name="csrf"' in section

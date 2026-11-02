@@ -53,7 +53,7 @@ from .. import customchecks as customchecks_mod
 from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
 from ..quota import QuotaExceeded, QuotaGuard
-from ..seo import score_catalog
+from ..seo import TAGS_CHAR_LIMIT, score_catalog, tags_char_count
 from ..store import AdCheck, OutlierReport, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
@@ -2344,6 +2344,9 @@ def create_app(
             "outlier_line": outlier_line(score),
             "change": card,
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
+            "tag_count": len(text[2]), "tag_chars": tags_char_count(text[2]), "tags_limit": TAGS_CHAR_LIMIT,
+            # Enough rows for every tag (about 70 characters a row); CSS grows the box as you type.
+            "tags_rows": max(2, tags_char_count(text[2]) // 70 + 1),
             "title_limit": TITLE_LIMIT, "description_limit": DESCRIPTION_BYTE_LIMIT,
             "active": "content", "entry": entry, "video": video, "card": entry.card,
             "groups": group_checks(entry.card),
