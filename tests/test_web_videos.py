@@ -50,12 +50,43 @@ def test_content_page_renders_rows_with_all_columns(tmp_path: Path) -> None:
     assert re.search(r"[A-Z][a-z]{2} \d{1,2}, 2026", html)
 
 
-def test_default_sort_is_fix_priority(tmp_path: Path) -> None:
+def test_default_sort_is_newest_and_fix_next_is_a_chip(tmp_path: Path) -> None:
     ui = seeded(tmp_path)
-    for query in ("", "?sort=fix", "?sort=nonsense"):
-        ids = listed(ui, query)
-        prio = [fix_priority(ui.videos[i], ui.cards[i]) for i in ids]
-        assert prio == sorted(prio, reverse=True), query
+    for query in ("", "?sort=nonsense", "?sort=date", "?sort=newest"):
+        dates = [ui.videos[i].published_at for i in listed(ui, query)]
+        assert dates == sorted(dates, reverse=True), query
+    ids = listed(ui, "?sort=fix&dir=asc")  # a direction means nothing for Fix next
+    prio = [fix_priority(ui.videos[i], ui.cards[i]) for i in ids]
+    assert prio == sorted(prio, reverse=True)
+    html = ui.client.get("/videos").text
+    assert 'aria-label="Sort by"' not in html
+    assert re.search(r'class="chip" id="chip-fix" href="/videos\?sort=fix"[^>]*>Fix next first<', html)
+    on = ui.client.get("/videos?sort=fix").text
+    assert re.search(r'class="chip active" id="chip-fix" href="/videos" aria-current="true"', on)
+
+
+def test_column_titles_sort_and_a_second_click_reverses(tmp_path: Path) -> None:
+    ui = seeded(tmp_path)
+    head = ui.client.get("/videos").text.split("<thead>")[1].split("</thead>")[0]
+    assert re.search(r'<th class="col-date" scope="col" aria-sort="descending"><a class="th-sort active" '
+                     r'href="/videos\?dir=asc" title="Order by Date, oldest first">Date<', head)
+    assert 'href="/videos?sort=title" title="Order by Video, A to Z">Video<' in head
+    assert 'href="/videos?sort=views" title="Order by Views, most first">Views<' in head
+    assert 'href="/videos?sort=score" title="Order by SEO score, lowest first">SEO score<' in head
+    assert head.count("aria-sort=") == 1
+    titles = [ui.videos[i].title.casefold() for i in listed(ui, "?sort=title")]
+    assert titles == sorted(titles)
+    back = [ui.videos[i].title.casefold() for i in listed(ui, "?sort=title&dir=desc")]
+    assert back == sorted(back, reverse=True)
+    views = [ui.videos[i].view_count for i in listed(ui, "?sort=views&dir=asc")]
+    assert views == sorted(views)
+    scores = [ui.cards[i].score for i in listed(ui, "?sort=score&dir=desc")]
+    assert scores == sorted(scores, reverse=True)
+    oldest = [ui.videos[i].published_at for i in listed(ui, "?dir=asc")]
+    assert oldest == sorted(oldest)
+    flipped = ui.client.get("/videos?sort=views").text.split("<thead>")[1].split("</thead>")[0]
+    assert re.search(r'aria-sort="descending"><a class="th-sort active" href="/videos\?sort=views&amp;dir=asc"', flipped)
+    assert listed(ui, "?sort=views&dir=sideways") == listed(ui, "?sort=views")
 
 
 def test_sort_score_views_newest(tmp_path: Path) -> None:
@@ -135,8 +166,8 @@ def test_filter_chips_are_links_that_mark_the_active_one(tmp_path: Path) -> None
     html = ui.client.get("/videos?visibility=public&sort=views").text
     assert re.search(r'class="chip active" href="/videos\?sort=views&amp;visibility=public"', html)
     assert 'href="/videos?sort=views&amp;visibility=private"' in html
-    assert re.search(r'class="chip active" href="/videos\?sort=views&amp;visibility=public"'
-                     r'[^>]*>Most views', html)
+    assert re.search(r'class="th-sort active" href="/videos\?sort=views&amp;dir=asc&amp;visibility=public"'
+                     r'[^>]*>Views<', html)
 
 
 def test_pagination_with_120_videos(tmp_path: Path) -> None:

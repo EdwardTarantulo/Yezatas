@@ -35,4 +35,4 @@ def test_bulk_edit_has_its_own_item_and_a_button_on_videos(ui) -> None:
     html = ui.client.get("/bulk").text
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/bulk"]
     videos = ui.client.get("/videos").text
-    assert 'id="bulk-link" href="/bulk"' in videos and "Sort by" in videos
+    assert 'id="bulk-link" href="/bulk"' in videos and 'id="chip-fix"' in videos

@@ -117,7 +117,7 @@ def test_unscored_videos_show_a_dash_and_say_why_in_plain_words(tmp_path: Path) 
 def test_a_video_with_too_few_peers_says_so(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
     seed(ui.config, catalog(5))
-    cell = ratio_cell(rows(ui.client.get("/videos").text)[0])
+    cell = ratio_cell(rows(ui.client.get("/videos?dir=asc").text)[0])
     assert "Not enough other public videos" in cell and "—" in cell
 
 
@@ -141,12 +141,15 @@ def test_the_vs_norm_sort_puts_the_highest_ratio_first_and_unscored_last(tmp_pat
     assert order[-3:] == sorted(order[-3:])  # in a stable order
 
 
-def test_the_sort_chip_exists_and_unknown_values_still_fall_back(tmp_path: Path) -> None:
+def test_the_vs_norm_title_sorts_and_unknown_values_still_fall_back(tmp_path: Path) -> None:
     ui = content_ui(tmp_path)
     html = ui.client.get("/videos?sort=norm").text
-    sort_row = html.split('aria-label="Sort by"')[1].split("</div>")[0]
-    assert re.search(r'class="chip active" href="/videos\?sort=norm" aria-current="true">vs norm<', sort_row)
-    assert sort_row.index(">Newest<") < sort_row.index(">vs norm<")
+    head = html.split("<thead>")[1].split("</thead>")[0]
+    assert re.search(r'<th class="col-ratio" scope="col" aria-sort="descending"><a class="th-sort active" '
+                     r'href="/videos\?sort=norm&amp;dir=asc"[^>]*>vs norm<', head)
+    assert head.index(">Date<") < head.index(">vs norm<")
+    low_first = ids_in(rows(ui.client.get("/videos?sort=norm&dir=asc").text))
+    assert low_first[0] == vid(LOW)
     odd = ui.client.get("/videos?sort=nonsense&outliers=maybe")
     assert odd.status_code == 200
     assert ids_in(rows(odd.text)) == ids_in(rows(ui.client.get("/videos").text))
@@ -170,8 +173,8 @@ def test_outliers_combine_with_sort_and_other_filters_and_keep_paging(tmp_path: 
     ui = content_ui(tmp_path)
     html = ui.client.get("/videos?outliers=1&sort=norm").text
     assert ids_in(rows(html)) == [vid(HIGH), vid(MID)]
-    sort_row = html.split('aria-label="Sort by"')[1].split("</div>")[0]
-    assert 'href="/videos?sort=views&amp;outliers=1"' in sort_row  # the filter survives a re-sort
+    head = html.split("<thead>")[1].split("</thead>")[0]
+    assert 'href="/videos?sort=views&amp;outliers=1"' in head  # the filter survives a re-sort
     none = ui.client.get("/videos?outliers=1&visibility=private").text
     assert 'id="no-videos"' in none and "Clear all filters" in none
     page1 = ui.client.get("/videos?sort=norm").text

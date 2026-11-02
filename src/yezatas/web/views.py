@@ -58,14 +58,20 @@ BANDS: tuple[tuple[str, str, str], ...] = (
     ("poor", "Needs work", "under 50"),
 )
 BAND_KEYS = tuple(b[0] for b in BANDS)
-SORTS: tuple[tuple[str, str], ...] = (
-    ("fix", "Fix next"),
-    ("score", "Lowest score"),
-    ("views", "Most views"),
-    ("newest", "Newest"),
-    ("norm", "vs norm"),
+# the sortable columns: key, title, the first click's direction, and how each direction reads
+SORTS: tuple[tuple[str, str, str, str, str], ...] = (
+    ("title", "Video", "asc", "A to Z", "Z to A"),
+    ("visibility", "Visibility", "asc", "A to Z", "Z to A"),
+    ("date", "Date", "desc", "oldest first", "newest first"),
+    ("views", "Views", "desc", "fewest first", "most first"),
+    ("norm", "vs norm", "desc", "lowest first", "highest first"),
+    ("score", "SEO score", "asc", "lowest first", "highest first"),
 )
-SORT_KEYS = tuple(s[0] for s in SORTS)
+DEFAULT_SORT = "date"
+SORT_KEYS = ("fix", *(s[0] for s in SORTS))
+SORT_ALIASES = {"newest": "date"}  # links from before the columns were sortable
+FIRST_DIRECTION = {s[0]: s[2] for s in SORTS}
+DIRECTIONS = ("asc", "desc")
 VISIBILITIES: tuple[tuple[str, str], ...] = (
     ("all", "All"),
     ("public", "Public"),
@@ -258,14 +264,16 @@ def _page_number(raw: str | None) -> int:
         return 1
 
 
-def listing_href(q: str = "", sort: str = "fix", visibility: str = "all", band: str = "",
-                 check: str = "", page: int = 1, outliers: bool = False) -> str:
+def listing_href(q: str = "", sort: str = DEFAULT_SORT, visibility: str = "all", band: str = "",
+                 check: str = "", page: int = 1, outliers: bool = False, direction: str = "") -> str:
     """A /videos URL that carries only the non-default parameters."""
     params: list[tuple[str, str]] = []
     if q:
         params.append(("q", q))
-    if sort != "fix":
+    if sort != DEFAULT_SORT:
         params.append(("sort", sort))
+    if sort in FIRST_DIRECTION and direction in DIRECTIONS and direction != FIRST_DIRECTION[sort]:
+        params.append(("dir", direction))
     if visibility != "all":
         params.append(("visibility", visibility))
     if band:
@@ -287,6 +295,22 @@ class Chip:
 
 
 @dataclass
+class SortColumn:
+    """A column title that sorts the table: `href` sorts by it, or reverses it when it is the active one."""
+    key: str
+    label: str
+    href: str
+    active: bool
+    direction: str  # the table's direction when active, else ""
+    arrow: str  # the direction the arrow shows: the current one, or the one a click gives
+    title: str
+
+    @property
+    def aria_sort(self) -> str:
+        return ("ascending" if self.direction == "asc" else "descending") if self.active else ""
+
+
+@dataclass
 class Listing:
     entries: list[Entry]
     total: int
@@ -300,7 +324,9 @@ class Listing:
     check_title: str
     visibility_chips: list[Chip] = field(default_factory=list)
     band_chips: list[Chip] = field(default_factory=list)
-    sort_chips: list[Chip] = field(default_factory=list)
+    direction: str = ""
+    columns: dict[str, SortColumn] = field(default_factory=dict)
+    fix_chip: Chip | None = None
     outliers: bool = False
     outlier_chip: Chip | None = None
     prev_href: str = ""
@@ -330,22 +356,40 @@ def _failed_check(entry: Entry, check_id: str) -> CheckResult | None:
     return None
 
 
-def _sort(entries: list[Entry], sort: str) -> list[Entry]:
-    if sort == "score":
-        return sorted(entries, key=lambda e: (e.card.score, -e.video.view_count, e.video.video_id))
-    if sort == "views":
-        return sorted(entries, key=lambda e: (-e.video.view_count, e.video.video_id))
-    if sort == "newest":
-        return sorted(entries, key=lambda e: (e.video.published_at or "", e.video.video_id),
-                      reverse=True)
-    if sort == "norm":  # highest ratio first; videos without a ratio last
-        def norm_key(e: Entry) -> tuple[int, float, str]:
-            s = e.score
-            ratio = s.ratio if s is not None and s.status == "scored" else None
-            return (1, 0.0, e.video.video_id) if ratio is None else (0, -ratio, e.video.video_id)
+def _ratio(entry: Entry) -> float | None:
+    s = entry.score
+    return s.ratio if s is not None and s.status == "scored" else None
 
-        return sorted(entries, key=norm_key)
-    return sorted(entries, key=lambda e: (-e.priority, -e.card.missing, e.video.video_id))
+
+_SORT_KEYS: dict[str, Callable[[Entry], tuple[Any, str]]] = {
+    "title": lambda e: ((e.video.title or "").casefold(), e.video.video_id),
+    "visibility": lambda e: (e.video.privacy_status or "", e.video.video_id),
+    "date": lambda e: (e.video.published_at or "", e.video.video_id),
+    "views": lambda e: (e.video.view_count, e.video.video_id),
+    "score": lambda e: (e.card.score, e.video.video_id),
+}
+
+
+def _sort(entries: list[Entry], sort: str, direction: str = "") -> list[Entry]:
+    if sort == "fix":
+        return sorted(entries, key=lambda e: (-e.priority, -e.card.missing, e.video.video_id))
+    desc = (direction or FIRST_DIRECTION.get(sort, "desc")) == "desc"
+    if sort == "norm":  # videos without a ratio come last either way, in a stable order
+        scored = [e for e in entries if _ratio(e) is not None]
+        rest = [e for e in entries if _ratio(e) is None]
+        scored.sort(key=lambda e: (_ratio(e) or 0.0, e.video.video_id), reverse=desc)
+        return scored + sorted(rest, key=lambda e: e.video.video_id)
+    return sorted(entries, key=_SORT_KEYS.get(sort, _SORT_KEYS[DEFAULT_SORT]), reverse=desc)
+
+
+def _column(key: str, label: str, first: str, words: tuple[str, str], sort: str, direction: str,
+            href: Callable[..., str]) -> SortColumn:
+    active = key == sort
+    target = ("asc" if direction == "desc" else "desc") if active else first
+    reads = words[0] if target == "asc" else words[1]
+    return SortColumn(key=key, label=label, href=href(sort=key, direction=target), active=active,
+                      direction=direction if active else "", arrow=direction if active else first,
+                      title=f"Order by {label}, {reads}")
 
 
 def build_listing(entries: Sequence[Entry], params: Mapping[str, str],
@@ -354,7 +398,9 @@ def build_listing(entries: Sequence[Entry], params: Mapping[str, str],
 
     `scores` (video id -> OutlierScore) feeds the vs norm column, its sort and the Outliers filter."""
     q = (params.get("q") or "").strip()[:MAX_QUERY_CHARS]
-    sort = _pick(params.get("sort"), SORT_KEYS, "fix")
+    raw_sort = params.get("sort")
+    sort = _pick(SORT_ALIASES.get(raw_sort or "", raw_sort), SORT_KEYS, DEFAULT_SORT)
+    direction = "" if sort == "fix" else _pick(params.get("dir"), DIRECTIONS, FIRST_DIRECTION[sort])
     visibility = _pick(params.get("visibility"), VISIBILITY_KEYS, "all")
     band = _pick(params.get("band"), BAND_KEYS, "")
     check = (params.get("check") or "").strip()[:100]
@@ -382,7 +428,7 @@ def build_listing(entries: Sequence[Entry], params: Mapping[str, str],
             if check_title:
                 break
         rows = [e for e in rows if _failed_check(e, check) is not None]
-    rows = _sort(rows, sort)
+    rows = _sort(rows, sort, direction)
 
     total = len(rows)
     pages = max(1, -(-total // PAGE_SIZE))
@@ -391,18 +437,22 @@ def build_listing(entries: Sequence[Entry], params: Mapping[str, str],
 
     def href(**changes: object) -> str:
         args: dict[str, object] = {"q": q, "sort": sort, "visibility": visibility, "band": band,
-                                   "check": check, "outliers": only_outliers, "page": 1}
+                                   "check": check, "outliers": only_outliers, "page": 1,
+                                   "direction": direction}
         args.update(changes)
         return listing_href(**args)  # type: ignore[arg-type]
 
     listing = Listing(
-        entries=shown, total=total, page=page, pages=pages, q=q, sort=sort,
+        entries=shown, total=total, page=page, pages=pages, q=q, sort=sort, direction=direction,
         visibility=visibility, band=band, check=check, check_title=check_title,
         visibility_chips=[Chip(label, href(visibility=key), key == visibility)
                           for key, label in VISIBILITIES],
         band_chips=[Chip("Any score", href(band=""), band == "")]
         + [Chip(f"{label} ({rng})", href(band=key), key == band) for key, label, rng in BANDS],
-        sort_chips=[Chip(label, href(sort=key), key == sort) for key, label in SORTS],
+        columns={key: _column(key, label, first, (asc, desc), sort, direction, href)
+                 for key, label, first, asc, desc in SORTS},
+        fix_chip=Chip("Fix next first", href(sort=DEFAULT_SORT, direction="") if sort == "fix"
+                      else href(sort="fix", direction=""), sort == "fix"),
         outliers=only_outliers,
         outlier_chip=Chip(f"Outliers ({ratio_label(OUTLIER_THRESHOLD)}+)",
                           href(outliers=not only_outliers), only_outliers),

@@ -1,6 +1,9 @@
 {% extends "shell.html" %}
 {% from "_macros.html" import icon, score_badge, thumb %}
 {% block title %}Videos - Yezatas{% endblock %}
+{% macro sort_th(col, cls) -%}
+<th class="{{ cls }}" scope="col"{% if col.active %} aria-sort="{{ col.aria_sort }}"{% endif %}><a class="th-sort{% if col.active %} active{% endif %}" href="{{ col.href }}" title="{{ col.title }}">{{ col.label }}<span class="sort-arrow" aria-hidden="true">{{ '&uarr;'|safe if col.arrow == 'asc' else '&darr;'|safe }}</span></a></th>
+{%- endmacro %}
 {% block content %}
 <div class="page-head"><h1 class="page-title">Videos</h1><a class="button secondary" id="bulk-link" href="/bulk" title="Find and replace, or add a block, in many descriptions at once (drafts only)">{{ icon('bulk') }}<span>Bulk edit</span></a></div>
 
@@ -11,10 +14,7 @@
   <div class="chip-row" role="group" aria-label="SEO score">
     {% for chip in listing.band_chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }}</a>{% endfor %}
     <a class="chip{% if listing.outlier_chip.active %} active{% endif %}" id="chip-outliers" href="{{ listing.outlier_chip.href }}"{% if listing.outlier_chip.active %} aria-current="true"{% endif %} title="Videos with at least this many times the views of the videos published around them">{{ listing.outlier_chip.label }}</a>
-  </div>
-  <div class="chip-row" role="group" aria-label="Sort by">
-    <span class="chip-label">Sort by</span>
-    {% for chip in listing.sort_chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }}</a>{% endfor %}
+    <a class="chip{% if listing.fix_chip.active %} active{% endif %}" id="chip-fix" href="{{ listing.fix_chip.href }}"{% if listing.fix_chip.active %} aria-current="true"{% endif %} title="Videos where a fix gains the most first: views times the points they miss">{{ listing.fix_chip.label }}</a>
   </div>
   {% if listing.check %}
   <div class="chip-row">
@@ -37,12 +37,12 @@
 <table class="vtable">
   <thead>
     <tr>
-      <th class="col-video" scope="col">Video</th>
-      <th class="col-vis" scope="col">Visibility</th>
-      <th class="col-date" scope="col">Date</th>
-      <th class="col-num" scope="col">Views</th>
-      <th class="col-ratio" scope="col">vs norm</th>
-      <th class="col-score" scope="col">SEO score</th>
+      {{ sort_th(listing.columns['title'], 'col-video') }}
+      {{ sort_th(listing.columns['visibility'], 'col-vis') }}
+      {{ sort_th(listing.columns['date'], 'col-date') }}
+      {{ sort_th(listing.columns['views'], 'col-num') }}
+      {{ sort_th(listing.columns['norm'], 'col-ratio') }}
+      {{ sort_th(listing.columns['score'], 'col-score') }}
     </tr>
   </thead>
   <tbody>

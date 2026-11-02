@@ -394,6 +394,12 @@ a.chip:hover { background: var(--line); }
 .result-count { color: var(--muted); margin: 0 0 8px; }
 .vtable { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .vtable th { text-align: left; font-weight: 500; color: var(--muted); font-size: 13px; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+.th-sort { display: inline-flex; align-items: center; gap: 4px; color: inherit; text-decoration: none; border-radius: 4px; }
+.th-sort:hover, .th-sort:focus-visible { color: var(--text); }
+.th-sort.active { color: var(--text); font-weight: 600; }
+.sort-arrow { opacity: 0; font-size: 12px; }
+.th-sort:hover .sort-arrow, .th-sort:focus-visible .sort-arrow { opacity: 0.45; }
+.th-sort.active .sort-arrow { opacity: 1; }
 .vtable td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .vtable .col-vis { width: 110px; }
 .vtable .col-date { width: 120px; }
