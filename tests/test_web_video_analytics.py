@@ -82,3 +82,50 @@ def test_the_view_without_views_says_so() -> None:
     assert set(view.bars) == {"h-0"} and (view.first_day, view.last_day) == ("Jun 1", "Jun 28")
     assert view.up_to == "Jun 28, 2026" and view.sources == () and view.countries == ()
     assert build_video_analytics(None, 330) is None
+
+
+def stored(ui, hours_ago: float) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from yezatas.videostats import save_video_stats
+    when = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+    days = tuple(Day(f"2026-06-{d:02d}", 1, 1, 0, 0) for d in range(1, 29))
+    save_video_stats(ui.config.home, VideoStats(VID, when, "2026-06-28", days, (), (), 3))
+
+
+def test_the_card_asks_to_read_itself_when_nothing_is_stored(tmp_path: Path) -> None:
+    ui, _ = make_today_ui(tmp_path)
+    part = card(ui)
+    assert re.search(rf'<form class="va-refresh" method="post" action="/videos/{VID}/analytics/refresh" '
+                     r'data-auto-refresh>', part)
+    assert '<input type="hidden" name="auto" value="1">' in part
+    assert '<button type="submit" class="link-button">Refresh</button>' in part
+
+
+def test_a_fresh_read_is_not_repeated_and_an_old_one_is(tmp_path: Path) -> None:
+    ui, _ = make_today_ui(tmp_path)
+    stored(ui, 1)
+    fresh = card(ui)
+    assert "data-auto-refresh" not in fresh and 'name="auto"' not in fresh and 'id="video-analytics-when"' in fresh
+    stored(ui, 13)
+    assert "data-auto-refresh" in card(ui)
+
+
+def test_not_connected_never_reads_itself(tmp_path: Path) -> None:
+    ui, _ = make_today_ui(tmp_path, connected=False)
+    assert "data-auto-refresh" not in card(ui)
+
+
+def test_the_read_on_opening_comes_back_without_the_jump(tmp_path: Path) -> None:
+    reader = VideoReader()
+    ui, _ = make_today_ui(tmp_path, reader=reader)
+    resp = ui.post(f"/videos/{VID}/analytics/refresh", data={"auto": "1"}, follow_redirects=False)
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{VID}"
+    ui.web.video_stats_job.wait()
+    assert len(reader.calls) == 3
+    assert "data-auto-refresh" not in card(ui)  # just read: not due again
+
+
+def test_the_page_script_submits_a_due_form_once() -> None:
+    js = (Path(__file__).resolve().parents[1] / "src" / "yezatas" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    assert 'document.querySelector("form[data-auto-refresh]")' in js and "autoForm.submit()" in js

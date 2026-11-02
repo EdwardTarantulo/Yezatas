@@ -4,7 +4,7 @@
   <div class="card-title-row">
     <h2 id="h-va">Analytics</h2>
     <span class="muted">Last 28 days{% if va %} &middot; data up to {{ va.up_to }}{% endif %}</span>
-    {% if vs.connected %}<form class="va-refresh" method="post" action="/videos/{{ video.video_id|urlencode }}/analytics/refresh"><input type="hidden" name="csrf" value="{{ csrf }}">{% if vs.when %}<span class="muted">Read {{ vs.when }}</span>{% endif %}<button type="submit" class="button secondary"{% if vs.running or vs.busy %} disabled{% endif %}>Refresh</button></form>{% endif %}
+    {% if vs.connected %}<form class="va-refresh" method="post" action="/videos/{{ video.video_id|urlencode }}/analytics/refresh"{% if vs.auto %} data-auto-refresh{% endif %}><input type="hidden" name="csrf" value="{{ csrf }}">{% if vs.auto %}<input type="hidden" name="auto" value="1">{% endif %}{% if vs.when %}<span class="muted" id="video-analytics-when">Read {{ vs.when }}</span>{% endif %}<button type="submit" class="link-button"{% if vs.running or vs.busy %} disabled{% endif %}>Refresh</button></form>{% endif %}
   </div>
   {% if vs.running %}
   <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="video_stats-msg" role="status" aria-live="polite">{{ vs.message or 'Starting…' }}</span></p>
@@ -33,7 +33,7 @@
     {% endfor %}
   </div>
   {% else %}
-  <p class="empty-note" id="video-analytics-empty">Not read yet. Refresh reads this video's last 28 days from YouTube Analytics: three queries on the Analytics quota, not your daily Data API budget. Nothing is written to YouTube.</p>
+  <p class="empty-note" id="video-analytics-empty">Not read yet. This video's last 28 days are read from YouTube Analytics when you open this page (at most every 12 hours) or press Refresh: three queries on the Analytics quota, not your daily Data API budget. Nothing is written to YouTube.</p>
   {% endif %}
   <p class="va-note">Impressions and click-through rate are not in YouTube's API: see them in YouTube Studio, under Analytics, then Reach.</p>
 </section>

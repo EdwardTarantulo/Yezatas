@@ -466,6 +466,9 @@ a.chip:hover { background: var(--line); }
 .vfact-fix { padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 700; line-height: 16px; letter-spacing: 0.04em; text-transform: uppercase; background: var(--warn); color: var(--surface); }
 .va-card .card-title-row { flex-wrap: wrap; gap: 4px 12px; }
 .va-refresh { display: flex; align-items: center; gap: 10px; margin: 0 0 0 auto; }
+.link-button { padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-weight: 500; cursor: pointer; }
+.link-button:hover, .link-button:focus-visible { text-decoration: underline; }
+.link-button:disabled { color: var(--muted); cursor: default; text-decoration: none; }
 .va-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius); margin: 4px 0 16px; }
 .va-stat { display: flex; flex-direction: column; gap: 1px; padding: 10px 14px; min-width: 0; }
 .va-stat + .va-stat { border-left: 1px solid var(--line); }

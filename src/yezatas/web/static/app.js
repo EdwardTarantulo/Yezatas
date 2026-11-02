@@ -97,6 +97,19 @@
     });
   });
 
+  // The video page's Analytics card reads itself on opening when the server marks its form as due (numbers
+  // missing or old). At most once per video every 12 hours in this tab, so a failed read is not retried on every visit.
+  var autoForm = document.querySelector("form[data-auto-refresh]");
+  if (autoForm) {
+    var autoKey = "yz-auto-read:" + autoForm.getAttribute("action");
+    var tried = 0;
+    try { tried = Number(window.sessionStorage.getItem(autoKey) || 0); } catch (e) { tried = 0; }
+    if (!tried || Date.now() - tried > 12 * 3600 * 1000) {
+      try { window.sessionStorage.setItem(autoKey, String(Date.now())); } catch (e) { /* storage off */ }
+      autoForm.submit();
+    }
+  }
+
   // Coming back with the Back button must not show disabled buttons or stale state.
   window.addEventListener("pageshow", function (e) { if (e.persisted) window.location.reload(); });
 

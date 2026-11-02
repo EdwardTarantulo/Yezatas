@@ -17,7 +17,7 @@ import time
 import webbrowser
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Sequence
 from urllib.parse import quote, urlencode
@@ -156,6 +156,7 @@ ANALYTICS_DISABLED = ("The YouTube Analytics API is not enabled in your Google C
 ANALYTICS_SIGN_IN = ("Google did not accept the search-terms sign-in. Click Connect search terms and "
                      "sign in again.")
 CHANNEL_STATS_TIMEOUT_SECONDS = 5 * 60.0
+VIDEO_STATS_AUTO_HOURS = 12  # the video page reads its Analytics on opening when the stored read is older
 CHANNEL_STATS_TIMEOUT_MESSAGE = ("Reading the channel's numbers took more than 5 minutes, so Yezatas "
                                  "stopped waiting. Try again.")
 ANALYTICS_SIGN_IN_CHANNEL = ("Google did not accept the YouTube Analytics sign-in. Click Connect "
@@ -2453,13 +2454,28 @@ def create_app(
         snap = state.video_stats_state()
         mine = state.video_stats_video == video_id
         saved = videostats_mod.load_video_stats(config.home, video_id)
+        connected = auth.can_read_analytics(config)
+        failed = snap.message if snap.status == "failed" and mine else ""
         return {
-            "connected": auth.can_read_analytics(config),
+            "connected": connected,
             "running": snap.running and mine, "busy": snap.running and not mine, "message": snap.message,
-            "failed": snap.message if snap.status == "failed" and mine else "",
+            "failed": failed,
             "when": _local_time(saved.fetched_at) if saved else "",
             "view": build_video_analytics(saved, duration),
+            "auto": connected and not snap.running and not failed and _stats_due(saved),
         }
+
+    def _stats_due(saved: "videostats_mod.VideoStats | None") -> bool:
+        """True when this video's numbers were never read or were read more than VIDEO_STATS_AUTO_HOURS ago."""
+        if saved is None:
+            return True
+        try:
+            read = datetime.fromisoformat(saved.fetched_at)
+        except ValueError:
+            return True
+        if read.tzinfo is None:
+            read = read.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - read > timedelta(hours=VIDEO_STATS_AUTO_HOURS)
 
     @app.get("/")
     def index(request: Request) -> Response:
@@ -4335,7 +4351,8 @@ def create_app(
 
     @app.post("/videos/{video_id}/analytics/refresh")
     async def refresh_video_analytics(request: Request, video_id: str) -> Response:
-        await read_form(request)
+        form = await read_form(request)
+        auto = str(form.get("auto") or "") == "1"  # sent by the page on opening: no jump to the card
 
         def exists() -> bool:
             with Store(config.catalog_db) as store:
@@ -4350,7 +4367,7 @@ def create_app(
                         "Connect Analytics on the Analytics page first.")
         elif not state.start_video_stats(creds, video_id):
             flash(request, "error", "Another video's numbers are being read. Wait for it to finish.")
-        return see_other(f"/videos/{quote(video_id)}#video-analytics")
+        return see_other(f"/videos/{quote(video_id)}" + ("" if auto else "#video-analytics"))
 
     @app.post("/videos/{video_id}/analytics/done")
     async def dismiss_video_analytics(request: Request, video_id: str) -> Response:
