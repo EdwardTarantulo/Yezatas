@@ -535,7 +535,7 @@ def test_content_table_and_dashboard_point_at_drafts(tmp_path: Path) -> None:
     assert "1 change waiting for review" in dash and 'href="/changes"' in dash
     save(ui, V2)
     assert "2 changes waiting for review" in ui.client.get("/").text
-    assert 'id="nav-drafts">2<' in ui.client.get("/videos").text
+    assert 'id="nav-drafts" title="2 drafts to review">2<' in ui.client.get("/videos").text
 
 
 # --- safety rules -----------------------------------------------------------------------------------

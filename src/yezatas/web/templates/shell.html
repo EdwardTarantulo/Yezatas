@@ -21,7 +21,7 @@
     {% if not group %}<div class="nav-spacer"></div>{% endif %}
     <div class="nav-group">{% if group %}<p class="nav-label">{{ group }}</p>{% endif %}
     {% for key, label, href in items %}
-    <a class="nav-item{% if active|default('') == key %} active{% endif %}" href="{{ href }}"{% if active|default('') == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span>{% if key == 'changes' and draft_count|default(0) %}<span class="nav-count" id="nav-drafts">{{ draft_count }}<span class="visually-hidden"> draft{{ '' if draft_count == 1 else 's' }}</span></span>{% endif %}</a>
+    <a class="nav-item{% if active|default('') == key %} active{% endif %}" href="{{ href }}"{% if active|default('') == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span>{% set nc = (nav_counts|default({})).get(key) %}{% if nc %}<span class="nav-count{% if nc.tone == 'warn' %} warn{% endif %}" id="{{ 'nav-drafts' if key == 'changes' else 'nav-count-' ~ key }}" title="{{ nc.text }}">{{ nc.shown }}<span class="visually-hidden"> {{ nc.noun }}</span></span>{% endif %}</a>
     {% endfor %}
     {% if not group %}<p class="nav-promise">Nothing goes to YouTube until you approve it.</p>{% endif %}
     </div>

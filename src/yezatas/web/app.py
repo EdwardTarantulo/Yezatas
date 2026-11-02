@@ -10,6 +10,7 @@ threads.
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import threading
 import time
@@ -62,6 +63,7 @@ from .views import stale_youtube_keys
 from .video_analytics_view import build_video_analytics
 from .category_view import build_category_view
 from .pinned_view import build_pinned_view
+from .nav_counts import build_nav_counts
 from ..store import AdCheck, CategoryCheck, OutlierReport, PinnedComment, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
@@ -2141,7 +2143,7 @@ def create_app(
             pull = store.latest_pull()
         entries = make_entries(videos, score_catalog(videos, stale, judged, pinned_states))
         return {
-            "entries": entries, "as_of": pull_moment(pull) if pull is not None else None,
+            "entries": entries, "as_of": pull_moment(pull) if pull is not None else None, "stale": stale,
             "latest_pull": {"videos": latest[0], "when": _local_time(latest[1])},
             "quota": {"used": used, "remaining": remaining, "budget": config.daily_quota_budget},
         }
@@ -2154,9 +2156,37 @@ def create_app(
         with Store(config.catalog_db) as store:
             return frozenset(row.video_id for row in store.list_drafts())
 
+    nav_cache: dict[str, Any] = {"key": None, "numbers": (0, 0, 0, 0)}
+
+    def nav_numbers() -> tuple[int, int, int, int]:
+        """(questions to answer, videos scoring under 50, translations out of date, broken links) for the
+        sidebar. Scoring the catalog is the slow part, so the numbers are kept until the database changes."""
+        try:
+            info = os.stat(config.catalog_db)
+            key: Any = (info.st_size, info.st_mtime_ns)
+        except OSError:
+            key = None
+        if key is not None and nav_cache["key"] == key:
+            return nav_cache["numbers"]
+        with Store(config.catalog_db) as store:
+            questions = len(store.comments_to_answer(limit=100))
+            entries = links_mod.inventory(store.list_videos(), store.latest_link_checks())
+        broken = sum(1 for e in entries if e.check is not None and e.check.status == "broken")
+        data = catalog_data()
+        poor = stale = 0
+        if data is not None:
+            poor = sum(1 for e in data["entries"] if e.band == "poor")
+            stale = sum(len(keys) for keys in data["stale"].values())
+        # The key read before counting: a write during the count makes the next page count again.
+        nav_cache["key"], nav_cache["numbers"] = key, (questions, poor, stale, broken)
+        return nav_cache["numbers"]
+
     def render(request: Request, name: str, extra: dict[str, Any],
                status_code: int = 200) -> Response:
-        context: dict[str, Any] = {"csrf": request.state.csrf, "draft_count": len(draft_ids()),
+        drafts = len(draft_ids())
+        questions, poor, stale, broken = nav_numbers()
+        context: dict[str, Any] = {"csrf": request.state.csrf, "draft_count": drafts, "nav_counts": build_nav_counts(
+            questions=questions, poor_videos=poor, stale_translations=stale, broken_links=broken, drafts=drafts),
                                    **extra}
         # The setup page shows its own flash messages next to the step they belong to.
         if "flash" not in extra and "shell_flash" not in extra:
