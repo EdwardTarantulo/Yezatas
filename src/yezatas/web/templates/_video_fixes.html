@@ -7,14 +7,16 @@
   {% if card.failed %}
   <p class="muted">{{ card.failed|length }} check{{ '' if card.failed|length == 1 else 's' }} to fix, +{{ card.missing }} points possible.</p>
   <ul class="vfix-list">
-    {% for c in card.failed %}
+    {% set go_map = {'description_chapters': ('#tool-transcript', 'Transcript and chapters'), 'localizations': ('#tool-translations', 'Translations'), 'thumbnail_hd': ('#tool-packaging', 'Packaging'), 'title': ('#f-title', 'Edit title'), 'description': ('#f-description', 'Edit description'), 'tags': ('#f-tags', 'Edit tags')} %}
+    {% for c in card.failed %}{% set go = go_map.get(c.check_id) or go_map.get(c.category) %}{% if loop.index == 5 %}</ul><details class="vfix-more"><summary>Show {{ card.failed|length - 4 }} more</summary><ul class="vfix-list">{% endif %}
     <li class="vfix-item">
-      <a class="vfix-title" href="#check-{{ c.check_id }}">{{ c.title }}</a>
       <span class="vfix-points">+{{ c.max_points - c.points }}</span>
+      <a class="vfix-title" href="#check-{{ c.check_id }}">{{ c.title }}</a>
       {% if c.fix %}<p class="vfix-fix">{{ c.fix }}</p>{% endif %}
+      {% if go %}<a class="vfix-go" href="{{ go[0] }}">{{ go[1] }}</a>{% else %}<a class="vfix-go" href="https://studio.youtube.com/video/{{ video.video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">YouTube Studio</a>{% endif %}
     </li>
     {% endfor %}
-  </ul>
+  </ul>{% if card.failed|length > 4 %}</details>{% endif %}
   {% else %}
   <p>Every check passes. Nothing to fix.</p>
   {% endif %}

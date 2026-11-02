@@ -166,3 +166,13 @@
   openTarget();
   window.addEventListener("hashchange", openTarget);
 })();
+
+// Phone menu: the sidebar is one scrolling row there. Bring the current page's chip into view (centred) without
+// scrolling the page itself.
+(function () {
+  "use strict";
+  var bar = document.querySelector(".sidebar");
+  var active = bar && bar.querySelector(".nav-item.active");
+  if (!active || !window.matchMedia("(max-width: 899px)").matches) return;
+  bar.scrollLeft = Math.max(0, active.offsetLeft - (bar.clientWidth - active.offsetWidth) / 2);
+})();

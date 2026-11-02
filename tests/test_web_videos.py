@@ -269,3 +269,14 @@ def test_csp_allows_only_the_thumbnail_host_for_images(tmp_path: Path) -> None:
         csp = ui.client.get(path).headers["content-security-policy"]
         assert "img-src 'self' https://i.ytimg.com;" in csp
         assert "script-src 'self';" in csp and "style-src 'self';" in csp
+
+
+def test_what_to_fix_links_each_fix_to_where_it_is_made(tmp_path: Path) -> None:
+    ui = seeded(tmp_path, 40)
+    vid = next(i for i, card in ui.cards.items() if any(c.check_id == "localizations" for c in card.failed))
+    html = ui.client.get(f"/videos/{vid}").text
+    part = html[html.index('id="what-to-fix"'):html.index('id="edit"')]
+    assert 'class="vfix-go" href="#tool-translations">Translations</a>' in part
+    failed = ui.cards[vid].failed
+    if len(failed) > 4:
+        assert f"Show {len(failed) - 4} more" in part
