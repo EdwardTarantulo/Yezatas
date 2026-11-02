@@ -65,7 +65,7 @@ def test_video_page_has_an_edit_form_prefilled_with_the_catalog_text(tmp_path: P
     assert 'id="edit"' in html and f'action="/videos/{V1}/draft"' in html
     assert 'name="title" value="Repotting cactus #1"' in html
     assert re.search(r'<textarea[^>]*rows="14"[^>]*>\s*How to repot cactus number 1\.</textarea>', html)
-    assert 'name="tags" value="cactus, garden"' in html
+    assert 'spellcheck="false">cactus, garden</textarea>' in html
     assert "Review changes" not in html
     assert html.index('id="edit"') < html.index('id="group-')
     assert "<script>" not in html and "style=" not in html
@@ -76,7 +76,7 @@ def test_edit_form_is_prefilled_with_the_draft_and_shows_its_issues(tmp_path: Pa
     save(ui, V1, title="Bad <title>", description="Draft text", tags=["a", "b"])
     html = ui.client.get(f"/videos/{V1}").text
     assert 'value="Bad &lt;title&gt;"' in html
-    assert "Draft text</textarea>" in html and 'name="tags" value="a, b"' in html
+    assert "Draft text</textarea>" in html and 'spellcheck="false">a, b</textarea>' in html
     assert "Error:" in html and f'href="/changes#d-{V1}"' in html and "Review changes" in html
 
 
