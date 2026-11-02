@@ -135,8 +135,8 @@ CASES: list[tuple[dict[str, Any], dict[str, Any], str, str]] = [
      "Every video has at least 5 tags."),
     ({"kind": "chapters_required"},
      {"kind": "chapters_required", "visibility": "public"},
-     "Every public video of 4 minutes or more has chapters.",
-     "Every video of 4 minutes or more has chapters."),
+     "Every public video longer than a minute has chapters.",
+     "Every video longer than a minute has chapters."),
 ]
 
 
@@ -320,10 +320,10 @@ def test_evaluate_chapters_required() -> None:
     assert evaluate(rule, make_video(description="No chapters here.", duration="PT10M")) is False
     late = "About.\n1:00 Start\n2:00 Middle\n3:00 End"
     assert evaluate(rule, make_video(description=late, duration="PT10M")) is False  # not from 0:00
-    assert evaluate(rule, make_video(description=CHAPTERS, duration="PT4M")) is True  # exactly 4 min
+    assert evaluate(rule, make_video(description=CHAPTERS, duration="PT1M1S")) is True  # just over a minute
 
 
-@pytest.mark.parametrize("duration", ["PT2M", "PT3M59S", "PT1M", "", "nonsense", "PT0S"])
+@pytest.mark.parametrize("duration", ["PT1M", "PT59S", "PT45S", "", "nonsense", "PT0S"])
 def test_chapters_do_not_apply_to_short_or_unreadable_durations(duration: str) -> None:
     rule = {"kind": "chapters_required", "visibility": "all"}
     assert evaluate(rule, make_video(description=CHAPTERS, duration=duration)) is None

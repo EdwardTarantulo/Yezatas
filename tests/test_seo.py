@@ -375,12 +375,13 @@ def test_chapters_hour_format_and_bullets():
 
 def test_chapters_not_applicable_for_short_or_unknown_duration():
     chap = "description_chapters"
-    for duration in ("PT3M59S", "PT45S", "PT1M", "", "P0D", "garbage"):
+    for duration in ("PT60S", "PT45S", "PT1M", "", "P0D", "garbage"):
         assert not check(make_video(description="none", duration=duration), chap).applicable
-    assert "4 minutes" in check(make_video(description="none", duration="PT3M59S"), chap).detail
-    assert check(make_video(description="none", duration="PT4M"), chap).applicable
-    assert not check(make_video(description="none", duration="PT4M"), chap).passed
-    assert check(make_video(description="none", duration="PT5M59S"), chap).applicable
+    assert "longer than a minute" in check(make_video(description="none", duration="PT1M"), chap).detail
+    for duration in ("PT1M1S", "PT2M", "PT3M59S", "PT4M"):
+        assert check(make_video(description="none", duration=duration), chap).applicable
+        assert not check(make_video(description="none", duration=duration), chap).passed
+    assert check(make_video(description="0:00 A\n0:20 B\n0:40 C", duration="PT1M30S"), chap).passed
     assert check(make_video(description="0:00 A\n0:30 B\n1:30 C", duration="PT4M"), chap).passed
 
 

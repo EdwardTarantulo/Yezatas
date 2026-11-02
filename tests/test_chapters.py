@@ -290,19 +290,19 @@ def test_unknown_video(store: Store) -> None:
 
 def test_short_video_is_refused(tmp_path: Path) -> None:
     with Store(tmp_path / "s.sqlite") as s:
-        s.upsert_video(video(duration="PT3M59S"), s.begin_pull("UC_fake", NOW), NOW)
+        s.upsert_video(video(duration="PT59S"), s.begin_pull("UC_fake", NOW), NOW)
         s.add_transcript(make_transcript(STARTS), NOW)
         result, client = run(s, [])
-        assert "4 minutes or more" in result.message
+        assert "longer than a minute" in result.message
         refused(result, client, s)
 
 
 def test_unknown_catalog_duration_falls_back_to_the_transcript(tmp_path: Path) -> None:
     with Store(tmp_path / "d.sqlite") as s:
         s.upsert_video(video(duration=""), s.begin_pull("UC_fake", NOW), NOW)
-        s.add_transcript(make_transcript(STARTS, duration_ms=200_000), NOW)
+        s.add_transcript(make_transcript(STARTS, duration_ms=59_000), NOW)
         result, _ = run(s, [])
-        assert result.status == "failed" and "4 minutes" in result.message
+        assert result.status == "failed" and "longer than a minute" in result.message
 
 
 def test_existing_timestamps_in_the_description_are_never_rewritten(tmp_path: Path) -> None:

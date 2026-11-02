@@ -38,7 +38,7 @@ HOOK_WINDOW, HOOK_MIN_TEXT = 150, 50
 SEPARATOR_MAX_TEXT = 20  # letters allowed on a mostly-separator line
 TITLE_WORDS_WINDOW = 200
 HASHTAGS_GOOD_MAX, HASHTAGS_OK_MAX = 3, 15
-CHAPTERS_MIN_DURATION = 240  # seconds
+CHAPTERS_MIN_DURATION = 61  # seconds: every video longer than a minute (Shorts are 60 s or less)
 CHAPTERS_MIN_COUNT, CHAPTER_MIN_GAP = 3, 10
 SHORT_MAX_DURATION = 60  # seconds
 TAGS_GOOD_MIN, TAGS_GOOD_MAX = 5, 15
@@ -381,11 +381,11 @@ def chapter_problem(stamps: Sequence[int]) -> str:
 
 
 def check_description_chapters(video: Video, context: ChannelContext | None) -> CheckResult:
-    title = "Long video has chapters starting at 0:00"
+    title = "Video has chapters starting at 0:00"
     seconds = parse_duration(video.duration)
     if seconds is None or seconds < CHAPTERS_MIN_DURATION:
         return _skip("description_chapters", "description", title, 8,
-                     "Chapters only matter for videos of 4 minutes or more.")
+                     "Chapters only matter for videos longer than a minute.")
     stamps = parse_chapters(video.description)
     problem = chapter_problem(stamps)
     return _result("description_chapters", "description", title, 8, 0 if problem else 8,

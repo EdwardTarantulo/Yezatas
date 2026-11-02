@@ -169,7 +169,7 @@ def test_a_run_makes_a_draft_and_the_video_page_shows_it(tmp_path: Path) -> None
     run = html.split('id="latest-run"')[1].split("</section>")[0]
     assert "Draft made" in run and "Sharper title." in run
     assert "Added a clearer ending." in run and "Title is 30 to 60 characters" in run
-    assert "Left for you" in run and "Long video has chapters starting at 0:00" in run
+    assert "Left for you" in run and "Video has chapters starting at 0:00" in run
     assert "Chapters need a transcript." in run
     assert "12,000 tokens in (2,000 cached), 800 out" in run
     assert "Estimated cost: $0.016" in run

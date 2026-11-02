@@ -369,8 +369,7 @@ def suggest_chapters(store: Store, client: ModelClient, video_id: str, *,
     if seconds is None:
         seconds = record.duration_ms // 1000
     if seconds < CHAPTERS_MIN_DURATION:
-        return refuse(f"Chapters only help on videos of {CHAPTERS_MIN_DURATION // 60} minutes or "
-                      "more; this one is shorter.")
+        return refuse("Chapters only help on videos longer than a minute; this one is shorter.")
     draft = store.get_draft(video_id)
     title, description, tags = ((draft.title, draft.description, draft.tags) if draft
                                 else (video.title, video.description, tuple(video.tags)))

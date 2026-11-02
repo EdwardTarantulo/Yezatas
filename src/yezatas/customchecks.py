@@ -65,7 +65,7 @@ Kinds:
 - must_not_contain (text, field): the field does not contain the text.
 - title_max (chars): the title is at most this many characters.
 - tags_min (count): the video has at least this many tags.
-- chapters_required (no parameters): videos of 4 minutes or more have chapters.
+- chapters_required (no parameters): videos longer than a minute have chapters.
 
 The field is title, description or tags. The visibility is public (only public videos) or all \
 (every video); use public unless the creator says every video, all videos or private ones too. \
@@ -160,7 +160,7 @@ def _explain(rule: dict[str, Any]) -> str:
     if kind == "tags_min":
         count = rule["count"]
         return f"Every {scope}video has at least {count} tag{'s' if count != 1 else ''}."
-    return f"Every {scope}video of 4 minutes or more has chapters."
+    return f"Every {scope}video longer than a minute has chapters."
 
 
 def validate_rule(data: object, request: str) -> tuple[dict[str, Any], str]:
@@ -256,7 +256,7 @@ def evaluate(rule: CustomRule | dict[str, Any], video: Video) -> bool | None:
     """Whether the video passes the rule; None when the rule does not apply to this video.
 
     A "public" rule does not apply to a video that is not public, and `chapters_required` does
-    not apply to a video under 4 minutes (or with no readable duration). Pure code: the rule is
+    not apply to a video of a minute or less (or with no readable duration). Pure code: the rule is
     plain data and nothing in it is run.
     """
     data = _rule_dict(rule)

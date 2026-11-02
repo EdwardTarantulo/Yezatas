@@ -1041,8 +1041,7 @@ def chapters_blocker(video: Video, row: DraftRow | None, record: TranscriptRecor
     if seconds is None:
         seconds = record.duration_ms // 1000
     if seconds < CHAPTERS_MIN_DURATION:
-        return (f"Chapters only help on videos of {CHAPTERS_MIN_DURATION // 60} minutes or more; "
-                "this one is shorter.")
+        return "Chapters only help on videos longer than a minute; this one is shorter."
     text = row.description if row is not None else video.description
     stamps = parse_chapters(text)
     if stamps:

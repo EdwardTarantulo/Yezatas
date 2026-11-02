@@ -89,7 +89,7 @@ def make_ts_ui(tmp_path: Path, *, fake: Any = "default", chapters_fn: Any = None
         make_video(2, video_id=V2, title="Second video", description="Plain text.", tags=[],
                    privacy_status="public"),
         make_video(3, video_id=SHORT, title="A short one", description="Plain.", tags=[],
-                   privacy_status="public", duration="PT2M"),
+                   privacy_status="public", duration="PT50S"),
     ])
     return ui, fake
 
@@ -249,7 +249,7 @@ def test_make_chapters_is_disabled_with_the_reason_on_a_short_video(tmp_path: Pa
     section = card(page(ui, SHORT))
     assert re.search(r'class="button primary" disabled aria-describedby="chapters-blocked">Make chapters<',
                      section)
-    assert 'id="chapters-blocked"' in section and "4 minutes or more" in section
+    assert 'id="chapters-blocked"' in section and "longer than a minute" in section
 
 
 def test_make_chapters_is_disabled_when_the_description_has_timestamps(tmp_path: Path) -> None:
@@ -578,7 +578,7 @@ def test_chapters_are_refused_without_a_transcript_or_when_blocked(tmp_path: Pat
     assert "Transcribe the video first." in page(ui)
     seed_transcript(ui.config, SHORT, segments=2)
     nf(ui, f"/videos/{SHORT}/chapters")
-    assert "4 minutes or more" in page(ui, SHORT)
+    assert "longer than a minute" in page(ui, SHORT)
     assert called == [] and ui.web.chapters_job.snapshot().status == "idle"
 
 

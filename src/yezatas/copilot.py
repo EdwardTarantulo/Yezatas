@@ -133,7 +133,7 @@ class _Row:
 
     @property
     def chapters_apply(self) -> bool:
-        """Chapters matter for this video (4 minutes or more)."""
+        """Chapters matter for this video (longer than a minute)."""
         return any(c.check_id == _CHAPTERS_CHECK and c.applicable for c in self.card.checks)
 
     @property
@@ -213,7 +213,7 @@ becomes a draft. Offer at most {MAX_PROPOSALS} proposals per answer and do not r
 text in your answer.
 - Never invent links, prices, dates, chapters, timestamps or other facts. Only use a link that a \
 tool returned. Never write chapter times yourself.
-- "chapters" is "n/a" for videos under 4 minutes: chapters only matter from 4 minutes.
+- "chapters" is "n/a" for videos of a minute or less (Shorts): chapters only matter on longer videos.
 - "vs norm" is a video's views divided by the median views of the public videos published nearest \
 to it. Videos that cannot be scored say why ("too new", "not public").
 
@@ -284,7 +284,7 @@ _FIND_PROPERTIES: dict[str, Any] = {
     "published_from": {"type": "string", "description": "A date like 2026-01-31, inclusive."},
     "published_to": {"type": "string", "description": "A date like 2026-01-31, inclusive."},
     "has_chapters": {"type": "boolean", "description": (
-        "true: chapters that YouTube will show. false: videos of 4 minutes or more without them "
+        "true: chapters that YouTube will show. false: videos longer than a minute without them "
         "(shorter videos don't need chapters).")},
     "is_short": {"type": "boolean"},
     "outliers_only": {"type": "boolean", "description": "Views far above the norm."},
