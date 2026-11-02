@@ -55,6 +55,7 @@ from .. import replytemplates as replytemplates_mod
 from ..quota import QuotaExceeded, QuotaGuard
 from ..seo import TAGS_CHAR_LIMIT, score_catalog, tags_char_count
 from .videofacts import build_facts
+from .views import stale_youtube_keys
 from ..store import AdCheck, OutlierReport, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
 from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
@@ -1960,10 +1961,13 @@ def create_app(
             if latest is None:
                 return None
             videos = store.list_videos()
+            # Translations on YouTube made from an older title or description do not count for the score.
+            stale = {v.video_id: keys for v in videos if v.localizations
+                     and (keys := stale_youtube_keys(v, store.latest_translations(v.video_id)))}
             guard = QuotaGuard(store, config.daily_quota_budget)
             used, remaining = guard.used(), guard.remaining()
             pull = store.latest_pull()
-        entries = make_entries(videos, score_catalog(videos))
+        entries = make_entries(videos, score_catalog(videos, stale))
         return {
             "entries": entries, "as_of": pull_moment(pull) if pull is not None else None,
             "latest_pull": {"videos": latest[0], "when": _local_time(latest[1])},
@@ -2357,7 +2361,7 @@ def create_app(
             "comments": format_count(video.comment_count),
             "published": format_date(video.published_at),
             "sg": panel, "latest_run": latest,
-            "tr": tr, "tv": build_translate_view(video, row, records), "ts": ts, "tt": tt,
+            "tr": tr, "tv": build_translate_view(video, row, records, stale_youtube_keys(video, records)), "ts": ts, "tt": tt,
             "sv": sv, "sb": sb,
             "pk": pk, "pv": build_packaging_view(
                 video_id, text[0], thumb_url(video, ("high", "medium", "default")), review, made,

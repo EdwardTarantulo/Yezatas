@@ -78,6 +78,25 @@
     update();
   });
 
+  // Translations card: Select all / none / not translated / out of date (each label carries data-state).
+  document.querySelectorAll("[data-select-for]").forEach(function (bar) {
+    var box = document.getElementById(bar.getAttribute("data-select-for"));
+    if (!box) return;
+    bar.hidden = false;
+    bar.addEventListener("click", function (e) {
+      var button = e.target.closest("[data-select]");
+      if (!button) return;
+      var how = button.getAttribute("data-select");
+      box.querySelectorAll("label[data-state]").forEach(function (label) {
+        var input = label.querySelector("input[type=checkbox]");
+        var state = label.getAttribute("data-state");
+        if (!input || state === "own") return;
+        input.checked = how === "all" || (how === "new" && (state === "" || state === "failed"))
+          || (how === "stale" && state === "stale");
+      });
+    });
+  });
+
   // Coming back with the Back button must not show disabled buttons or stale state.
   window.addEventListener("pageshow", function (e) { if (e.persisted) window.location.reload(); });
 

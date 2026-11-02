@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 from .store import Video
 
@@ -130,6 +130,8 @@ class Scorecard:
 @dataclass(frozen=True)
 class ChannelContext:
     title_counts: dict[str, int] = field(default_factory=dict)  # normalized title -> videos
+    # video id -> its translations on YouTube made from an older title or description: they do not count
+    stale_localizations: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 def normalize_title(title: str) -> str:
@@ -540,15 +542,22 @@ def _is_own_language(key: str, language: str | None) -> bool:
 
 def check_localizations(video: Video, context: ChannelContext | None) -> CheckResult:
     title = "Title and description are translated into 5+ languages"
-    n = sum(1 for key in video.localizations
-            if not _is_own_language(key, video.default_language))
+    stale = context.stale_localizations.get(video.video_id, frozenset()) if context else frozenset()
+    keys = [key for key in video.localizations if not _is_own_language(key, video.default_language)]
+    n = sum(1 for key in keys if key not in stale)
+    old = len(keys) - n
     points = 8 if n >= LOCALIZATIONS_GOOD else _half(8) if n >= 1 else 0
     fix = ("Add translated titles and descriptions; Yezatas can translate them for you."
-           if n == 0 else
+           if n == 0 and not old else
+           "Translate the out-of-date languages again, then add more if you have fewer than "
+           f"{LOCALIZATIONS_GOOD}." if old else
            f"Add more languages; {LOCALIZATIONS_GOOD} or more reach more viewers, and Yezatas "
            "can translate them for you.")
-    return _result("localizations", "details", title, 8, points,
-                   f"The video has {n} translation{'' if n == 1 else 's'}.", fix)
+    detail = f"The video has {n} translation{'' if n == 1 else 's'}."
+    if old:
+        detail += (f" {old} more {'was' if old == 1 else 'were'} made from an older title or description "
+                   f"and {'does' if old == 1 else 'do'} not count.")
+    return _result("localizations", "details", title, 8, points, detail, fix)
 
 
 def check_thumbnail_hd(video: Video, context: ChannelContext | None) -> CheckResult:
@@ -600,9 +609,13 @@ def score_video(video: Video, context: ChannelContext | None = None) -> Scorecar
     return Scorecard(video.video_id, round(100 * earned / total) if total else 100, checks)
 
 
-def score_catalog(videos: Iterable[Video]) -> dict[str, Scorecard]:
+def score_catalog(videos: Iterable[Video],
+                  stale_localizations: Mapping[str, frozenset[str]] | None = None) -> dict[str, Scorecard]:
+    """`stale_localizations`: video id -> translations on YouTube made from older text (not counted)."""
     videos = list(videos)
     context = channel_context(videos)
+    if stale_localizations:
+        context = ChannelContext(context.title_counts, dict(stale_localizations))
     return {v.video_id: score_video(v, context) for v in videos}
 
 

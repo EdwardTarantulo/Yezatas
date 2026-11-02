@@ -898,6 +898,16 @@ class TargetOption:
     name: str
     ticked: bool
     on_youtube: str  # "", "on YouTube" or "on YouTube as de-DE"
+    state: str = ""  # "own" (the video's language), "translated", "stale", "youtube", "failed", "" (none)
+    chip: str = ""  # the state as a pill: "Translated", "Out of date", "On YouTube", "Check failed"
+    tone: str = ""  # the pill's class
+
+
+# A target language's state on the Translations card: its pill text and class.
+TARGET_STATES: dict[str, tuple[str, str]] = {
+    "translated": ("Translated", "done"), "stale": ("Out of date", "warn"),
+    "youtube": ("On YouTube", "working"), "failed": ("Check failed", "problem"),
+}
 
 
 @dataclass(frozen=True)
@@ -938,6 +948,8 @@ class TranslateView:
     results: tuple[TranslationView, ...]
     addable_count: int
     in_draft: tuple[DraftTranslation, ...]
+    stale_names: tuple[str, ...] = ()  # target languages whose translation is out of date
+    summary: str = ""  # "2 translated · 1 out of date · 3 on YouTube · 18 not translated"
 
 
 def _same_text(loc: Mapping[str, str] | None, record: TranslationRecord) -> bool:
@@ -947,8 +959,25 @@ def _same_text(loc: Mapping[str, str] | None, record: TranslationRecord) -> bool
     }
 
 
+def stale_youtube_keys(video: Video, records: Mapping[str, TranslationRecord]) -> frozenset[str]:
+    """Translations on YouTube that are Yezatas' text made from another title or description than the
+    one on YouTube now: the title or description changed after they were pushed."""
+    current = source_hash(video.title, video.description)
+    youtube = edits.plain_localizations(video.localizations)
+    keys = list(youtube)
+    stale: set[str] = set()
+    for code, record in records.items():
+        if record.status == "failed" or record.source_hash == current:
+            continue
+        key = youtube_key(code, keys)
+        if _same_text(youtube.get(key), record):
+            stale.add(key)
+    return frozenset(stale)
+
+
 def build_translate_view(video: Video, row: DraftRow | None,
-                         records: Mapping[str, TranslationRecord]) -> TranslateView:
+                         records: Mapping[str, TranslationRecord],
+                         stale_keys: frozenset[str] = frozenset()) -> TranslateView:
     """What the translation card shows: the language choice, the results and the draft's translations."""
     language = (row.default_language if row is not None and row.default_language else None) \
         or video.default_language
@@ -961,15 +990,33 @@ def build_translate_view(video: Video, row: DraftRow | None,
 
     selected = next((code for code in LANGUAGES if language and same_language(code, language)), "")
     sources = tuple(SourceOption(code, name, code == selected) for code, name in LANGUAGES.items())
+    text = (row.title, row.description) if row is not None else (video.title, video.description)
+    current = source_hash(*text)
+    # A draft with another title or description makes every translation on YouTube out of date too.
+    text_changed = row is not None and current != source_hash(video.title, video.description)
     targets = []
     for code, name in LANGUAGES.items():
         key = youtube_key(code, youtube_keys)
-        mark = "" if key not in youtube_keys else (
-            "on YouTube" if key == code else f"on YouTube as {key}")
-        targets.append(TargetOption(code, name, code in DEFAULT_TARGETS and code != selected, mark))
-
-    text = (row.title, row.description) if row is not None else (video.title, video.description)
-    current = source_hash(*text)
+        on_youtube = key in youtube_keys
+        mark = "" if not on_youtube else ("on YouTube" if key == code else f"on YouTube as {key}")
+        record = records.get(code)
+        if code == selected:
+            state = "own"
+        elif record is not None and record.status != "failed":
+            state = "translated" if record.source_hash == current else "stale"
+        elif on_youtube:
+            state = "stale" if text_changed or key in stale_keys else "youtube"
+        elif record is not None:
+            state = "failed"
+        else:
+            state = ""
+        chip, tone = TARGET_STATES.get(state, ("", ""))
+        targets.append(TargetOption(code, name, code in DEFAULT_TARGETS and code != selected, mark,
+                                    state, chip, tone))
+    counted = [(n, label) for n, label in (
+        (sum(1 for t in targets if t.state == s), label) for s, label in (
+            ("translated", "translated"), ("stale", "out of date"), ("youtube", "on YouTube"),
+            ("failed", "check failed"), ("", "not translated"))) if n]
     ordered = [c for c in LANGUAGES if c in records] + sorted(c for c in records if c not in LANGUAGES)
     results = []
     for code in ordered:
@@ -1005,6 +1052,8 @@ def build_translate_view(video: Video, row: DraftRow | None,
         sources=sources, language_known=bool(selected), targets=tuple(targets),
         results=tuple(results), addable_count=sum(1 for r in results if r.addable),
         in_draft=tuple(listed),
+        stale_names=tuple(t.name for t in targets if t.state == "stale"),
+        summary=" · ".join(f"{n} {label}" for n, label in counted),
     )
 
 

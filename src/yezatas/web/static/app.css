@@ -742,6 +742,14 @@ button.gbtn { cursor: pointer; }
 .lang-grid legend { padding: 0 6px; font-weight: 500; }
 .lang-grid .check-label { font-weight: 400; }
 .on-yt { color: var(--muted); font-size: 13px; }
+.lang-grid .check-label.lang { display: flex; align-items: center; min-height: 28px; }
+.lang-grid .check-label.lang input { margin-top: 0; }
+.tr-chip { margin-left: auto; padding: 1px 8px; font-size: 11px; white-space: nowrap; }
+.tr-select { grid-column: 1 / -1; margin: 0 0 4px; font-size: var(--fs-sm); color: var(--muted); }
+.tr-select:not([hidden]) { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+.tr-select button { padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-weight: 500; cursor: pointer; }
+.tr-select button:hover { text-decoration: underline; }
+.tr-stale { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-size: var(--fs-sm); line-height: 1.45; }
 .tr-list, .tr-draft { list-style: none; margin: 0; padding: 0; }
 .tr-item { margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; }
 .tr-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }

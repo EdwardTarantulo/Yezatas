@@ -179,7 +179,7 @@ def test_languages_already_on_youtube_are_marked_and_the_own_language_is_not(tmp
            "en": {"title": "Cactus repotting", "description": DESCRIPTION}}
     ui, _ = make_tr_ui(tmp_path, localizations=loc)
     section = card(ui.client.get(f"/videos/{V1}").text)
-    assert "(on YouTube as de-DE)" in section and "(on YouTube)" in section
+    assert "(on YouTube as de-DE)" in section and "(on YouTube)" not in section and ">On YouTube</span>" in section
     assert section.count("on YouTube") >= 2
     en_label = re.search(r'name="targets" value="en">\s*<span>English(.*?)</span>', section, re.S)
     assert en_label and "on YouTube" not in en_label.group(1)
@@ -815,3 +815,63 @@ def test_new_markup_has_no_inline_script_or_style(tmp_path: Path) -> None:
         html = ui.client.get(path).text
         assert "style=" not in html and html.count("<script") == html.count("<script src="), path
         assert not re.search(r"\son\w+=", html), path
+
+
+def target_state(section: str, code: str) -> str | None:
+    found = re.search(rf'data-state="([a-z]*)"><input type="checkbox" name="targets" value="{code}"', section)
+    return found.group(1) if found else None
+
+
+def test_each_target_language_shows_its_state(tmp_path: Path) -> None:
+    ui, _ = make_tr_ui(tmp_path, localizations={"fr": {"title": "T", "description": "D"}})
+    run_translate(ui, targets=["es", "de"])
+    section = card(ui.client.get(f"/videos/{V1}").text)
+    assert [target_state(section, c) for c in ("en", "es", "de", "fr", "it")] == [
+        "own", "translated", "translated", "youtube", ""]
+    assert section.count(">Translated</span>") == 2 and 'id="tr-stale"' not in section
+    assert re.search(r'id="tr-summary">2 translated · 1 on YouTube · \d+ not translated<', section)
+    assert 'data-select-for="tr-targets" hidden' in section
+    for how in ("all", "none", "new", "stale"):
+        assert f'data-select="{how}"' in section
+
+
+def test_a_changed_title_makes_every_translation_out_of_date(tmp_path: Path) -> None:
+    ui, _ = make_tr_ui(tmp_path, localizations={"fr": {"title": "T", "description": "D"}})
+    run_translate(ui, targets=["es", "de"])
+    nf(ui, f"/videos/{V1}/draft", data={"title": "A new title", "description": DESCRIPTION, "tags": "cactus"})
+    section = card(ui.client.get(f"/videos/{V1}").text)
+    assert [target_state(section, c) for c in ("es", "de", "fr", "it")] == ["stale", "stale", "stale", ""]
+    assert "<strong>Out of date: Spanish, German, French.</strong>" in section
+    assert section.count(">Out of date</span>") == 3
+
+
+def test_stale_youtube_keys_finds_translations_made_from_older_text(tmp_path: Path) -> None:
+    ui, _ = make_tr_ui(tmp_path)
+    run_translate(ui, targets=["es"])
+    rec = records(ui)["es"]
+    loc = {"es": {"title": rec.title, "description": rec.description}}
+    same = make_video(1, video_id=V1, title="Cactus repotting", description=DESCRIPTION, localizations=loc)
+    assert views.stale_youtube_keys(same, {"es": rec}) == frozenset()
+    moved = make_video(1, video_id=V1, title="A new title", description=DESCRIPTION, localizations=loc)
+    assert views.stale_youtube_keys(moved, {"es": rec}) == frozenset({"es"})
+    other = make_video(1, video_id=V1, title="A new title", description=DESCRIPTION,
+                       localizations={"es": {"title": "Otro", "description": "D"}})
+    assert views.stale_youtube_keys(other, {"es": rec}) == frozenset()
+
+
+def test_the_score_does_not_count_translations_made_from_older_text(tmp_path: Path) -> None:
+    ui, _ = make_tr_ui(tmp_path)
+    run_translate(ui, targets=["es", "de"])
+    loc = {c: {"title": r.title, "description": r.description} for c, r in records(ui).items()}
+
+    def seed(title: str) -> None:
+        seed_catalog(ui.config, [make_video(1, video_id=V1, title=title, description=DESCRIPTION,
+                                            tags=["cactus"], privacy_status="public",
+                                            default_language="en", localizations=loc)])
+
+    seed("Cactus repotting")
+    assert "The video has 2 translations.<" in ui.client.get(f"/videos/{V1}").text
+    seed("Cactus repotting, the new title")
+    html = ui.client.get(f"/videos/{V1}").text
+    assert ("The video has 0 translations. 2 more were made from an older title or description and do "
+            "not count.") in html

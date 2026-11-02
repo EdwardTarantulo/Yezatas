@@ -30,12 +30,15 @@
       </select>
       {% if not tv.language_known %}<p class="hint" id="tr-language-hint">Yezatas does not guess the language of your video. Choose it before translating.</p>{% endif %}
     </div>
-    <fieldset class="lang-grid">
+    {% if tv.stale_names %}<p class="tr-stale" id="tr-stale" role="note"><strong>Out of date: {{ tv.stale_names|join(', ') }}.</strong> These translations were made from an older title or description. They do not count for the score and are not added to the draft until you translate them again.</p>{% endif %}
+    <fieldset class="lang-grid" id="tr-targets">
       <legend>Translate into</legend>
+      <p class="tr-select" data-select-for="tr-targets" hidden>Select <button type="button" data-select="all">all</button><button type="button" data-select="none">none</button><button type="button" data-select="new">not translated</button><button type="button" data-select="stale">out of date</button></p>
       {% for t in tv.targets %}
-      <label class="check-label lang"><input type="checkbox" name="targets" value="{{ t.code }}"{% if t.ticked %} checked{% endif %}> <span>{{ t.name }}{% if t.on_youtube %} <span class="on-yt">({{ t.on_youtube }})</span>{% endif %}</span></label>
+      <label class="check-label lang" data-state="{{ t.state }}"><input type="checkbox" name="targets" value="{{ t.code }}"{% if t.ticked %} checked{% endif %}> <span>{{ t.name }}{% if t.on_youtube and t.on_youtube != 'on YouTube' %} <span class="on-yt">({{ t.on_youtube }})</span>{% endif %}</span>{% if t.chip %}<span class="pill tr-chip {{ t.tone }}">{{ t.chip }}</span>{% endif %}</label>
       {% endfor %}
     </fieldset>
+    {% if tv.summary %}<p class="hint" id="tr-summary">{{ tv.summary }}</p>{% endif %}
     <p class="hint">Translating again replaces the earlier result for that language below. Languages marked "on YouTube" are only replaced if you add the new translation to the draft and push it.</p>
     <div class="actions"><button type="submit" class="button primary"{% if tr.busy or not tr.has_translator %} disabled{% endif %}>Translate</button></div>
   </form>

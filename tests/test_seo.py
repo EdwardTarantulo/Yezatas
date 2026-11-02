@@ -588,3 +588,16 @@ def test_buying_question_is_a_fine_description_opening() -> None:
                       description="Which budget laptop should you buy this year? I compare three of them "
                                   "for battery, screen and speed.")
     assert hook.passed
+
+
+def test_localizations_made_from_older_text_do_not_count():
+    video = make_video()
+    assert check(video, "localizations").passed
+    ctx = seo.ChannelContext(stale_localizations={video.video_id: frozenset({"fr", "es"})})
+    result = check(video, "localizations", ctx)
+    assert not result.passed and result.points == 4
+    assert result.detail == ("The video has 3 translations. 2 more were made from an older title or "
+                             "description and do not count.")
+    assert "out-of-date languages again" in result.fix
+    stale = seo.score_catalog([video], {video.video_id: frozenset({"fr"})})[video.video_id]
+    assert stale.score < seo.score_catalog([video])[video.video_id].score
