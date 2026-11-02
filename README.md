@@ -459,6 +459,11 @@ as it lands; the git history is the detailed record.
   the bottom with "Nothing goes to YouTube until you approve it."; on phones the menu row scrolls to the current
   page. Checked in the browser at desktop and phone width, light and dark. In review: blank lines and
   indentation left by moved lines.
+- **2026-11-02**: **Clearer draft editing**, built by **Muse Spark Open** on Baseten (about 4K tokens, one
+  round). A draft's **Edit** button on the Changes page is now **Edit draft**, and the video page's edit form
+  says when it shows your draft rather than the text on YouTube (the score and What to fix are for the text on
+  YouTube). The agent's **Why** block lost its blue fill and no longer repeats the model and summary from the
+  card's head line; its changes are grouped under each field once, the action first and the check below it.
 
 ---
 
