@@ -464,6 +464,12 @@ as it lands; the git history is the detailed record.
   says when it shows your draft rather than the text on YouTube (the score and What to fix are for the text on
   YouTube). The agent's **Why** block lost its blue fill and no longer repeats the model and summary from the
   card's head line; its changes are grouped under each field once, the action first and the check below it.
+- **2026-11-02**: **YouTube Studio look and a new logo**, built by **Muse Spark Open** on Baseten (one round,
+  27 edits). The colours follow YouTube Studio in light and dark: its greys, blue for buttons and links, red
+  only in the logo. Buttons and chips are rounder, the selected filter chip is dark, and the logo is a stack of
+  two drafts with a tick on the front one. The dashboard's **Fix next** card now says how it ranks videos:
+  views times points missing, and that "To fix" names the check that costs the most points. Checked in the
+  browser at desktop and phone width, light and dark; all theme contrast tests pass.
 
 ---
 
