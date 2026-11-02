@@ -910,6 +910,38 @@ button.gbtn { cursor: pointer; }
 .cm-template { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .cm-template-name { font-weight: 500; }
 
+/* Comments page (/comments): the whole channel's comments, a fetch bar and a per-video rail. */
+.cz-fetch { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; align-items: center; }
+.cz-fetch-text p { margin: 0; }
+.cz-fetch-main { font-weight: 600; }
+.cz-fetch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cz-fetch-notes { flex-basis: 100%; }
+.cz-cost { font-size: var(--fs-xs); font-weight: 500; opacity: .8; margin-left: 8px; padding-left: 8px; border-left: 1px solid currentColor; }
+.chip-n { font-size: var(--fs-xs); font-weight: 600; color: var(--muted); margin-left: 4px; }
+.chip.active .chip-n { color: inherit; opacity: .75; }
+.cz-filters { margin: 16px 0; }
+.cz-only { margin-left: auto; color: var(--muted); font-size: var(--fs-sm); }
+.cz-only.active { color: var(--link); font-weight: 600; }
+.cz-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+.cz-list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; }
+.cz-item { padding: 14px 18px; border-top: 1px solid var(--line); min-width: 0; }
+.cz-item:first-child { border-top: 0; }
+.cz-head { margin: 0; overflow-wrap: anywhere; }
+.cz-on { margin: 0; overflow-wrap: anywhere; }
+.cz-draft { border-left: 0; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
+.cz-rail { margin: 0; }
+.cz-rail-head { display: flex; justify-content: space-between; align-items: baseline; }
+.cz-rail-head h2 { margin: 0; }
+.cz-videos { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 2px; }
+.cz-vrow { display: grid; gap: 2px; padding: 8px 10px; border-radius: var(--radius-sm); color: var(--text); text-decoration: none; }
+.cz-vrow:hover { background: var(--hover); }
+.cz-vrow.active { background: var(--brand-soft); }
+.cz-vrow.active .cz-vtitle { color: var(--link); }
+.cz-vtitle { font-weight: 600; overflow-wrap: anywhere; }
+.cz-unsorted { color: var(--link); font-weight: 600; font-size: var(--fs-sm); }
+.cz-note { margin: 8px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: var(--fs-xs); }
+@media (max-width: 900px) { .cz-body { grid-template-columns: 1fr; } }
+
 /* Replies, Affiliate and Checks pages */
 .rp-body, .ck-explain { overflow-wrap: anywhere; white-space: pre-wrap; }
 .rp-template { margin-bottom: 16px; }

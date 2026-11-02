@@ -238,5 +238,5 @@ def test_the_nav_has_a_replies_item_after_copilot(tmp_path: Path) -> None:
     ui = make_replies_ui(tmp_path)
     html = page(ui)
     items = re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', html)
-    assert items.index("/replies") == items.index("/copilot") + 1
+    assert items.index("/replies") == items.index("/comments") + 1
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/replies"]

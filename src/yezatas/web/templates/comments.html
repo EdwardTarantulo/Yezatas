@@ -1,0 +1,147 @@
+{% extends "shell.html" %}
+{% block title %}Comments - Yezatas{% endblock %}
+{% from "_macros.html" import icon %}
+{% block content %}
+<h1 class="page-title">Comments</h1>
+<p class="intro" id="comments-about">The newest comments on your videos, sorted by {{ sort.model }}, with reply drafts you can copy. Yezatas only reads comments: you post replies on YouTube yourself.</p>
+<section class="card cz-fetch" id="comments-fetch" aria-label="Fetch and sort comments">
+<div class="cz-fetch-text">
+{% if cv.total %}
+<p class="cz-fetch-main" id="comments-summary">{{ cv.total }} comment{{ '' if cv.total == 1 else 's' }} from {{ cv.video_count }} video{{ '' if cv.video_count == 1 else 's' }}</p>
+<p class="muted" id="comments-fetched">Fetched {{ cv.fetched_text }}{% if cv.unsorted %} &middot; {{ cv.unsorted }} not sorted yet{% endif %}</p>
+{% else %}
+<p class="cz-fetch-main" id="comments-summary">No comments stored yet.</p>
+<p class="muted">Fetch reads the newest comments on your {{ fetch.videos }} newest videos.</p>
+{% endif %}
+</div>
+<div class="cz-fetch-actions">
+{% if cv.unsorted and not sort.running %}
+<form method="post" action="/comments/sort">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<button type="submit" class="button secondary" id="sort-button"{% if not sort.has_key or not sort.videos %} disabled{% endif %}>Sort new comments<span class="cz-cost">{{ sort.model }} &middot; one call per video</span></button>
+</form>
+{% endif %}
+{% if sort.running %}
+<p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="channel_sort-msg" role="status" aria-live="polite">{{ sort.message or 'Starting…' }}</span></p>
+{% endif %}
+{% if fetch.running %}
+<p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="channel_comments-msg" role="status" aria-live="polite">{{ fetch.message or 'Starting…' }}</span></p>
+{% elif not fetch.has_write %}
+<p id="comments-no-write">Reading comments needs the YouTube permission that pushing uses. Nothing is posted.</p>
+<form method="post" action="/changes/allow-edits">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="actions"><button type="submit" class="button primary">Allow Yezatas to edit your videos</button></div>
+</form>
+{% else %}
+<form method="post" action="/comments/fetch">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<button type="submit" class="button primary" id="fetch-button"{% if not fetch.videos %} disabled{% endif %}>Fetch new comments<span class="cz-cost">about {{ fetch.units }} units</span></button>
+</form>
+{% endif %}
+</div>
+<div class="cz-fetch-notes">
+{% if fetch.failed %}
+<div class="flash error" role="alert" id="fetch-failed">{{ fetch.failed }}</div>
+<form class="inline" method="post" action="/comments/channel/fetch/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+{% endif %}
+{% if fetch.result %}
+<p id="fetch-result">{{ fetch.result.text }}</p>
+{% if fetch.result.notes %}
+<ul class="ac-notes muted" id="fetch-notes">
+{% for note in fetch.result.notes %}<li>{{ note }}</li>{% endfor %}
+</ul>
+{% endif %}
+<form class="inline" method="post" action="/comments/channel/fetch/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+{% endif %}
+{% if sort.failed %}
+<div class="flash error" role="alert" id="sort-failed">{{ sort.failed }}</div>
+<form class="inline" method="post" action="/comments/channel/sort/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+{% endif %}
+{% if sort.result %}
+<div id="sort-result">
+<p id="sort-counts">{% for label, count in sort.result.counts %}{{ label }}: {{ count }}{% if not loop.last %} &middot; {% endif %}{% endfor %}</p>
+<p id="sort-drafts">{{ sort.result.drafts }} draft{{ '' if sort.result.drafts == 1 else 's' }} made.</p>
+{% if sort.result.notes %}
+<ul class="ac-notes muted" id="sort-notes">
+{% for note in sort.result.notes %}<li>{{ note }}</li>{% endfor %}
+</ul>
+{% endif %}
+<p class="muted" id="sort-cost">{{ sort.result.model }} &middot; {{ sort.result.tokens }} tokens &middot; cost {{ sort.result.cost }}</p>
+<form class="inline" method="post" action="/comments/channel/sort/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
+</div>
+{% endif %}
+{% if cv.unsorted and not sort.has_key %}
+<p class="hint" id="sort-no-key">There is no Meta API key yet, so the sort cannot run. <a href="/setup#step-ai">Add one in Setup</a>.</p>
+{% endif %}
+{% if cv.unsorted %}
+<p class="hint">Sorting sends each video's title, description and stored comments to Meta's Model API ({{ sort.model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>). Nothing is sent to YouTube.</p>
+{% endif %}
+</div>
+</section>
+{% if cv.total %}
+<div class="chip-row cz-filters" role="group" aria-label="Filter comments">
+{% for chip in cv.chips %}<a class="chip{% if chip.active %} active{% endif %}" href="{{ chip.href }}"{% if chip.active %} aria-current="true"{% endif %}>{{ chip.label }} <span class="chip-n">{{ chip.count }}</span></a>{% endfor %}
+<a class="cz-only{% if cv.draft_only %} active{% endif %}" id="draft-only" href="{{ cv.draft_only_href }}"{% if cv.draft_only %} aria-current="true"{% endif %}>Only with a reply draft</a>
+</div>
+{% endif %}
+<div class="cz-body">
+<div class="cz-main">
+{% if cv.rows %}
+<ol class="cz-list" id="comments-list">
+{% for row in cv.rows %}
+{% set row_no = loop.index %}
+<li class="cz-item" id="comment-{{ row.comment.comment_id }}">
+<p class="cz-head"><strong>{{ row.comment.author }}</strong> <span class="muted">{{ row.date_text }} &middot; {{ row.likes_text }} likes</span> <span class="pill">{{ row.category_label }}</span>{% if row.draft %} <span class="pill done">Draft ready</span>{% endif %}</p>
+<p class="cz-on muted">on <a href="{{ row.video_href }}">{{ row.video_title }}</a></p>
+<p class="cm-text">{{ row.comment.text }}</p>
+{% if row.draft %}
+<div class="cm-draft cz-draft" id="draft-{{ row.draft.id }}">
+<p class="cm-draft-label">Reply draft <span class="muted">&middot; {{ row.draft.model }}</span></p>
+<p class="cm-draft-text" id="draft-text-{{ row.draft.id }}">{{ row.draft.text }}</p>
+<div class="actions">
+<button type="button" class="button secondary" data-copy-target="draft-text-{{ row.draft.id }}" aria-label="Copy reply">Copy reply</button>
+<a class="button secondary" href="{{ row.youtube_url }}" target="_blank" rel="noopener noreferrer">{{ icon('external') }}Open on YouTube</a>
+<form class="inline" method="post" action="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ cv.next_path }}"><button type="submit" class="button secondary">Mark as used</button></form>
+<form class="inline" method="post" action="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ cv.next_path }}"><button type="submit" class="button secondary">Dismiss</button></form>
+</div>
+</div>
+{% else %}
+<div class="actions">
+<a class="button secondary" href="{{ row.youtube_url }}" target="_blank" rel="noopener noreferrer">{{ icon('external') }}Open on YouTube</a>
+</div>
+{% endif %}
+{% if row.templates %}
+<div class="cm-templates">
+<p class="hint">Reply templates</p>
+<ul class="cm-template-list">
+{% for t in row.templates %}
+<li class="cm-template">
+<span class="cm-template-name">{{ t.name }}</span>
+<span class="cm-template-text" id="template-text-{{ row_no }}-{{ loop.index }}">{{ t.text }}</span>
+<button type="button" class="button secondary" data-copy-target="template-text-{{ row_no }}-{{ loop.index }}" aria-label="Copy template reply">Copy</button>
+</li>
+{% endfor %}
+</ul>
+</div>
+{% endif %}
+</li>
+{% endfor %}
+</ol>
+{% elif cv.total %}
+<p class="muted" id="comments-none-match">No comments match this filter.</p>
+{% else %}
+<p class="muted" id="comments-empty">No comments yet. Fetch new comments to see them here.</p>
+{% endif %}
+</div>
+{% if cv.videos %}
+<aside class="card cz-rail" aria-labelledby="h-by-video">
+<div class="cz-rail-head"><h2 id="h-by-video">By video</h2><span class="muted">{{ cv.video_count }} video{{ '' if cv.video_count == 1 else 's' }}</span></div>
+{% if cv.video_filter %}<p class="cz-all"><a href="/comments">All videos</a></p>{% endif %}
+<ol class="cz-videos">
+{% for v in cv.videos %}<li><a class="cz-vrow{% if v.active %} active{% endif %}" href="{{ v.href }}"{% if v.active %} aria-current="true"{% endif %}><span class="cz-vtitle">{{ v.title }}</span><span class="muted">{{ v.meta }}</span>{% if v.unsorted %}<span class="cz-unsorted">{{ v.unsorted }} not sorted</span>{% endif %}</a></li>{% endfor %}
+</ol>
+<p class="cz-note muted">Yezatas only reads comments. You post replies on YouTube yourself.</p>
+</aside>
+{% endif %}
+</div>
+{% endblock %}

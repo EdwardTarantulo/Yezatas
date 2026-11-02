@@ -2359,6 +2359,193 @@ def build_comments_view(video_id: str, comments: Sequence[Comment], replies: Seq
     return CommentsView(video_id=video_id, chips=tuple(chips), pinned=pinned, rows=tuple(rows), total=len(ordered), filtered_total=len(filtered), filter_key=selected)
 
 
+CHANNEL_COMMENTS_PATH = "/comments"
+
+
+@dataclass(frozen=True)
+class ChannelCommentRow:
+    comment: Comment
+    video_id: str
+    video_title: str
+    video_href: str  # the video's page in Yezatas
+    category_label: str
+    date_text: str
+    likes_text: str
+    draft: CommentReply | None
+    templates: tuple[CommentTemplateView, ...]
+    youtube_url: str
+
+
+@dataclass(frozen=True)
+class ChannelVideoRow:
+    video_id: str
+    title: str
+    href: str  # /comments?v=<id>, keeping the other filters
+    meta: str  # e.g. "3 questions · 12 comments"
+    unsorted: int
+    active: bool
+
+
+@dataclass(frozen=True)
+class ChannelCommentsView:
+    chips: tuple[CommentChipView, ...]
+    rows: tuple[ChannelCommentRow, ...]
+    videos: tuple[ChannelVideoRow, ...]
+    total: int  # stored comments given to the builder
+    filtered_total: int
+    unsorted: int  # over all comments given
+    video_count: int  # videos that have comments
+    fetched_text: str  # format_date of the newest fetched_at, "" when none
+    filter_key: str
+    video_filter: str  # "" or a video id that has comments
+    draft_only: bool
+    draft_only_href: str  # the same page with "only with a reply draft" switched
+    next_path: str  # this page's own path with its filters, for forms to come back to
+
+
+def build_channel_comments_view(comments: Sequence[Comment], replies: Sequence[CommentReply], videos: Mapping[str, Video], templates: Sequence[ReplyTemplate], params: Mapping[str, str] | None = None) -> ChannelCommentsView:
+    ordered = sorted(comments, key=lambda c: (c.published_at or "", c.comment_id), reverse=True)
+    raw = str((params or {}).get("c") or "").strip()
+    if raw in ("", "all"):
+        selected = "all"
+    elif raw in COMMENT_CATEGORIES:
+        selected = raw
+    elif raw in (NOT_SORTED_KEY, "unsorted", "not-sorted"):
+        selected = NOT_SORTED_KEY
+    else:
+        selected = "all"
+    vf_raw = str((params or {}).get("v") or "").strip()
+    comment_video_ids = {c.video_id for c in ordered}
+    video_filter = vf_raw if vf_raw in comment_video_ids else ""
+    draft_only = str((params or {}).get("draft") or "") == "1"
+
+    def _channel_href(category: str, video: str, draft: bool) -> str:
+        pairs: list[tuple[str, str]] = []
+        if category != "all":
+            pairs.append(("c", category))
+        if video:
+            pairs.append(("v", video))
+        if draft:
+            pairs.append(("draft", "1"))
+        if pairs:
+            return f"{CHANNEL_COMMENTS_PATH}?{urlencode(pairs)}"
+        return CHANNEL_COMMENTS_PATH
+
+    open_replies = [r for r in replies if r.status == "open"]
+    drafts: dict[str, CommentReply] = {}
+    for reply in open_replies:
+        if reply.comment_id and reply.comment_id not in drafts:
+            drafts[reply.comment_id] = reply
+
+    if video_filter:
+        scope = [c for c in ordered if c.video_id == video_filter]
+    else:
+        scope = list(ordered)
+
+    counts: dict[str, int] = {key: 0 for key in COMMENT_CATEGORIES}
+    not_sorted_scope = 0
+    for comment in scope:
+        if comment.category in counts:
+            counts[comment.category] += 1
+        else:
+            not_sorted_scope += 1
+    chips: list[CommentChipView] = []
+    chips.append(CommentChipView("all", "All", len(scope), _channel_href("all", video_filter, draft_only), selected == "all"))
+    for key, label in COMMENT_CATEGORIES.items():
+        chips.append(CommentChipView(key, label, counts[key], _channel_href(key, video_filter, draft_only), selected == key))
+    chips.append(CommentChipView(NOT_SORTED_KEY, NOT_SORTED_LABEL, not_sorted_scope, _channel_href(NOT_SORTED_KEY, video_filter, draft_only), selected == NOT_SORTED_KEY))
+
+    if selected == "all":
+        filtered = list(scope)
+    elif selected == NOT_SORTED_KEY:
+        filtered = [c for c in scope if c.category not in COMMENT_CATEGORIES]
+    else:
+        filtered = [c for c in scope if c.category == selected]
+    if draft_only:
+        filtered = [c for c in filtered if c.comment_id in drafts]
+
+    rows: list[ChannelCommentRow] = []
+    for comment in filtered[:COMMENTS_LIMIT]:
+        vid = comment.video_id
+        vobj = videos.get(vid)
+        if vobj is not None and getattr(vobj, "title", ""):
+            video_title = vobj.title
+        else:
+            video_title = vid
+        video_href = f"/videos/{quote(vid)}"
+        category_label = COMMENT_CATEGORIES.get(comment.category, NOT_SORTED_LABEL)
+        date_text = format_date(comment.published_at)
+        likes_text = format_count(comment.like_count)
+        draft = drafts.get(comment.comment_id)
+        matched: tuple[CommentTemplateView, ...] = ()
+        if comment.category in ("question", "feedback"):
+            matched = tuple(
+                CommentTemplateView(t.name, replytemplates_mod.fill(t.body, comment.author))
+                for t in replytemplates_mod.suggest(comment.text, templates)[:3]
+            )
+        youtube_url = f"https://www.youtube.com/watch?v={quote(vid)}&lc={quote(comment.comment_id)}"
+        rows.append(ChannelCommentRow(
+            comment=comment,
+            video_id=vid,
+            video_title=video_title,
+            video_href=video_href,
+            category_label=category_label,
+            date_text=date_text,
+            likes_text=likes_text,
+            draft=draft,
+            templates=matched,
+            youtube_url=youtube_url,
+        ))
+
+    # rail over all ordered
+    seen: list[str] = []
+    seen_set: set[str] = set()
+    for c in ordered:
+        if c.video_id not in seen_set:
+            seen_set.add(c.video_id)
+            seen.append(c.video_id)
+    video_rows: list[ChannelVideoRow] = []
+    for vid in seen:
+        v_comments = [c for c in ordered if c.video_id == vid]
+        n = len(v_comments)
+        q = sum(1 for c in v_comments if c.category == "question")
+        unsorted_v = sum(1 for c in v_comments if c.category not in COMMENT_CATEGORIES)
+        if q:
+            meta = f"{q} question{'' if q == 1 else 's'} \u00b7 {n} comment{'' if n == 1 else 's'}"
+        else:
+            meta = f"{n} comment{'' if n == 1 else 's'}"
+        vobj = videos.get(vid)
+        title = vobj.title if vobj is not None and getattr(vobj, "title", "") else vid
+        href = _channel_href(selected, vid, draft_only)
+        active = vid == video_filter
+        video_rows.append(ChannelVideoRow(video_id=vid, title=title, href=href, meta=meta, unsorted=unsorted_v, active=active))
+
+    unsorted_total = sum(1 for c in ordered if c.category not in COMMENT_CATEGORIES)
+    if ordered:
+        newest_fetched = max(c.fetched_at for c in ordered)
+        fetched_text = format_date(newest_fetched)
+    else:
+        fetched_text = ""
+    video_count = len(seen)
+    draft_only_href = _channel_href(selected, video_filter, not draft_only)
+    next_path = _channel_href(selected, video_filter, draft_only)
+    return ChannelCommentsView(
+        chips=tuple(chips),
+        rows=tuple(rows),
+        videos=tuple(video_rows),
+        total=len(ordered),
+        filtered_total=len(filtered),
+        unsorted=unsorted_total,
+        video_count=video_count,
+        fetched_text=fetched_text,
+        filter_key=selected,
+        video_filter=video_filter,
+        draft_only=draft_only,
+        draft_only_href=draft_only_href,
+        next_path=next_path,
+    )
+
+
 @dataclass(frozen=True)
 class GlossaryRow:
     index: int

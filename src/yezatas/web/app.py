@@ -70,7 +70,7 @@ from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
 from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
                     affiliate_apply_message, build_adcheck_view, build_shorts_view, build_affiliate_preview,
-                    build_bulk_preview, build_checks_view, build_comments_view, build_copilot_turns, build_glossary_rows, build_links_view, build_listing,
+                    build_bulk_preview, build_channel_comments_view, build_checks_view, build_comments_view, build_copilot_turns, build_glossary_rows, build_links_view, build_listing,
                     build_outlier_view, build_outdated_view, build_packaging_view, build_preview, build_strategy_view, build_subtitles_view,
                     build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
                     chapters_blocker, dashboard_model, format_cost, format_count, format_date,
@@ -171,6 +171,15 @@ ASSIST_TIMEOUT_SECONDS = 180.0
 ASSIST_TIMEOUT_MESSAGE = (
     "Sorting the comments took more than 3 minutes, so Yezatas stopped waiting. Try again."
 )
+CHANNEL_FETCH_TIMEOUT_SECONDS = 10 * 60.0
+CHANNEL_FETCH_TIMEOUT_MESSAGE = (
+    "Reading the comments took more than 10 minutes, so Yezatas stopped waiting. Try again."
+)
+CHANNEL_SORT_TIMEOUT_SECONDS = 30 * 60.0
+CHANNEL_SORT_TIMEOUT_MESSAGE = (
+    "Sorting the comments took more than 30 minutes, so Yezatas stopped waiting. Try again."
+)
+CHANNEL_COMMENTS_PATH = "/comments"
 NO_PACKAGING_KEY = "There is no Meta API key. Add one in Setup. Nothing was sent."
 MAX_ID_DIGITS = 12  # a variant id in a URL; longer is never a real one
 MAX_PATH_CHARS = 1000
@@ -559,6 +568,16 @@ def map_assist_error(exc: BaseException) -> tuple[str, str]:
     return "assist", f"Sorting the comments stopped unexpectedly ({exc.__class__.__name__})."
 
 
+def comments_back(next_path: str) -> str | None:
+    """The /comments page (with its filters) a reply form asked to come back to, or None."""
+    if next_path == CHANNEL_COMMENTS_PATH:
+        return next_path
+    if next_path.startswith(CHANNEL_COMMENTS_PATH + "?") and len(next_path) <= MAX_PATH_CHARS \
+            and all(33 <= ord(ch) < 127 and ch != "\\" for ch in next_path):
+        return next_path
+    return None
+
+
 def make_default_comments_assist(config: Config) -> CommentsAssistFn:
     """The real sort: Muse Spark through Meta's Model API, one client per sort."""
 
@@ -846,6 +865,10 @@ class WebState:
         self.assist_job = Job(map_assist_error, ASSIST_TIMEOUT_SECONDS, ASSIST_TIMEOUT_MESSAGE, clock)
         self._assist_seen: JobSnapshot | None = None
         self._assist_video = ""
+        self.channel_comments_job = Job(map_comments_error, CHANNEL_FETCH_TIMEOUT_SECONDS, CHANNEL_FETCH_TIMEOUT_MESSAGE, clock)
+        self._channel_comments_seen: JobSnapshot | None = None
+        self.channel_sort_job = Job(map_assist_error, CHANNEL_SORT_TIMEOUT_SECONDS, CHANNEL_SORT_TIMEOUT_MESSAGE, clock)
+        self._channel_sort_seen: JobSnapshot | None = None
         self.thumb_job = Job(map_thumb_error)
         self._thumb_seen: JobSnapshot | None = None
         self._thumb_page = ""  # the page that started the swap
@@ -1674,6 +1697,56 @@ class WebState:
             with self._lock:
                 self._assist_seen = snap
 
+    # --- comments of the whole channel (/comments) ---------------------------------------------
+    def start_channel_comments(self, video_ids: Sequence[str], creds: Any) -> bool:
+        """Read the comments of several videos in the one channel fetch job."""
+        ids = list(video_ids)
+        return self.channel_comments_job.start(lambda report: self._run_channel_comments(ids, creds, report))
+
+    def _run_channel_comments(self, video_ids: list[str], creds: Any, report: Report) -> "comments_mod.ChannelFetch":
+        report("Starting…")
+        reader = self._make_comment_reader(creds)
+        with Store(self.config.catalog_db) as store:
+            guard = QuotaGuard(store, self.config.daily_quota_budget)
+            return comments_mod.fetch_channel_comments(store, reader, video_ids, guard=guard, report=report)
+
+    def channel_comments_state(self) -> JobSnapshot:
+        snap = self.channel_comments_job.snapshot()
+        with self._lock:
+            if snap is self._channel_comments_seen:
+                snap = JobSnapshot("idle")
+            return snap
+
+    def dismiss_channel_comments_result(self) -> None:
+        snap = self.channel_comments_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._channel_comments_seen = snap
+
+    def start_channel_sort(self, video_ids: Sequence[str]) -> bool:
+        """Sort the comments of several videos in the one channel sort job."""
+        ids = list(video_ids)
+        return self.channel_sort_job.start(lambda report: self._run_channel_sort(ids, report))
+
+    def _run_channel_sort(self, video_ids: list[str], report: Report) -> "comments_mod.ChannelSort":
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            now = datetime.now(timezone.utc)
+            return comments_mod.sort_channel_comments(lambda vid: self._comments_assist(store, vid, now, lambda line: None), video_ids, report=report)
+
+    def channel_sort_state(self) -> JobSnapshot:
+        snap = self.channel_sort_job.snapshot()
+        with self._lock:
+            if snap is self._channel_sort_seen:
+                snap = JobSnapshot("idle")
+            return snap
+
+    def dismiss_channel_sort_result(self) -> None:
+        snap = self.channel_sort_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._channel_sort_seen = snap
+
     # --- custom checks: turn words into one fixed rule (G7) --------------------------------------
     def propose_rule(self, request: str) -> "customchecks_mod.RuleDraft":
         """Turn the creator's words into a proposed rule. Short: callers use a worker thread."""
@@ -2047,6 +2120,36 @@ def create_app(
             }
         panel.update({"has_key": has_key, "has_comments": has_comments, "model": config.model, "result": result})
         return panel
+
+    def channel_fetch_panel(has_write: bool, videos: int) -> dict[str, Any]:
+        snap = state.channel_comments_state()
+        running = snap.running
+        failed = snap.message if snap.status == "failed" else ""
+        message = snap.message if running else ""
+        result = None
+        if snap.status == "done" and isinstance(snap.result, comments_mod.ChannelFetch):
+            found = snap.result
+            n = found.fetched
+            v = found.videos
+            result = {"text": f"Fetched {n} comment{'' if n == 1 else 's'} from {v} video{'' if v == 1 else 's'}.", "notes": list(found.notes)}
+        return {"running": running, "message": message, "failed": failed, "has_write": has_write, "videos": videos, "units": comments_mod.channel_fetch_units(videos), "result": result}
+
+    def channel_sort_panel(has_key: bool, videos: int) -> dict[str, Any]:
+        snap = state.channel_sort_state()
+        running = snap.running
+        failed = snap.message if snap.status == "failed" else ""
+        message = snap.message if running else ""
+        result = None
+        if snap.status == "done" and isinstance(snap.result, comments_mod.ChannelSort):
+            found = snap.result
+            total = found.input_tokens + found.output_tokens
+            cost = agent.estimate_cost(found.model, found.input_tokens, found.cached_tokens, found.output_tokens)
+            result = {
+                "counts": [(comments_mod.CATEGORIES[key], found.counts.get(key, 0)) for key in comments_mod.CATEGORIES],
+                "drafts": found.drafts, "notes": list(found.notes), "model": found.model,
+                "tokens": f"{total:,}", "cost": format_cost(cost),
+            }
+        return {"running": running, "message": message, "failed": failed, "has_key": has_key, "videos": videos, "model": config.model, "result": result}
 
     def video_not_found(request: Request) -> Response:
         return render(request, "error.html", {
@@ -2652,6 +2755,8 @@ def create_app(
             "shorts": _job_json(state.shorts_job.snapshot()),
             "comments": _job_json(state.comments_job.snapshot()),
             "assist": _job_json(state.assist_job.snapshot()),
+            "channel_comments": _job_json(state.channel_comments_job.snapshot()),
+            "channel_sort": _job_json(state.channel_sort_job.snapshot()),
             "variants": _job_json(state.variants_job.snapshot()),
             "thumb": _job_json(state.thumb_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
@@ -3180,6 +3285,23 @@ def create_app(
     async def bulk_ask_discard(request: Request) -> Response:
         await read_form(request)
         return see_other("/bulk")
+
+    # --- comments of the whole channel (/comments) ------------------------------------------------
+    @app.get("/comments")
+    def comments_page(request: Request) -> Response:
+        with Store(config.catalog_db) as store:
+            stored = store.list_recent_comments()
+            open_replies = store.list_open_comment_replies()
+            videos = {v.video_id: v for v in store.list_videos()}
+            templates = store.list_reply_templates()
+            to_fetch = comments_mod.newest_video_ids(store)
+            to_sort = comments_mod.unsorted_video_ids(store.list_recent_comments(limit=5000))
+        cv = build_channel_comments_view(stored, open_replies, videos, templates, dict(request.query_params))
+        fetch = channel_fetch_panel(state.write_credentials() is not None, len(to_fetch))
+        sort = channel_sort_panel(has_packaging_key(), len(to_sort))
+        return render(request, "comments.html", {
+            "active": "comments", "cv": cv, "fetch": fetch, "sort": sort,
+            "poll": fetch["running"] or sort["running"]})
 
     # --- reply templates (G5) -------------------------------------------------------------------
     @app.get("/replies")
@@ -4026,9 +4148,58 @@ def create_app(
         video_id = str(form.get("video_id") or "")
         return see_other(f"/videos/{quote(video_id)}#comments" if video_id else "/")
 
-    async def set_reply_status(request: Request, video_id: str, reply_id: str, status: str) -> Response:
+    @app.post("/comments/fetch")
+    async def fetch_channel_comments_route(request: Request) -> Response:
         await read_form(request)
-        back = see_other(f"/videos/{quote(video_id)}#comments")
+        creds = await run_in_threadpool(state.write_credentials)
+
+        def newest() -> list[str]:
+            with Store(config.catalog_db) as store:
+                return comments_mod.newest_video_ids(store)
+
+        ids = await run_in_threadpool(newest)
+        if creds is None:
+            flash(request, "error", "Reading comments needs the YouTube permission that pushing uses. Nothing is posted.")
+        elif not ids:
+            flash(request, "error", "There are no videos yet. Pull your videos first.")
+        elif state.comments_job.snapshot().running or not state.start_channel_comments(ids, creds):
+            flash(request, "error", "The comments are already being read. Wait for it to finish.")
+        return see_other(CHANNEL_COMMENTS_PATH)
+
+    @app.post("/comments/sort")
+    async def sort_channel_comments_route(request: Request) -> Response:
+        await read_form(request)
+        if not await run_in_threadpool(has_packaging_key):
+            flash(request, "error", NO_PACKAGING_KEY, "ai")
+            return see_other(CHANNEL_COMMENTS_PATH)
+
+        def need_sort() -> list[str]:
+            with Store(config.catalog_db) as store:
+                return comments_mod.unsorted_video_ids(store.list_recent_comments(limit=5000))
+
+        ids = await run_in_threadpool(need_sort)
+        if not ids:
+            flash(request, "error", "Every stored comment is sorted already.")
+        elif state.assist_job.snapshot().running or not state.start_channel_sort(ids):
+            flash(request, "error", "The comments are already being sorted. Wait for it to finish.")
+        return see_other(CHANNEL_COMMENTS_PATH)
+
+    @app.post("/comments/channel/fetch/done")
+    async def dismiss_channel_fetch(request: Request) -> Response:
+        await read_form(request)
+        state.dismiss_channel_comments_result()
+        return see_other(CHANNEL_COMMENTS_PATH)
+
+    @app.post("/comments/channel/sort/done")
+    async def dismiss_channel_sort(request: Request) -> Response:
+        await read_form(request)
+        state.dismiss_channel_sort_result()
+        return see_other(CHANNEL_COMMENTS_PATH)
+
+    async def set_reply_status(request: Request, video_id: str, reply_id: str, status: str) -> Response:
+        form = await read_form(request)
+        back = see_other(comments_back(str(form.get("next") or ""))
+                         or f"/videos/{quote(video_id)}#comments")
 
         def work() -> str:
             with Store(config.catalog_db) as store:
