@@ -146,3 +146,43 @@ def test_an_unknown_video_is_neither_suggested_nor_marked(tmp_path: Path) -> Non
     assert ui.fn.calls == []
     with Store(ui.config.catalog_db) as store:
         assert store.pinned_comment("nope") is None
+
+
+def test_category_and_pinned_comment_sit_in_details_above_tools(tmp_path: Path) -> None:
+    ui = make_pin_ui(tmp_path)
+    html = page(ui)
+    details = html.split('<section class="vdetails" id="details"')[1].split('id="h-tools"')[0]
+    assert html.index('id="h-details">Details</h2>') < html.index('id="h-tools"')
+    assert html.index('id="h-edit"') < html.index('id="h-details"')
+    assert '<details class="tool" id="detail-category" data-keep>' in html
+    assert '<details class="tool" id="detail-pinned" data-keep>' in html
+    assert html.index('id="detail-category"') < html.index('id="category"') < html.index('id="detail-pinned"')
+    assert html.index('id="detail-pinned"') < html.index('id="pinned-comment"') < html.index('id="h-tools"')
+    assert '<span class="tool-name">Pinned comment</span>' in details
+    assert re.search(r'<span class="tool-name">Pinned comment</span>.*?<span class="pill unverified">Not fetched</span>'
+                     r'</summary>', html, re.S)
+    assert '<a href="#h-details">Details</a>' in html
+    assert 'href="#category"' in html and 'href="#pinned-comment"' in html  # the tiles still lead there
+
+
+def test_a_found_comment_from_the_channel_is_shown(tmp_path: Path) -> None:
+    ui = make_pin_ui(tmp_path)
+    with Store(ui.config.catalog_db) as store:
+        store.upsert_comments([
+            Comment("c1", V1, author="viewer", text="Nice", published_at="2026-10-02T10:00:00Z"),
+            Comment("c2", V1, author="me", text="Old note", by_owner=True, published_at="2026-09-01T10:00:00Z"),
+            Comment("c3", V1, author="me", text="Ask me <anything>", by_owner=True, like_count=1234,
+                    published_at="2026-10-01T10:00:00Z"),
+        ])
+    part = card(ui)
+    assert ">Yours found</span>" in part
+    found = part.split('id="pinned-found"')[1].split("</div>")[0]
+    assert '<p class="pin-text" id="pin-found-text">Ask me &lt;anything&gt;</p>' in found
+    assert "Oct 1, 2026 &middot; 1.2K likes" in found and "Old note" not in found
+    assert 'href="https://www.youtube.com/watch?v=vid00000001&amp;lc=c3"' in found and ">Open on YouTube</a>" in found
+
+
+def test_no_comment_from_the_channel_shows_none(tmp_path: Path) -> None:
+    ui = make_pin_ui(tmp_path)
+    add_comments(ui, own=False)
+    assert 'id="pinned-found"' not in card(ui)

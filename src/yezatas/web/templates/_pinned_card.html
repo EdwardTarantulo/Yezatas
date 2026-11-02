@@ -5,6 +5,13 @@
     <span class="pill {{ pn.tone }}" id="pinned-chip">{{ pn.chip }}</span>
   </div>
   <p id="pinned-detail">{{ pn.detail }}</p>
+  {% if pn.own %}
+  <div class="pin-box pin-found" id="pinned-found">
+    <p class="pin-label">Your newest comment on this video</p>
+    <p class="pin-text" id="pin-found-text">{{ pn.own.text }}</p>
+    <p class="hint pin-found-meta">{{ pn.own.date_text }} &middot; {{ pn.own.likes_text }} likes &middot; <a href="{{ pn.own.youtube_url }}" target="_blank" rel="noopener noreferrer">Open on YouTube</a></p>
+  </div>
+  {% endif %}
   {% if pn.error %}<div class="flash error" role="alert" id="pinned-error">{{ pn.error }}</div>{% endif %}
   {% if pt.running %}
   <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="pinned-msg" role="status" aria-live="polite">{{ pt.message or 'Starting…' }}</span></p>

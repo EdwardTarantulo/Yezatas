@@ -2604,7 +2604,7 @@ def create_app(
                 next((c for c in entry.card.checks if c.check_id == "category"), None), _local_time),
             "pt": pt, "pn": build_pinned_view(
                 pinned_record, next((c for c in entry.card.checks if c.check_id == "pinned_comment"), None),
-                _local_time),
+                _local_time, all_comments),
             "change": card,
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
             "tag_count": len(text[2]), "tag_chars": tags_char_count(text[2]), "tags_limit": TAGS_CHAR_LIMIT,

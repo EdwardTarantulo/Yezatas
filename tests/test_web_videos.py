@@ -267,8 +267,8 @@ def test_video_page_menu_and_section_names(tmp_path: Path) -> None:
     html = ui.client.get(f"/videos/{vid}").text
     start = html.index('<nav class="vnav"')
     nav = html[start:html.index("</nav>", start)]
-    assert re.findall(r'href="(#[a-z-]+)"', nav) == ["#edit", "#h-tools", "#checks"]
-    assert ">Tools</a>" in nav and ">Checklist" in nav and "What to fix" not in nav
+    assert re.findall(r'href="(#[a-z-]+)"', nav) == ["#edit", "#h-details", "#h-tools", "#checks"]
+    assert ">Details</a>" in nav and ">Tools</a>" in nav and ">Checklist" in nav and "What to fix" not in nav
     assert '<h2 id="h-tools">Tools</h2>' in html and "AI tools" not in html
     assert '<span class="tool-name">Checklist</span>' in html and "All checks" not in html
     assert '<span class="tool-name">Thumbnail</span>' in html and ">Packaging<" not in html

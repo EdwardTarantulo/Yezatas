@@ -32,7 +32,7 @@
 
 {% include "_video_analytics.html" %}
 
-<nav class="vnav" aria-label="On this page"><a href="#edit">Edit</a><a href="#h-tools">Tools</a><a href="#checks">Checklist{% if card.failed %} <span class="vnav-n">{{ card.failed|length }}</span>{% endif %}</a></nav>
+<nav class="vnav" aria-label="On this page"><a href="#edit">Edit</a><a href="#h-details">Details</a><a href="#h-tools">Tools</a><a href="#checks">Checklist{% if card.failed %} <span class="vnav-n">{{ card.failed|length }}</span>{% endif %}</a></nav>
 
 <div class="vbody">
 {% include "_video_fixes.html" %}
@@ -68,9 +68,20 @@
   </form>
 </section>
 
-{% include "_category_card.html" %}
-
-{% include "_pinned_card.html" %}
+<section class="vdetails" id="details" aria-labelledby="h-details">
+  <h2 id="h-details">Details</h2>
+  <p class="muted">As in YouTube Studio: checked here, changed in Studio. Open a row to see it.</p>
+  <div class="vdetails-rows">
+  <details class="tool" id="detail-category" data-keep>
+    <summary><span class="tool-icon">{{ icon('category') }}</span><span class="tool-text"><span class="tool-name">Category</span><span class="tool-what">{{ cg.current }}</span></span><span class="pill {{ cg.tone }}">{{ cg.chip }}</span></summary>
+    {% include "_category_card.html" %}
+  </details>
+  <details class="tool" id="detail-pinned" data-keep>
+    <summary><span class="tool-icon">{{ icon('pin') }}</span><span class="tool-text"><span class="tool-name">Pinned comment</span><span class="tool-what">A comment from you at the top of the comments</span></span><span class="pill {{ pn.tone }}">{{ pn.chip }}</span></summary>
+    {% include "_pinned_card.html" %}
+  </details>
+  </div>
+</section>
 
 {% include "_video_tools.html" %}
 

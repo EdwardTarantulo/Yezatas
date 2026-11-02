@@ -548,6 +548,12 @@ a.chip:hover { background: var(--line); }
 .tool > .card { border: 0; margin: 0; padding-top: 0; background: none; }
 .tool > .card > h2, .tool > .card > .card-title-row > h2 { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .tool > .card > .card-title-row { justify-content: flex-end; }
+.vdetails { margin: 24px 0 16px; }
+.vdetails > h2 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.vdetails-rows { display: grid; gap: 10px; }
+.vdetails-rows > .tool { margin: 0; }
+.vdetails .tool > summary > .pill { flex: none; }
+.vdetails .tool > .card > .card-title-row { display: none; }
 .vtools .button.primary { background: var(--surface); color: var(--text); border-color: var(--line); box-shadow: var(--shadow); }
 .vtools .button.primary:hover:not(:disabled) { background: var(--hover); }
 .all-checks { margin-top: 16px; }
@@ -821,6 +827,9 @@ button.gbtn { cursor: pointer; }
 .pin-link { padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-weight: 500; cursor: pointer; }
 .pin-link:hover { text-decoration: underline; }
 .pin-note { margin: 12px 0 0; }
+.pin-found { margin: 12px 0 0; }
+.pin-found .pin-text { margin: 0 0 8px; }
+.pin-found-meta { margin: 0; }
 .tr-select { grid-column: 1 / -1; margin: 0 0 4px; font-size: var(--fs-sm); color: var(--muted); }
 .tr-select:not([hidden]) { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
 .tr-select button { padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-weight: 500; cursor: pointer; }
