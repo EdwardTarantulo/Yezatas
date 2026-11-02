@@ -449,6 +449,16 @@ as it lands; the git history is the detailed record.
   Dismiss button's way back now refuses `/\host` as well as `//host`, which browsers both read as another site,
   and the confirmation page shows its quota numbers with separators. In review: a test string with an invalid
   escape.
+- **2026-11-02**: **A redesigned video page and sidebar**, mocked up first as still pictures (made-up videos only)
+  and then built by **Muse Spark Open** on Baseten (about 15K tokens, five rounds). The video page opens with one
+  header: thumbnail, title, a visibility pill, and a score ring with the points still possible. Under it, a bar
+  of links to What to fix, Edit, AI tools and All checks stays at the top while you scroll. On wide screens What
+  to fix becomes a right-hand column that stays in view while you edit. Each fix starts with its points and ends
+  with a link to the field or tool that fixes it (chapters go to Transcript, languages to Translations). The AI
+  tools are a grid of tiles with icons. The sidebar marks the current page with a teal tint and keeps Setup at
+  the bottom with "Nothing goes to YouTube until you approve it."; on phones the menu row scrolls to the current
+  page. Checked in the browser at desktop and phone width, light and dark. In review: blank lines and
+  indentation left by moved lines.
 
 ---
 
