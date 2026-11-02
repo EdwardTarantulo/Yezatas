@@ -262,7 +262,7 @@ def test_video_page_puts_the_edit_form_first_and_folds_the_tools(tmp_path: Path)
     html = ui.client.get(f"/videos/{vid}").text
     marks = ['id="video-head"', 'id="what-to-fix"', 'id="edit"', 'id="h-tools"', 'id="checks"']
     assert [html.index(m) for m in marks] == sorted(html.index(m) for m in marks)
-    tids = ["tool-suggest", "tool-translations", "tool-transcript", "tool-packaging", "tool-shorts", "tool-adcheck", "tool-comments"]
+    tids = ["tool-suggest", "tool-translations", "tool-transcript", "tool-subtitles", "tool-packaging", "tool-shorts", "tool-adcheck", "tool-comments"]
     last = -1
     for tid in tids:
         needle = f'<details class="tool" id="{tid}" data-keep>'
@@ -270,7 +270,7 @@ def test_video_page_puts_the_edit_form_first_and_folds_the_tools(tmp_path: Path)
         pos = html.index(needle)
         assert pos > last
         last = pos
-    for inner in ["suggest", "translations", "transcript", "packaging", "shorts", "adcheck", "comments"]:
+    for inner in ["suggest", "translations", "transcript", "subtitles", "packaging", "shorts", "adcheck", "comments"]:
         assert f'id="{inner}"' in html
     assert '<details class="all-checks" id="checks" data-keep>' in html
 

@@ -157,7 +157,7 @@ def stored(ui: Any, video_id: str = V1) -> dict[str, Any]:
 def test_the_block_is_hidden_without_a_transcript(tmp_path: Path) -> None:
     ui, _ = make_sb_ui(tmp_path, transcripts=False)
     html = page(ui)
-    assert 'id="subtitles"' not in html and "Subtitles in other languages" not in html
+    assert 'id="subtitles-need-transcript"' in html and 'id="subtitles-form"' not in html
     assert nf(ui, f"/videos/{V1}/subtitles", data={"targets": ["es"]}).status_code == 303
     assert "no transcript" in page(ui) and ui.web.subtitles_job.snapshot().status == "idle"
 
@@ -167,7 +167,8 @@ def test_the_block_sits_under_chapters_and_says_nothing_is_uploaded(tmp_path: Pa
     html = page(ui)
     section = block(html)
     assert html.index("Chapters and subtitles") < html.index('id="subtitles"')
-    assert "Subtitles in other languages</h3>" in html
+    assert '<h2 id="h-subtitles">Subtitles in other languages</h2>' in html
+    assert '<details class="tool" id="tool-subtitles" data-keep>' in html
     assert "Yezatas does not upload subtitles to YouTube" in section
     assert "YouTube Studio" in section and "every time is copied from the transcript" in section
     assert "spark-test translates" in section and "glimmer-test on this computer" in section

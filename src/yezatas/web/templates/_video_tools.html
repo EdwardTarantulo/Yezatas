@@ -16,6 +16,10 @@
     <summary><span class="tool-icon">{{ icon('content') }}</span><span class="tool-text"><span class="tool-name">Transcript and chapters</span><span class="tool-what">Speech to text from the video file, then chapters</span></span>{% if ts.transcribe.running or ts.chapters.running %}<span class="tool-state">Running</span>{% endif %}</summary>
     {% include "_transcript_card.html" %}
   </details>
+  <details class="tool" id="tool-subtitles" data-keep>
+    <summary><span class="tool-icon">{{ icon('translations') }}</span><span class="tool-text"><span class="tool-name">Subtitles</span><span class="tool-what">Subtitle files in other languages; needs the transcript first</span></span>{% if sb.running %}<span class="tool-state">Running</span>{% endif %}</summary>
+    {% include "_subtitles_card.html" %}
+  </details>
   <details class="tool" id="tool-packaging" data-keep>
     <summary><span class="tool-icon">{{ icon('dashboard') }}</span><span class="tool-text"><span class="tool-name">Thumbnail</span><span class="tool-what">How the title and thumbnail work together, and variants</span></span>{% if pk.check.running or pk.variants.running %}<span class="tool-state">Running</span>{% endif %}</summary>
     {% include "_packaging_card.html" %}
