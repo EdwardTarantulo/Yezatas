@@ -160,9 +160,9 @@
           setTimeout(poll, 1500);
         } else {
           keepScroll();
-          // Reload without the #anchor, so the browser does not jump to it before the page restores its place.
-          history.replaceState(null, "", window.location.pathname + window.location.search);
-          window.location.reload();
+          // Load the page again without the #anchor, so the browser does not jump to it; a replace, not a
+          // reload, so browsers that cross-fade page loads (app.css) do so here too.
+          window.location.replace(window.location.pathname + window.location.search);
         }
       })
       .catch(function () {
@@ -231,6 +231,7 @@ document.addEventListener("submit", function (e) {
     // Back from a reload this page caused: come back at the same place, then glide to the card only if it is
     // out of view.
     window.scrollTo({ top: back[0], behavior: "instant" });
+    document.documentElement.classList.remove("yz-restoring");
     var card = go && document.getElementById(go);
     if (card) {
       var fold = card.closest("details[data-keep]");
@@ -245,6 +246,9 @@ document.addEventListener("submit", function (e) {
   }
   window.addEventListener("hashchange", openTarget);
 })();
+
+// Whatever happened above, never leave the page hidden (theme.js hides it while the place is restored).
+document.documentElement.classList.remove("yz-restoring");
 
 // Phone menu: the sidebar is one scrolling row there. Bring the current page's chip into view (centred) without
 // scrolling the page itself.

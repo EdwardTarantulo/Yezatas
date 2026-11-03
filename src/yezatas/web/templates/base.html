@@ -7,6 +7,9 @@
   <title>{% block title %}Yezatas{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/theme.js"></script>
+  {# Hold the first paint until app.js has run, so a page coming back from a button press is drawn at the reader's
+     place, not at the top (browsers without render blocking hide the page for that moment instead, see theme.js). #}
+  <link rel="expect" href="#yz-ready" blocking="render">
 </head>
 <body class="{% block body_class %}bare{% endblock %}" data-poll="{{ '1' if poll|default(false) else '0' }}" data-csrf="{{ csrf|default('') }}">
 {% block body %}
@@ -21,5 +24,6 @@
   </main>
 {% endblock %}
   <script src="/static/app.js"></script>
+  <div id="yz-ready" hidden></div>
 </body>
 </html>

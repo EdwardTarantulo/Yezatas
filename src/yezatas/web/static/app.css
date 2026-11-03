@@ -1178,3 +1178,10 @@ a.vhead-thumb:hover img { opacity: .88; }
 
 /* In-page links (the jump bar, Checklist buttons, the header thumbnail) glide instead of jumping. */
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+/* A page coming back from a button press cross-fades instead of flashing (browsers with view transitions). */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition { navigation: auto; }
+  ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .2s; }
+}
+html.yz-restoring body { visibility: hidden; }

@@ -23,6 +23,15 @@
   }
 
   apply();
+  // Coming back from a button press (app.js keeps the place): where the first paint cannot be held until app.js
+  // has scrolled, keep the page invisible for that moment instead of showing its top.
+  try {
+    var link = document.createElement("link");
+    if (!(link.relList && link.relList.supports && link.relList.supports("expect"))
+        && window.sessionStorage.getItem("yz-scroll:" + window.location.pathname)) {
+      root.classList.add("yz-restoring");
+    }
+  } catch (e) { /* storage blocked: nothing kept */ }
   if (media && media.addEventListener) media.addEventListener("change", apply);
   window.yezatasTheme = { current: current, set: set };
 })();
