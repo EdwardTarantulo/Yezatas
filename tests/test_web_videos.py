@@ -268,7 +268,8 @@ def test_video_page_menu_and_section_names(tmp_path: Path) -> None:
     start = html.index('<nav class="vnav"')
     nav = html[start:html.index("</nav>", start)]
     assert re.findall(r'href="(#[a-z-]+)"', nav) == ["#edit", "#h-details", "#h-tools", "#checks"]
-    assert ">Details</a>" in nav and ">Tools</a>" in nav and ">Checklist" in nav and "What to fix" not in nav
+    assert ">Video details</a>" in nav and ">Tools</a>" in nav and ">Checklist" in nav and "What to fix" not in nav
+    assert '<h2 id="h-details">Video details</h2>' in html
     assert '<h2 id="h-tools">Tools</h2>' in html and "AI tools" not in html
     assert '<span class="tool-name">Checklist</span>' in html and "All checks" not in html
     assert '<span class="tool-name">Thumbnail</span>' in html and ">Packaging<" not in html
@@ -291,19 +292,19 @@ def test_video_page_puts_the_edit_form_first_and_folds_the_tools(tmp_path: Path)
     ui = seeded(tmp_path, 40)
     vid = next(i for i, card in ui.cards.items() if card.failed)
     html = ui.client.get(f"/videos/{vid}").text
-    marks = ['id="video-head"', 'id="what-to-fix"', 'id="edit"', 'id="h-tools"', 'id="checks"']
+    marks = ['id="video-head"', 'id="what-to-fix"', 'id="edit"', 'id="h-details"', 'id="h-tools"', 'id="checks"']
     assert [html.index(m) for m in marks] == sorted(html.index(m) for m in marks)
-    tids = ["tool-suggest", "tool-translations", "tool-transcript", "tool-subtitles", "tool-packaging", "tool-shorts", "tool-adcheck", "tool-comments"]
-    last = -1
+    tids = ["tool-packaging", "tool-transcript", "tool-subtitles", "tool-translations", "tool-comments", "tool-suggest", "tool-adcheck", "tool-shorts"]
     for tid in tids:
         needle = f'<details class="tool" id="{tid}" data-keep>'
-        assert needle in html
-        pos = html.index(needle)
-        assert pos > last
-        last = pos
+        assert html.count(needle) == 1
     for inner in ["suggest", "translations", "transcript", "subtitles", "packaging", "shorts", "adcheck", "comments"]:
         assert f'id="{inner}"' in html
     assert '<details class="all-checks" id="checks" data-keep>' in html
+    for tid in ["tool-packaging", "tool-transcript", "tool-subtitles", "tool-translations", "tool-comments"]:
+        assert html.index('id="h-details"') < html.index(f'id="{tid}"') < html.index('id="h-tools"')
+    for tid in ["tool-suggest", "tool-adcheck", "tool-shorts"]:
+        assert html.index('id="h-tools"') < html.index(f'id="{tid}"') < html.index('id="checks"')
 
 
 def test_what_to_fix_lists_the_failed_checks_with_points(tmp_path: Path) -> None:
@@ -334,8 +335,9 @@ def test_what_to_fix_links_each_fix_to_where_it_is_made(tmp_path: Path) -> None:
     ui = seeded(tmp_path, 40)
     vid = next(i for i, card in ui.cards.items() if any(c.check_id == "localizations" for c in card.failed))
     html = ui.client.get(f"/videos/{vid}").text
-    part = html[html.index('id="what-to-fix"'):html.index('id="edit"')]
-    assert 'class="vfix-go" href="#tool-translations">Translations</a>' in part
+    part = html[html.index('id="what-to-fix"'):html.index('</section>', html.index('id="what-to-fix"'))]
+    assert 'class="vfix-go" href="#tool-translations">Translate</a>' in part
+    assert 'class="check-go" href="#tool-translations">Translate</a>' in html[html.index('id="checks"'):]
     failed = ui.cards[vid].failed
     if len(failed) > 4:
         assert f"Show {len(failed) - 4} more" in part

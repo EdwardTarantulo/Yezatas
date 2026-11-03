@@ -530,7 +530,7 @@ a.chip:hover { background: var(--line); }
 .all-checks > summary::before { content: "\25B8"; color: var(--muted); }
 .all-checks[open] > summary::before { content: "\25BE"; }
 .vtools-grid { display: grid; gap: 10px; }
-@media (min-width: 900px) { .vtools-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (min-width: 900px) { .vtools-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .vtools-grid > .tool { margin: 0; }
 .tool[open] { grid-column: 1 / -1; }
 .tool > summary { flex-wrap: nowrap; align-items: center; gap: 12px; padding: 12px 14px; }
@@ -553,9 +553,21 @@ a.chip:hover { background: var(--line); }
 .vdetails-rows { display: grid; gap: 10px; }
 .vdetails-rows > .tool { margin: 0; }
 .vdetails .tool > summary > .pill { flex: none; }
-.vdetails .tool > .card > .card-title-row { display: none; }
-.vtools .button.primary { background: var(--surface); color: var(--text); border-color: var(--line); box-shadow: var(--shadow); }
-.vtools .button.primary:hover:not(:disabled) { background: var(--hover); }
+#detail-category > .card > .card-title-row, #detail-pinned > .card > .card-title-row { display: none; }
+.vdetails-list { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.vdetails-list > .tool { margin: 0; border: 0; border-radius: 0; box-shadow: none; background: none; }
+.vdetails-list > .tool + .tool { border-top: 1px solid var(--line); }
+.vdetails-list > .tool > summary { min-height: 64px; padding: 12px 16px; }
+.vdetails-list > .tool[open] > summary { background: var(--bg); }
+.row-act { flex: none; padding: 0 14px; line-height: 32px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--text); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; }
+.tool[open] .row-act { display: none; }
+@media (max-width: 599px) { .row-act { display: none; } }
+.vtools .button.primary, .vdetails .button.primary { background: var(--surface); color: var(--text); border-color: var(--line); box-shadow: var(--shadow); }
+.vtools .button.primary:hover:not(:disabled), .vdetails .button.primary:hover:not(:disabled) { background: var(--hover); }
+.check-fix { display: flex; align-items: center; gap: 16px; }
+.check-fix > span { flex: 1; }
+.check-go { flex: none; padding: 0 12px; line-height: 30px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); color: var(--link); font-weight: 600; white-space: nowrap; text-decoration: none; }
+.check-go:hover { border-color: var(--link); }
 .all-checks { margin-top: 16px; }
 .all-checks > .check-group { border: 0; border-top: 1px solid var(--line); border-radius: 0; margin: 0; background: none; }
 

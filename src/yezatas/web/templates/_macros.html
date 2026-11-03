@@ -141,3 +141,5 @@
 </ul>
 {% endif %}
 {% endmacro %}
+
+{% macro fix_go(c, video_id, cls) %}{% set go_map = {'description_chapters': ('#tool-transcript', 'Make chapters'), 'localizations': ('#tool-translations', 'Translate'), 'thumbnail_hd': ('#tool-packaging', 'Thumbnail'), 'category': ('#category', 'Category'), 'pinned_comment': ('#pinned-comment', 'Pinned comment'), 'title': ('#f-title', 'Edit title'), 'description': ('#f-description', 'Edit description'), 'tags': ('#f-tags', 'Edit tags')} %}{% set go = go_map.get(c.check_id) or go_map.get(c.category) %}{% if go %}<a class="{{ cls }}" href="{{ go[0] }}">{{ go[1] }}</a>{% else %}<a class="{{ cls }}" href="https://studio.youtube.com/video/{{ video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">YouTube Studio</a>{% endif %}{% endmacro %}

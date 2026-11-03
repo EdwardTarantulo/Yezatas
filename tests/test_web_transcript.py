@@ -141,7 +141,7 @@ def store_of(ui: Any) -> Store:
 
 
 # --- the card -----------------------------------------------------------------------------------
-def test_the_card_has_the_form_the_price_and_sits_after_translations(tmp_path: Path) -> None:
+def test_the_card_has_the_form_the_price_and_sits_before_translations(tmp_path: Path) -> None:
     ui, _ = make_ts_ui(tmp_path)
     html = page(ui)
     section = card(html)
@@ -156,7 +156,7 @@ def test_the_card_has_the_form_the_price_and_sits_after_translations(tmp_path: P
     assert '<option value="en" selected>English</option>' in section
     assert '<select id="ts-language" name="language">' in section
     assert "Latest transcript" not in section and "Make chapters" not in section
-    assert html.index('id="edit"') < html.index('id="translations"') < html.index('id="transcript"')
+    assert html.index('id="transcript"') < html.index('id="translations"')
     assert "<script>" not in html and "style=" not in html and "onclick" not in html
 
 

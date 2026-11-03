@@ -1,40 +1,55 @@
-{# Tools on the video page: folded tool cards. #}
+{# The video page's lower half: Video details (the parts of the video, one row each) and Tools. #}
 {% from "_macros.html" import icon %}
+{% macro fv(key) %}{% for f in facts if f.key == key %}{{ f.value }}{% endfor %}{% endmacro %}
+<section class="vdetails" id="details" aria-labelledby="h-details">
+  <h2 id="h-details">Video details</h2>
+  <p class="muted">Thumbnail, chapters, languages, category and comments, each with its state and what to do.</p>
+  <div class="vdetails-list">
+  <details class="tool" id="tool-packaging" data-keep>
+    <summary><span class="tool-icon">{{ icon('dashboard') }}</span><span class="tool-text"><span class="tool-name">Thumbnail</span><span class="tool-what">How the title and thumbnail work together, and variants</span></span>{% if pk.check.running or pk.variants.running %}<span class="tool-state">Running</span>{% endif %}<span class="row-act">Check with the title</span></summary>
+    {% include "_packaging_card.html" %}
+  </details>
+  <details class="tool" id="tool-transcript" data-keep>
+    <summary><span class="tool-icon">{{ icon('content') }}</span><span class="tool-text"><span class="tool-name">Chapters</span><span class="tool-what">Chapters: {{ fv('chapters') }} &middot; made from the transcript</span></span>{% for f in facts if f.key == 'chapters' and f.tone == 'warn' %}<span class="pill warn">Fix</span>{% endfor %}{% if ts.transcribe.running or ts.chapters.running %}<span class="tool-state">Running</span>{% endif %}<span class="row-act">Make chapters</span></summary>
+    {% include "_transcript_card.html" %}
+  </details>
+  <details class="tool" id="tool-subtitles" data-keep>
+    <summary><span class="tool-icon">{{ icon('translations') }}</span><span class="tool-text"><span class="tool-name">Subtitles</span><span class="tool-what">Captions: {{ fv('captions') }} &middot; subtitle files in other languages</span></span>{% for f in facts if f.key == 'captions' and f.tone == 'warn' %}<span class="pill warn">Fix</span>{% endfor %}{% if sb.running %}<span class="tool-state">Running</span>{% endif %}<span class="row-act">Translate subtitles</span></summary>
+    {% include "_subtitles_card.html" %}
+  </details>
+  <details class="tool" id="tool-translations" data-keep>
+    <summary><span class="tool-icon">{{ icon('translations') }}</span><span class="tool-text"><span class="tool-name">Translations</span><span class="tool-what">Languages: {{ fv('translations') }} &middot; title and description, each one checked</span></span>{% for f in facts if f.key == 'translations' and f.tone == 'warn' %}<span class="pill warn">Fix</span>{% endfor %}{% if tr.running %}<span class="tool-state">Running</span>{% endif %}<span class="row-act">Translate</span></summary>
+    {% include "_translate_card.html" %}
+  </details>
+  <details class="tool" id="detail-category" data-keep>
+    <summary><span class="tool-icon">{{ icon('category') }}</span><span class="tool-text"><span class="tool-name">Category</span><span class="tool-what">{{ cg.current }}</span></span><span class="pill {{ cg.tone }}">{{ cg.chip }}</span><span class="row-act">Check category</span></summary>
+    {% include "_category_card.html" %}
+  </details>
+  <details class="tool" id="tool-comments" data-keep>
+    <summary><span class="tool-icon">{{ icon('replies') }}</span><span class="tool-text"><span class="tool-name">Comments</span><span class="tool-what">The newest comments, sorted, with reply drafts</span></span>{% if cm.running or am.running %}<span class="tool-state">Running</span>{% endif %}<span class="row-act">Open comments</span></summary>
+    {% include "_comments_card.html" %}
+  </details>
+  <details class="tool" id="detail-pinned" data-keep>
+    <summary><span class="tool-icon">{{ icon('pin') }}</span><span class="tool-text"><span class="tool-name">Pinned comment</span><span class="tool-what">A comment from you at the top of the comments</span></span><span class="pill {{ pn.tone }}">{{ pn.chip }}</span><span class="row-act">Check pinned comment</span></summary>
+    {% include "_pinned_card.html" %}
+  </details>
+  </div>
+</section>
 <section class="vtools" aria-labelledby="h-tools">
   <h2 id="h-tools">Tools</h2>
-  <p class="muted">Each tool makes a draft or advice. Nothing goes to YouTube until you approve it. Open a tool to use it.</p>
+  <p class="muted">Each tool makes a draft or advice. Nothing goes to YouTube until you approve it.</p>
   <div class="vtools-grid">
   <details class="tool" id="tool-suggest" data-keep>
     <summary><span class="tool-icon">{{ icon('changes') }}</span><span class="tool-text"><span class="tool-name">Suggestions from {{ ai_name() }}</span><span class="tool-what">A better title, description and tags, as a draft</span></span>{% if sg.running %}<span class="tool-state">Running</span>{% endif %}</summary>
     {% include "_suggest_card.html" %}
   </details>
-  <details class="tool" id="tool-translations" data-keep>
-    <summary><span class="tool-icon">{{ icon('translations') }}</span><span class="tool-text"><span class="tool-name">Translations</span><span class="tool-what">Title and description in other languages, each one checked</span></span>{% if tr.running %}<span class="tool-state">Running</span>{% endif %}</summary>
-    {% include "_translate_card.html" %}
-  </details>
-  <details class="tool" id="tool-transcript" data-keep>
-    <summary><span class="tool-icon">{{ icon('content') }}</span><span class="tool-text"><span class="tool-name">Transcript and chapters</span><span class="tool-what">Speech to text from the video file, then chapters</span></span>{% if ts.transcribe.running or ts.chapters.running %}<span class="tool-state">Running</span>{% endif %}</summary>
-    {% include "_transcript_card.html" %}
-  </details>
-  <details class="tool" id="tool-subtitles" data-keep>
-    <summary><span class="tool-icon">{{ icon('translations') }}</span><span class="tool-text"><span class="tool-name">Subtitles</span><span class="tool-what">Subtitle files in other languages; needs the transcript first</span></span>{% if sb.running %}<span class="tool-state">Running</span>{% endif %}</summary>
-    {% include "_subtitles_card.html" %}
-  </details>
-  <details class="tool" id="tool-packaging" data-keep>
-    <summary><span class="tool-icon">{{ icon('dashboard') }}</span><span class="tool-text"><span class="tool-name">Thumbnail</span><span class="tool-what">How the title and thumbnail work together, and variants</span></span>{% if pk.check.running or pk.variants.running %}<span class="tool-state">Running</span>{% endif %}</summary>
-    {% include "_packaging_card.html" %}
-  </details>
-  <details class="tool" id="tool-shorts" data-keep>
-    <summary><span class="tool-icon">{{ icon('outliers') }}</span><span class="tool-text"><span class="tool-name">Shorts finder</span><span class="tool-what">Moments that could stand alone as a Short</span></span>{% if sp.running %}<span class="tool-state">Running</span>{% endif %}</summary>
-    {% include "_shorts_card.html" %}
-  </details>
   <details class="tool" id="tool-adcheck" data-keep>
     <summary><span class="tool-icon">{{ icon('checks') }}</span><span class="tool-text"><span class="tool-name">Advertiser-friendly check</span><span class="tool-what">Words that may limit ads</span></span>{% if ac.running %}<span class="tool-state">Running</span>{% endif %}</summary>
     {% include "_adcheck_card.html" %}
   </details>
-  <details class="tool" id="tool-comments" data-keep>
-    <summary><span class="tool-icon">{{ icon('replies') }}</span><span class="tool-text"><span class="tool-name">Comments</span><span class="tool-what">The newest comments, sorted, with reply drafts</span></span>{% if cm.running or am.running %}<span class="tool-state">Running</span>{% endif %}</summary>
-    {% include "_comments_card.html" %}
+  <details class="tool" id="tool-shorts" data-keep>
+    <summary><span class="tool-icon">{{ icon('outliers') }}</span><span class="tool-text"><span class="tool-name">Shorts finder</span><span class="tool-what">Moments that could stand alone as a Short</span></span>{% if sp.running %}<span class="tool-state">Running</span>{% endif %}</summary>
+    {% include "_shorts_card.html" %}
   </details>
   </div>
 </section>

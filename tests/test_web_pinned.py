@@ -152,7 +152,7 @@ def test_category_and_pinned_comment_sit_in_details_above_tools(tmp_path: Path) 
     ui = make_pin_ui(tmp_path)
     html = page(ui)
     details = html.split('<section class="vdetails" id="details"')[1].split('id="h-tools"')[0]
-    assert html.index('id="h-details">Details</h2>') < html.index('id="h-tools"')
+    assert html.index('id="h-details">Video details</h2>') < html.index('id="h-tools"')
     assert html.index('id="h-edit"') < html.index('id="h-details"')
     assert '<details class="tool" id="detail-category" data-keep>' in html
     assert '<details class="tool" id="detail-pinned" data-keep>' in html
@@ -160,8 +160,8 @@ def test_category_and_pinned_comment_sit_in_details_above_tools(tmp_path: Path) 
     assert html.index('id="detail-pinned"') < html.index('id="pinned-comment"') < html.index('id="h-tools"')
     assert '<span class="tool-name">Pinned comment</span>' in details
     assert re.search(r'<span class="tool-name">Pinned comment</span>.*?<span class="pill unverified">Not fetched</span>'
-                     r'</summary>', html, re.S)
-    assert '<a href="#h-details">Details</a>' in html
+                     r'<span class="row-act">Check pinned comment</span></summary>', html, re.S)
+    assert '<a href="#h-details">Video details</a>' in html
     assert 'href="#category"' in html and 'href="#pinned-comment"' in html  # the tiles still lead there
 
 

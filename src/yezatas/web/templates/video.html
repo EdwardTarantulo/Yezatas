@@ -1,5 +1,5 @@
 {% extends "shell.html" %}
-{% from "_macros.html" import icon, thumb, issue_list %}
+{% from "_macros.html" import icon, thumb, issue_list, fix_go %}
 {% block title %}{{ video.title }} - Yezatas{% endblock %}
 {% block content %}
 <p class="backlink"><a href="/videos">{{ icon('back') }}<span>Videos</span></a></p>
@@ -32,7 +32,7 @@
 
 {% include "_video_analytics.html" %}
 
-<nav class="vnav" aria-label="On this page"><a href="#edit">Edit</a><a href="#h-details">Details</a><a href="#h-tools">Tools</a><a href="#checks">Checklist{% if card.failed %} <span class="vnav-n">{{ card.failed|length }}</span>{% endif %}</a></nav>
+<nav class="vnav" aria-label="On this page"><a href="#edit">Edit</a><a href="#h-details">Video details</a><a href="#h-tools">Tools</a><a href="#checks">Checklist{% if card.failed %} <span class="vnav-n">{{ card.failed|length }}</span>{% endif %}</a></nav>
 
 <div class="vbody">
 {% include "_video_fixes.html" %}
@@ -68,21 +68,6 @@
   </form>
 </section>
 
-<section class="vdetails" id="details" aria-labelledby="h-details">
-  <h2 id="h-details">Details</h2>
-  <p class="muted">As in YouTube Studio: checked here, changed in Studio. Open a row to see it.</p>
-  <div class="vdetails-rows">
-  <details class="tool" id="detail-category" data-keep>
-    <summary><span class="tool-icon">{{ icon('category') }}</span><span class="tool-text"><span class="tool-name">Category</span><span class="tool-what">{{ cg.current }}</span></span><span class="pill {{ cg.tone }}">{{ cg.chip }}</span></summary>
-    {% include "_category_card.html" %}
-  </details>
-  <details class="tool" id="detail-pinned" data-keep>
-    <summary><span class="tool-icon">{{ icon('pin') }}</span><span class="tool-text"><span class="tool-name">Pinned comment</span><span class="tool-what">A comment from you at the top of the comments</span></span><span class="pill {{ pn.tone }}">{{ pn.chip }}</span></summary>
-    {% include "_pinned_card.html" %}
-  </details>
-  </div>
-</section>
-
 {% include "_video_tools.html" %}
 
 <details class="all-checks" id="checks" data-keep>
@@ -101,7 +86,7 @@
       <div class="check-body">
         <p class="check-title">{{ c.title }}</p>
         {% if c.detail %}<p class="check-detail">{{ c.detail }}</p>{% endif %}
-        {% if state in ('fail', 'part') and c.fix %}<p class="check-fix"><strong>Fix:</strong> {{ c.fix }}</p>{% endif %}
+        {% if state in ('fail', 'part') and c.fix %}<p class="check-fix"><span><strong>Fix:</strong> {{ c.fix }}</span>{{ fix_go(c, video.video_id, 'check-go') }}</p>{% endif %}
       </div>
       <span class="check-points">{% if c.applicable %}{{ c.points }}/{{ c.max_points }}{% else %}n.a.{% endif %}</span>
     </li>
