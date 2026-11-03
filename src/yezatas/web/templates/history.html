@@ -48,6 +48,26 @@
   <p><a class="button secondary" href="/changes">Go to Changes</a></p>
 </section>
 {% endif %}
+{% if posted %}
+<section class="history-group" id="posted-replies">
+  <h2>Replies and comments posted</h2>
+  <p class="muted">What Yezatas posted on YouTube after you confirmed it. To take one down, delete it on YouTube.</p>
+  <ul class="history">
+    {% for r in posted %}
+    <li class="card history-row" id="posted-{{ r.reply.id }}">
+      <div class="history-head">
+        <span class="pill done">{{ 'Comment' if r.pinned_draft else 'Reply' }}</span>
+        <a class="history-title" href="/videos/{{ r.reply.video_id|urlencode }}">{{ r.title }}</a>
+        <span class="muted history-when">{{ r.when }}</span>
+      </div>
+      {% if r.answers %}<p class="muted">Answering {{ r.answers }}</p>{% endif %}
+      <p class="cm-draft-text">{{ r.reply.text }}</p>
+      {% if r.url %}<div class="actions"><a class="button secondary" href="{{ r.url }}" target="_blank" rel="noopener noreferrer" title="Open this on YouTube in a new tab">Open on YouTube</a></div>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% if swaps %}
 <section class="history-group" id="thumbnails">
   <h2>Thumbnails</h2>

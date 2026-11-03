@@ -37,5 +37,5 @@
     {% if not pn.marked %}<form class="inline pin-mark" method="post" action="/videos/{{ video.video_id|urlencode }}/pinned/mark"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="pin-link">I pinned one already</button></form>{% endif %}
   </div>
   {% endif %}
-  <p class="hint pin-note">Post it in YouTube Studio and pin it there. Yezatas does not post comments.{% if pn.when %} Suggested {{ pn.when }}.{% endif %}</p>
+  <p class="hint pin-note">Post it in YouTube Studio and pin it there. Yezatas cannot post this suggestion for you.{% if pn.when %} Suggested {{ pn.when }}.{% endif %}</p>
 </section>

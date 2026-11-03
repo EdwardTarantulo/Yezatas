@@ -35,7 +35,7 @@ def test_empty_page(tmp_path: Path) -> None:
     html = resp.text
     assert 'id="comments-empty"' in html
     assert 'id="fetch-button"' in html
-    assert "Yezatas only reads comments: you post replies on YouTube yourself." in html
+    assert "Yezatas posts a reply only after you check its exact text and confirm." in html
     assert "about 2 units" in html
 
 

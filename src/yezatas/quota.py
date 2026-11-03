@@ -22,6 +22,8 @@ COSTS: dict[str, int] = {
     "captions.download": 200,
     "captions.insert": 400,
     "captions.update": 450,
+    "comments.insert": 50,
+    "commentThreads.insert": 50,
 }
 
 

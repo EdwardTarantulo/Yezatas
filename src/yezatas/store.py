@@ -423,10 +423,17 @@ _SCHEMA_V15: tuple[str, ...] = (
     "ALTER TABLE comments ADD COLUMN by_owner INTEGER NOT NULL DEFAULT 0",
 )
 
+# v16: a reply draft that Yezatas posted: the id YouTube gave the new comment, and when.
+_SCHEMA_V16: tuple[str, ...] = (
+    "ALTER TABLE comment_replies ADD COLUMN posted_comment_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE comment_replies ADD COLUMN posted_at TEXT NOT NULL DEFAULT ''",
+)
+
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
     _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
     _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11, _SCHEMA_V12, _SCHEMA_V13, _SCHEMA_V14, _SCHEMA_V15,
+    _SCHEMA_V16,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -693,7 +700,8 @@ class Comment:
 @dataclass(frozen=True)
 class CommentReply:
     """One reply draft for a comment (or, with an empty `comment_id`, the pinned-comment draft
-    for the video). A draft only: the creator posts it themself; nothing is sent to YouTube."""
+    for the video). Nothing reaches YouTube unless the creator confirms posting it; then the
+    status is "posted" and `posted_comment_id` is the id YouTube gave the new comment."""
 
     id: int
     video_id: str
@@ -701,8 +709,10 @@ class CommentReply:
     text: str
     model: str
     created_at: str
-    status: str  # "open" | "used" | "dismissed"
+    status: str  # "open" | "used" (posted by hand) | "dismissed" | "posted" (by Yezatas)
     notes: tuple[str, ...]  # what the guards dropped or changed, in plain words
+    posted_comment_id: str = ""  # the new comment's id on YouTube, once status is "posted"
+    posted_at: str = ""  # when it was posted (UTC, ISO), once status is "posted"
 
 
 @dataclass(frozen=True)
@@ -2030,6 +2040,8 @@ class Store:
             created_at=row["created_at"],
             status=row["status"],
             notes=tuple(json.loads(row["notes_json"])),
+            posted_comment_id=row["posted_comment_id"],
+            posted_at=row["posted_at"],
         )
 
     def add_comment_reply(self, video_id: str, comment_id: str, text: str, model: str,
@@ -2056,10 +2068,37 @@ class Store:
             ).fetchall()
         return [self._row_to_comment_reply(r) for r in rows]
 
+    def get_comment_reply(self, id: int) -> CommentReply | None:
+        row = self._conn.execute("SELECT * FROM comment_replies WHERE id = ?", (id,)).fetchone()
+        return self._row_to_comment_reply(row) if row else None
+
+    def mark_comment_reply_posted(self, id: int, text: str, posted_comment_id: str,
+                                  now: datetime | None = None) -> bool:
+        """Record that an open draft was posted as `text`; False (nothing changed) when it is not open."""
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE comment_replies SET status = 'posted', text = ?, posted_comment_id = ?, "
+                "posted_at = ? WHERE id = ? AND status = 'open'",
+                (text, posted_comment_id, _iso(now), id))
+        return cur.rowcount == 1
+
+    def list_posted_comment_replies(self, limit: int = 100) -> list[CommentReply]:
+        """The drafts Yezatas posted, newest first."""
+        rows = self._conn.execute(
+            "SELECT * FROM comment_replies WHERE status = 'posted' "
+            "ORDER BY posted_at DESC, id DESC LIMIT ?", (limit,)).fetchall()
+        return [self._row_to_comment_reply(r) for r in rows]
+
+    def get_comment(self, comment_id: str) -> Comment | None:
+        row = self._conn.execute(
+            "SELECT * FROM comments WHERE comment_id = ?", (comment_id,)).fetchone()
+        return self._row_to_comment(row) if row else None
+
     def set_comment_reply_status(self, id: int, status: str) -> None:
-        """Set a reply draft's status: "open", "used" or "dismissed"."""
-        if status not in ("open", "used", "dismissed"):
-            raise ValueError(f'Unknown reply status "{status}": use open, used or dismissed.')
+        """Set a reply draft's status: "open", "used", "dismissed" or "posted"."""
+        if status not in ("open", "used", "dismissed", "posted"):
+            raise ValueError(
+                f'Unknown reply status "{status}": use open, used, dismissed or posted.')
         with self._conn:
             self._conn.execute(
                 "UPDATE comment_replies SET status = ? WHERE id = ?", (status, id))
@@ -2072,11 +2111,11 @@ class Store:
         return [self._row_to_comment(r) for r in rows]
 
     def comments_to_answer(self, limit: int = 50) -> list[Comment]:
-        """Questions the channel has not replied to and whose reply draft was not used or dismissed, newest first."""
+        """Questions the channel has not replied to and whose reply draft was not used, posted or dismissed, newest first."""
         rows = self._conn.execute(
             "SELECT * FROM comments c WHERE c.category = 'question' AND c.owner_replied = 0 "
             "AND NOT EXISTS (SELECT 1 FROM comment_replies r WHERE r.comment_id = c.comment_id "
-            "AND r.status IN ('used', 'dismissed')) "
+            "AND r.status IN ('used', 'dismissed', 'posted')) "
             "ORDER BY c.published_at DESC, c.comment_id LIMIT ?", (limit,)
         ).fetchall()
         return [self._row_to_comment(r) for r in rows]

@@ -59,7 +59,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Insights** | Outliers, Strategy, Competitors, Search gaps | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos; the same outlier rule on up to 5 other public channels; and the real YouTube search terms whose words are missing from the titles. |
 | **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first, or described in plain words. |
 | **Ad safety** | Video | An advertiser-friendly check of the title, description, tags and transcript; every quote is checked by code. Advice only. |
-| **Community** | Video, Comments, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy (nothing is posted), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
+| **Community** | Video, Comments, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy, or to post after you check the exact text and confirm (the API cannot pin a comment, so a pinned draft is pinned in Studio), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
 
 ---
 
@@ -162,7 +162,8 @@ src/yezatas/
   glossary.py                # the translation glossary, checked by code
   links.py, adcheck.py       # link inventory and dead-link check, advertiser-friendly check
   categorycheck.py, pinnedcomment.py   # the category check and the pinned comment suggestion (Muse Spark)
-  comments.py, replytemplates.py   # comments assistant (drafts only) and reply templates
+  comments.py, replytemplates.py   # comments assistant (drafts) and reply templates
+  postreply.py               # post a reply draft after a confirmation page: the exact text, 50 quota units, never twice
   affiliate.py, customchecks.py    # affiliate tagging as drafts, custom checks by asking
   web/                       # the local FastAPI app: pages, jobs, security, sidebar counts
 tests/                       # pytest; every YouTube and model call is faked

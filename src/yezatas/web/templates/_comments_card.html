@@ -1,7 +1,7 @@
-{# The "Comments" card of the video page. `cm` is the fetch job state, `am` the sort job state, `cv` the stored comments. Drafts only: nothing is posted. #}
+{# The "Comments" card of the video page. `cm` is the fetch job state, `am` the sort job state, `cv` the stored comments. A draft is posted only from its confirmation page. #}
 <section class="card comments-card" id="comments" aria-labelledby="h-comments">
   <h2 id="h-comments">Comments</h2>
-  <p class="muted">Yezatas reads the newest comments on this video. {{ am.model }} can sort them and draft replies. Every draft is yours to copy and post yourself. Nothing is posted to YouTube.</p>
+  <p class="muted">Yezatas reads the newest comments on this video. {{ am.model }} can sort them and draft replies. Every draft is yours to copy and post yourself, or to post from here after you check its exact text and confirm. Nothing is posted without that confirmation.</p>
 
   {% if cm.running %}
   <p class="waiting"><span class="spinner" aria-hidden="true"></span>
@@ -63,13 +63,23 @@
   </form>
   {% endif %}
 
+  {% if cv.pinned_posted %}
+  <div class="cm-pinned" id="pinned-posted">
+    <h3 class="run-h">Pinned comment <span class="pill done">Posted</span></h3>
+    <p class="cm-draft-text">{{ cv.pinned_posted.text }}</p>
+    <p class="hint">YouTube does not let apps pin comments. Open YouTube Studio and pin it there.</p>
+    {% if cv.pinned_posted_url %}<div class="actions"><a class="button secondary" href="{{ cv.pinned_posted_url }}" target="_blank" rel="noopener noreferrer" title="Open the posted comment on YouTube in a new tab">Open on YouTube</a></div>{% endif %}
+  </div>
+  {% endif %}
+
   {% if cv.pinned %}
   <div class="cm-pinned" id="pinned-draft">
     <h3 class="run-h">Pinned comment draft</h3>
     <p class="cm-draft-text" id="pinned-text">{{ cv.pinned.text }}</p>
     <div class="actions">
+      <a class="button primary" href="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ cv.pinned.id }}/post" title="Post this comment on YouTube under your channel, after you check it">Post comment</a>
       <button type="button" class="button secondary" data-copy-target="pinned-text" aria-label="Copy pinned comment draft" title="Copy the text, to paste it into YouTube">Copy</button>
-      <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ cv.pinned.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary" title="Tell Yezatas you posted this on YouTube yourself (it cannot post for you). The draft is put away as done.">I posted it</button></form>
+      <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ cv.pinned.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary" title="Tell Yezatas you already posted this on YouTube yourself. The draft is put away as done.">I posted it</button></form>
       <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ cv.pinned.id }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary" title="Throw this draft away without posting it. The comment itself stays on YouTube.">Dismiss</button></form>
     </div>
   </div>
@@ -88,13 +98,21 @@
     <li class="cm-item" id="comment-{{ row.comment.comment_id }}">
       <p class="cm-head"><strong>{{ row.comment.author }}</strong> <span class="muted">{{ row.date_text }} &middot; {{ row.likes_text }} likes &middot; {{ row.category_label }}</span> <a href="{{ row.youtube_url }}" target="_blank" rel="noopener noreferrer">Open on YouTube</a></p>
       <p class="cm-text">{{ row.comment.text }}</p>
+      {% if row.posted %}
+      <div class="cm-draft cm-posted" id="posted-{{ row.posted.id }}">
+        <p class="cm-draft-label"><span class="pill done">Posted</span> <span class="muted">Your reply</span></p>
+        <p class="cm-draft-text">{{ row.posted.text }}</p>
+        {% if row.posted_url %}<div class="actions"><a class="button secondary" href="{{ row.posted_url }}" target="_blank" rel="noopener noreferrer" title="Open your posted reply on YouTube in a new tab">Open on YouTube</a></div>{% endif %}
+      </div>
+      {% endif %}
       {% if row.draft %}
       <div class="cm-draft" id="draft-{{ row.draft.id }}">
         <p class="cm-draft-label">Draft reply</p>
         <p class="cm-draft-text" id="draft-text-{{ row.draft.id }}">{{ row.draft.text }}</p>
         <div class="actions">
+          <a class="button primary" href="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/post" title="Post this reply on YouTube under your channel, after you check it">Post reply</a>
           <button type="button" class="button secondary" data-copy-target="draft-text-{{ row.draft.id }}" aria-label="Copy draft reply" title="Copy the text, to paste it into YouTube">Copy</button>
-          <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary" title="Tell Yezatas you posted this on YouTube yourself (it cannot post for you). The draft is put away as done.">I posted it</button></form>
+          <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary" title="Tell Yezatas you already posted this on YouTube yourself. The draft is put away as done.">I posted it</button></form>
           <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary" title="Throw this draft away without posting it. The comment itself stays on YouTube.">Dismiss</button></form>
         </div>
       </div>

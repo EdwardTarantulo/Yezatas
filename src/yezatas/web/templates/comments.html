@@ -3,7 +3,7 @@
 {% from "_macros.html" import icon %}
 {% block content %}
 <h1 class="page-title">Comments</h1>
-<p class="intro" id="comments-about">The newest comments on your videos, sorted by {{ sort.model }}, with reply drafts you can copy. Yezatas only reads comments: you post replies on YouTube yourself.</p>
+<p class="intro" id="comments-about">The newest comments on your videos, sorted by {{ sort.model }}, with reply drafts you can copy or post. Yezatas posts a reply only after you check its exact text and confirm.</p>
 <section class="card cz-fetch" id="comments-fetch" aria-label="Fetch and sort comments">
 <div class="cz-fetch-text">
 {% if cv.total %}
@@ -94,14 +94,22 @@
 <p class="cz-head"><strong>{{ row.comment.author }}</strong> <span class="muted">{{ row.date_text }} &middot; {{ row.likes_text }} likes</span> <span class="pill">{{ row.category_label }}</span>{% if row.draft %} <span class="pill done">Draft ready</span>{% endif %}</p>
 <p class="cz-on muted">on <a href="{{ row.video_href }}">{{ row.video_title }}</a></p>
 <p class="cm-text">{{ row.comment.text }}</p>
+{% if row.posted %}
+<div class="cm-draft cz-draft cz-posted" id="posted-{{ row.posted.id }}">
+<p class="cm-draft-label"><span class="pill done">Posted</span> <span class="muted">Your reply</span></p>
+<p class="cm-draft-text">{{ row.posted.text }}</p>
+{% if row.posted_url %}<div class="actions"><a class="button secondary" href="{{ row.posted_url }}" target="_blank" rel="noopener noreferrer" title="Open your posted reply on YouTube in a new tab">{{ icon('external') }}Open on YouTube</a></div>{% endif %}
+</div>
+{% endif %}
 {% if row.draft %}
 <div class="cm-draft cz-draft" id="draft-{{ row.draft.id }}">
 <p class="cm-draft-label">Reply draft <span class="muted">&middot; {{ row.draft.model }}</span></p>
 <p class="cm-draft-text" id="draft-text-{{ row.draft.id }}">{{ row.draft.text }}</p>
 <div class="actions">
 <button type="button" class="button secondary" data-copy-target="draft-text-{{ row.draft.id }}" aria-label="Copy reply" title="Copy the text, to paste it into YouTube">Copy reply</button>
+<a class="button primary" href="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/post?next={{ cv.next_path|urlencode }}" title="Post this reply on YouTube under your channel, after you check it">Post reply</a>
 <a class="button secondary" href="{{ row.youtube_url }}" target="_blank" rel="noopener noreferrer" title="Open this comment on YouTube in a new tab, where you can post your reply">{{ icon('external') }}Open on YouTube</a>
-<form class="inline" method="post" action="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ cv.next_path }}"><button type="submit" class="button secondary" title="Tell Yezatas you posted this on YouTube yourself (it cannot post for you). The draft is put away as done.">I posted it</button></form>
+<form class="inline" method="post" action="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ cv.next_path }}"><button type="submit" class="button secondary" title="Tell Yezatas you already posted this on YouTube yourself. The draft is put away as done.">I posted it</button></form>
 <form class="inline" method="post" action="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ cv.next_path }}"><button type="submit" class="button secondary" title="Throw this draft away without posting it. The comment itself stays on YouTube.">Dismiss</button></form>
 </div>
 </div>
@@ -140,7 +148,7 @@
 <ol class="cz-videos">
 {% for v in cv.videos %}<li><a class="cz-vrow{% if v.active %} active{% endif %}" href="{{ v.href }}"{% if v.active %} aria-current="true"{% endif %}><span class="cz-vtitle">{{ v.title }}</span><span class="muted">{{ v.meta }}</span>{% if v.unsorted %}<span class="cz-unsorted">{{ v.unsorted }} not sorted</span>{% endif %}</a></li>{% endfor %}
 </ol>
-<p class="cz-note muted">Yezatas only reads comments. You post replies on YouTube yourself.</p>
+<p class="cz-note muted">Replies are posted only after you confirm the exact text.</p>
 </aside>
 {% endif %}
 </div>

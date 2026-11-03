@@ -3,7 +3,8 @@ the edit, review and push screens, plus the AI suggestions and the agent log.
 
 Pages only read from YouTube through the catalog pull. The one write is `POST /changes/push`,
 which sends drafts the creator approved and ticked a confirmation box for. A suggestion only ever
-makes a draft. Background jobs open their own Store, because a SQLite connection must not cross
+makes a draft. A confirmed thumbnail and a confirmed comment reply are posted from their own
+confirmation pages. Background jobs open their own Store, because a SQLite connection must not cross
 threads.
 """
 
@@ -60,6 +61,7 @@ from .. import comments as comments_mod
 from .. import customchecks as customchecks_mod
 from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
+from .. import postreply as postreply_mod
 from ..quota import QuotaExceeded, QuotaGuard
 from ..seo import TAGS_CHAR_LIMIT, CategoryJudgment, parse_duration, score_catalog, tags_char_count, video_category_id
 from .videofacts import build_facts
@@ -70,8 +72,8 @@ from .pinned_view import build_pinned_view
 from .nav_counts import build_nav_counts
 from ..store import AdCheck, CategoryCheck, OutlierReport, PinnedComment, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
-from ..youtube import (CaptionReader, CommentReader, GoogleCaptionReader, GoogleCommentReader,
-                       GoogleYouTubeReader, GoogleYouTubeWriter, YouTubeReader, YouTubeWriter,
+from ..youtube import (CaptionReader, CommentReader, CommentWriter, GoogleCaptionReader, GoogleCommentReader,
+                       GoogleCommentWriter, GoogleYouTubeReader, GoogleYouTubeWriter, YouTubeReader, YouTubeWriter,
                        api_error_info)
 from . import upload as upload_mod
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
@@ -86,7 +88,7 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (STARTER_QUESTIONS, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
+from .views import (STARTER_QUESTIONS, build_posted_rows, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
                     affiliate_apply_message, build_adcheck_view, build_shorts_view, build_affiliate_preview,
                     build_bulk_preview, build_channel_comments_view, build_checks_view, build_comments_view, build_copilot_turns, build_glossary_rows, build_links_view, build_listing,
                     build_outlier_view, build_outdated_view, build_packaging_view, build_preview, build_strategy_view, build_subtitles_view,
@@ -248,6 +250,7 @@ ShortsFn = Callable[[Store, str, datetime, Report], "ShortsFind"]
 # The three packaging clients (None without a Meta API key); the real one reads the key from the config.
 PackagingToolsFactory = Callable[[Config], "packaging_mod.PackagingTools | None"]
 CommentReaderFactory = Callable[[Any], CommentReader]
+CommentWriterFactory = Callable[[Any], CommentWriter]
 # (store, video id, the time now, report) -> what the sort did
 CommentsAssistFn = Callable[[Store, str, datetime, Report], "comments_mod.AssistResult"]
 # (the creator's words) -> the proposed fixed rule
@@ -833,6 +836,7 @@ class WebState:
         pinned_fn: PinnedFn | None = None,
         caption_reader: CaptionReaderFactory | None = None,
         soundtags_fn: SoundTagsFn | None = None,
+        comment_writer: CommentWriterFactory | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -852,6 +856,7 @@ class WebState:
         self._category = category_fn or make_default_category(config)
         self._pinned = pinned_fn or make_default_pinned(config)
         self._comment_reader_factory = comment_reader
+        self._comment_writer_factory = comment_writer  # None: the real writer
         self._comments_assist = comments_assist or make_default_comments_assist(config)
         self._rule_maker = rule_maker or make_default_rule_maker(config)
         self._bulk_asker = bulk_asker or make_default_bulk_asker(config)
@@ -1911,6 +1916,11 @@ class WebState:
             return GoogleCommentReader(creds)
         return factory(creds)
 
+    def make_comment_writer(self, creds: Any) -> CommentWriter:
+        """The poster of confirmed comments and replies (a fake in tests)."""
+        factory = self._comment_writer_factory
+        return GoogleCommentWriter(creds) if factory is None else factory(creds)
+
     def start_comments(self, video_id: str, creds: Any) -> bool:
         """Read one video's comments in the one comments job."""
         if not self.comments_job.start(lambda report: self._run_comments(video_id, creds, report)):
@@ -2078,6 +2088,7 @@ def create_app(
     pinned: PinnedFn | None = None,
     caption_reader: CaptionReaderFactory | None = None,
     soundtags: SoundTagsFn | None = None,
+    comment_writer: CommentWriterFactory | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -2097,7 +2108,7 @@ def create_app(
                      analytics_sign_in=analytics_sign_in, analytics_credentials_loader=analytics_credentials_loader,
                      analytics_reader=analytics_reader, gap_rank=gap_rank, channel_reader=channel_reader,
                      category_fn=category, pinned_fn=pinned, caption_reader=caption_reader,
-                     soundtags_fn=soundtags)
+                     soundtags_fn=soundtags, comment_writer=comment_writer)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -2667,9 +2678,9 @@ def create_app(
         sh = shorts_panel(video_id, tr["model"], tr["provider"], transcript is not None)
         with Store(config.catalog_db) as store:
             all_comments = store.list_comments(video_id)
-            open_replies = store.list_comment_replies(video_id, status="open")
+            replies = store.list_comment_replies(video_id)
             reply_templates = store.list_reply_templates()
-        cv = build_comments_view(video_id, all_comments, open_replies, reply_templates, dict(request.query_params))
+        cv = build_comments_view(video_id, all_comments, replies, reply_templates, dict(request.query_params))
         cm = comments_panel(video_id, state.write_credentials() is not None)
         am = assist_panel(video_id, pk["has_tools"], bool(all_comments))
         with Store(config.catalog_db) as store:
@@ -3592,11 +3603,22 @@ def create_app(
                 v = store.get_video(s.video_id)
                 if v is not None:
                     swap_titles[s.video_id] = v.title
+            posted = store.list_posted_comment_replies(limit=HISTORY_LIMIT)
+            posted_titles: dict[str, str] = {}
+            posted_authors: dict[str, str] = {}
+            for r in posted:
+                v = store.get_video(r.video_id)
+                if v is not None:
+                    posted_titles[r.video_id] = v.title
+                answered = store.get_comment(r.comment_id) if r.comment_id else None
+                if answered is not None:
+                    posted_authors[r.comment_id] = answered.author
         return render(request, "history.html", {
             "active": "history",
             "groups": history_groups(records, runs, run_records, titles, _local_time, drafts),
             "limit": HISTORY_LIMIT, "shown": len(records),
             "swaps": build_swap_rows(swaps, swap_titles, _local_time),
+            "posted": build_posted_rows(posted, posted_titles, posted_authors, _local_time),
         })
 
     @app.post("/history/runs/{run_id}/undo")
@@ -3796,12 +3818,12 @@ def create_app(
     def comments_page(request: Request) -> Response:
         with Store(config.catalog_db) as store:
             stored = store.list_recent_comments()
-            open_replies = store.list_open_comment_replies()
+            replies = [*store.list_open_comment_replies(), *store.list_posted_comment_replies()]
             videos = {v.video_id: v for v in store.list_videos()}
             templates = store.list_reply_templates()
             to_fetch = comments_mod.newest_video_ids(store)
             to_sort = comments_mod.unsorted_video_ids(store.list_recent_comments(limit=5000))
-        cv = build_channel_comments_view(stored, open_replies, videos, templates, dict(request.query_params))
+        cv = build_channel_comments_view(stored, replies, videos, templates, dict(request.query_params))
         fetch = channel_fetch_panel(state.write_credentials() is not None, len(to_fetch))
         sort = channel_sort_panel(has_packaging_key(), len(to_sort))
         return render(request, "comments.html", {
@@ -4903,6 +4925,8 @@ def create_app(
                 found = next((r for r in store.list_comment_replies(video_id) if r.id == wanted), None)
                 if found is None:
                     return "missing_reply"
+                if found.status == "posted":
+                    return "posted"
                 store.set_comment_reply_status(found.id, status)
                 return "ok"
 
@@ -4911,7 +4935,109 @@ def create_app(
             return video_not_found(request)
         if outcome == "missing_reply":
             flash(request, "error", "This draft does not exist.")
+        elif outcome == "posted":
+            flash(request, "error", "Yezatas already posted this reply, so it stays as it is.")
         return back
+
+    # --- posting a reply draft: a confirmation page first, the post only from its button ----------
+    def post_context(video_id: str, reply_id: str) -> tuple[str, Any, Any, Any, Any]:
+        """("ok", video, draft, comment, quota preview), or (problem code, None, None, None, None)."""
+        nothing: tuple[None, None, None, None] = (None, None, None, None)
+        with Store(config.catalog_db) as store:
+            video = store.get_video(video_id)
+            if video is None:
+                return ("missing_video", *nothing)
+            if not reply_id.isascii() or not reply_id.isdigit() or len(reply_id) > MAX_ID_DIGITS:
+                return ("missing_reply", *nothing)
+            draft = store.get_comment_reply(int(reply_id))
+            if draft is None or draft.video_id != video_id:
+                return ("missing_reply", *nothing)
+            if draft.status != "open":
+                return (draft.status, *nothing)
+            comment = store.get_comment(draft.comment_id) if draft.comment_id else None
+            preview = QuotaGuard(store, config.daily_quota_budget).preview(
+                [(postreply_mod.operation_for(not draft.comment_id), 1)])
+        return "ok", video, draft, comment, preview
+
+    def post_problem(request: Request, code: str, back: str) -> Response:
+        if code == "missing_video":
+            return video_not_found(request)
+        if code == "missing_reply":
+            flash(request, "error", "This draft does not exist.")
+        elif code == "posted":
+            flash(request, "info", "This reply was already posted. Nothing was sent.")
+        else:
+            flash(request, "error", "This draft was put away, so it cannot be posted.")
+        return see_other(back)
+
+    def post_page(request: Request, video: Any, draft: Any, comment: Any, preview: Any, text: str,
+                  next_path: str, *, reconnect: bool = False) -> Response:
+        has_write = not reconnect and state.write_credentials() is not None
+        return render(request, "post_reply.html", {
+            "active": "comments", "video": video, "draft": draft, "comment": comment, "text": text,
+            "pinned_draft": not draft.comment_id, "next_path": next_path,
+            "back_url": comments_back(next_path) or f"/videos/{quote(video.video_id)}#comments",
+            "action": f"/videos/{quote(video.video_id)}/comments/replies/{draft.id}/post",
+            "units": preview.total, "remaining": preview.remaining, "fits": preview.fits,
+            "budget": config.daily_quota_budget, "has_write": has_write,
+            "limit": postreply_mod.MAX_CHARS})
+
+    @app.get("/videos/{video_id}/comments/replies/{reply_id}/post")
+    def post_reply_page(request: Request, video_id: str, reply_id: str) -> Response:
+        next_path = str(request.query_params.get("next") or "")
+        back = comments_back(next_path) or f"/videos/{quote(video_id)}#comments"
+        code, video, draft, comment, preview = post_context(video_id, reply_id)
+        if code != "ok":
+            return post_problem(request, code, back)
+        return post_page(request, video, draft, comment, preview, draft.text, next_path)
+
+    @app.post("/videos/{video_id}/comments/replies/{reply_id}/post")
+    async def post_reply_route(request: Request, video_id: str, reply_id: str) -> Response:
+        form = await read_form(request)
+        next_path = str(form.get("next") or "")
+        back = comments_back(next_path) or f"/videos/{quote(video_id)}#comments"
+        text = str(form.get("text") or "")
+        code, video, draft, comment, preview = await run_in_threadpool(post_context, video_id, reply_id)
+        if code != "ok":
+            return post_problem(request, code, back)
+
+        def again(message: str, *, reconnect: bool = False) -> Response:
+            flash(request, "error", message)
+            return post_page(request, video, draft, comment, preview, text, next_path,
+                             reconnect=reconnect)
+
+        if form.get("confirm") != "yes":
+            return again("Check the text and press Post to YouTube. Nothing was posted.")
+        creds = await run_in_threadpool(state.write_credentials)
+        if creds is None:
+            return again(postreply_mod.SCOPE_MESSAGE, reconnect=True)
+
+        def work() -> "postreply_mod.PostedReply":
+            try:
+                writer = state.make_comment_writer(creds)
+            except Exception as exc:  # noqa: BLE001
+                raise postreply_mod.PostReplyError(
+                    "api", f"Could not start the connection to YouTube ({exc.__class__.__name__}). "
+                           "Nothing was posted.") from exc
+            with Store(config.catalog_db) as store:
+                guard = QuotaGuard(store, config.daily_quota_budget)
+                return postreply_mod.post_reply(store, writer, guard, draft.id, text)
+
+        try:
+            posted = await run_in_threadpool(work)
+        except postreply_mod.PostReplyError as exc:
+            if exc.kind in ("missing", "already", "closed"):
+                flash(request, "error", str(exc))
+                return see_other(back)
+            return again(str(exc), reconnect=exc.kind == "scope")
+        if posted.pinned_draft:
+            flash(request, "ok", f"Posted the comment on YouTube ({posted.units} quota units). "
+                                 "YouTube does not let apps pin comments: open YouTube Studio and "
+                                 "pin it there.")
+        else:
+            who = f" to {comment.author}" if comment is not None and comment.author else ""
+            flash(request, "ok", f"Posted your reply{who} on YouTube ({posted.units} quota units).")
+        return see_other(back)
 
     @app.post("/videos/{video_id}/comments/replies/{reply_id}/used")
     async def mark_reply_used(request: Request, video_id: str, reply_id: str) -> Response:

@@ -1,0 +1,56 @@
+{% extends "shell.html" %}
+{% block title %}{{ 'Post comment' if pinned_draft else 'Post reply' }} - Yezatas{% endblock %}
+{% block content %}
+<p class="backlink"><a href="{{ back_url }}">Back to the comments</a></p>
+<h1 class="page-title">{{ 'Post this comment on YouTube?' if pinned_draft else 'Post this reply on YouTube?' }}</h1>
+<p class="intro">On <a href="/videos/{{ video.video_id|urlencode }}">{{ video.title }}</a>. Nothing is posted until you press the button below.</p>
+
+{% if comment %}
+<section class="card" id="post-answers" aria-labelledby="h-answers">
+  <h2 id="h-answers">The comment you answer</h2>
+  <p><strong>{{ comment.author }}</strong></p>
+  <p class="cm-text" id="post-comment-text">{{ comment.text }}</p>
+</section>
+{% elif pinned_draft %}
+<section class="card" id="post-answers">
+  <p>This is a new comment on the video, not a reply. YouTube does not let apps pin comments: after it is posted, open YouTube Studio and pin it there.</p>
+</section>
+{% else %}
+<section class="card" id="post-answers">
+  <p>This reply answers a comment that is no longer stored here. Yezatas will still try to post it under that comment.</p>
+</section>
+{% endif %}
+
+<section class="card" id="post-confirm" aria-labelledby="h-post">
+  <h2 id="h-post">{{ 'Your comment' if pinned_draft else 'Your reply' }}</h2>
+  {% if has_write and fits %}
+  <form method="post" action="{{ action }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next_path }}">
+    <input type="hidden" name="confirm" value="yes">
+    <label for="post-text">This exact text is what goes on YouTube. You can change it first.</label>
+    <textarea id="post-text" name="text" rows="8" maxlength="{{ limit }}" required>{{ text }}</textarea>
+    <p class="hint">At most {{ limit|num }} characters. It will be posted under your channel.</p>
+    <p class="hint" id="post-cost">This uses {{ units|num }} of the {{ remaining|num }} YouTube quota units left today (budget {{ budget|num }}).</p>
+    <div class="actions">
+      <button type="submit" class="button primary" title="Post this text on YouTube now">Post to YouTube</button>
+      <a class="button secondary" href="{{ back_url }}">Cancel</a>
+    </div>
+  </form>
+  {% else %}
+  <p class="cm-draft-text" id="post-text-readonly">{{ text }}</p>
+  {% if not fits %}
+  <p class="issue warning" id="post-no-quota">Not enough quota left today to post ({{ units|num }} units needed, {{ remaining|num }} left). It resets at midnight Pacific time.</p>
+  {% else %}
+  <div id="post-no-write">
+    <p>Yezatas needs YouTube's permission to post comments for you. It is the same permission pushing uses.</p>
+    <form method="post" action="/changes/allow-edits">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="actions"><button type="submit" class="button primary">Allow Yezatas to edit your videos</button></div>
+    </form>
+  </div>
+  {% endif %}
+  <div class="actions"><a class="button secondary" href="{{ back_url }}">Cancel</a></div>
+  {% endif %}
+</section>
+{% endblock %}

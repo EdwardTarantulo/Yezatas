@@ -32,6 +32,7 @@ from ..store import (AdCheck, AgentRun, CopilotProposal, CopilotTurn, DraftRow, 
                      ThumbnailVariant, TranscriptRecord, TranslationRecord, Video, Comment,
                      CommentReply, ReplyTemplate, Store)
 from ..comments import CATEGORIES as COMMENT_CATEGORIES
+from ..postreply import posted_url
 from .. import affiliate as affiliate_mod
 from .. import bulkask as bulkask_mod
 from .. import customchecks as customchecks_mod
@@ -2424,6 +2425,8 @@ class CommentRowView:
     draft: CommentReply | None
     templates: tuple[CommentTemplateView, ...]
     youtube_url: str
+    posted: CommentReply | None = None  # the reply Yezatas posted to this comment, if any
+    posted_url: str = ""  # that reply on YouTube
 
 
 @dataclass(frozen=True)
@@ -2435,6 +2438,25 @@ class CommentsView:
     total: int
     filtered_total: int
     filter_key: str
+    pinned_posted: CommentReply | None = None  # the pinned-comment draft Yezatas posted (pin it in Studio)
+    pinned_posted_url: str = ""
+
+
+def _posted_replies(replies: Sequence[CommentReply]) -> tuple[dict[str, CommentReply], CommentReply | None]:
+    """The newest posted reply of each comment, and the newest posted pinned-comment draft."""
+    by_comment: dict[str, CommentReply] = {}
+    pinned: CommentReply | None = None
+    for reply in sorted((r for r in replies if r.status == "posted"),
+                        key=lambda r: (r.posted_at, r.id), reverse=True):
+        if not reply.comment_id:
+            pinned = pinned or reply
+        elif reply.comment_id not in by_comment:
+            by_comment[reply.comment_id] = reply
+    return by_comment, pinned
+
+
+def _posted_link(video_id: str, reply: CommentReply | None) -> str:
+    return posted_url(video_id, reply.posted_comment_id) if reply is not None else ""
 
 
 def build_comments_view(video_id: str, comments: Sequence[Comment], replies: Sequence[CommentReply], templates: Sequence[ReplyTemplate], params: Mapping[str, str] | None = None) -> CommentsView:
@@ -2472,6 +2494,7 @@ def build_comments_view(video_id: str, comments: Sequence[Comment], replies: Seq
     for reply in open_replies:
         if reply.comment_id and reply.comment_id not in drafts:
             drafts[reply.comment_id] = reply
+    posted, pinned_posted = _posted_replies(replies)
     rows: list[CommentRowView] = []
     for comment in filtered[:COMMENTS_LIMIT]:
         matched: tuple[CommentTemplateView, ...] = ()
@@ -2488,11 +2511,34 @@ def build_comments_view(video_id: str, comments: Sequence[Comment], replies: Seq
             likes_text=format_count(comment.like_count),
             draft=drafts.get(comment.comment_id), templates=matched,
             youtube_url="https://www.youtube.com/watch?"
-            + urlencode({"v": video_id, "lc": comment.comment_id})))
-    return CommentsView(video_id=video_id, chips=tuple(chips), pinned=pinned, rows=tuple(rows), total=len(ordered), filtered_total=len(filtered), filter_key=selected)
+            + urlencode({"v": video_id, "lc": comment.comment_id}),
+            posted=posted.get(comment.comment_id),
+            posted_url=_posted_link(video_id, posted.get(comment.comment_id))))
+    return CommentsView(video_id=video_id, chips=tuple(chips), pinned=pinned, rows=tuple(rows), total=len(ordered), filtered_total=len(filtered), filter_key=selected,
+                        pinned_posted=pinned_posted, pinned_posted_url=_posted_link(video_id, pinned_posted))
 
 
 CHANNEL_COMMENTS_PATH = "/comments"
+
+
+@dataclass(frozen=True)
+class PostedReplyRow:
+    """One reply or comment Yezatas posted, for the History page."""
+
+    reply: CommentReply
+    title: str  # the video's title
+    when: str
+    url: str  # the new comment on YouTube, "" when YouTube sent no id
+    answers: str  # who it answered ("Alice"), "" for a new top-level comment
+    pinned_draft: bool
+
+
+def build_posted_rows(replies: Sequence[CommentReply], titles: Mapping[str, str],
+                      authors: Mapping[str, str], when: Callable[[str], str]) -> tuple[PostedReplyRow, ...]:
+    return tuple(PostedReplyRow(
+        reply=r, title=titles.get(r.video_id, r.video_id), when=when(r.posted_at),
+        url=posted_url(r.video_id, r.posted_comment_id),
+        answers=authors.get(r.comment_id, ""), pinned_draft=not r.comment_id) for r in replies)
 
 
 @dataclass(frozen=True)
@@ -2507,6 +2553,8 @@ class ChannelCommentRow:
     draft: CommentReply | None
     templates: tuple[CommentTemplateView, ...]
     youtube_url: str
+    posted: CommentReply | None = None  # the reply Yezatas posted to this comment, if any
+    posted_url: str = ""  # that reply on YouTube
 
 
 @dataclass(frozen=True)
@@ -2569,6 +2617,7 @@ def build_channel_comments_view(comments: Sequence[Comment], replies: Sequence[C
     for reply in open_replies:
         if reply.comment_id and reply.comment_id not in drafts:
             drafts[reply.comment_id] = reply
+    posted, _ = _posted_replies(replies)
 
     if video_filter:
         scope = [c for c in ordered if c.video_id == video_filter]
@@ -2628,6 +2677,8 @@ def build_channel_comments_view(comments: Sequence[Comment], replies: Sequence[C
             draft=draft,
             templates=matched,
             youtube_url=youtube_url,
+            posted=posted.get(comment.comment_id),
+            posted_url=_posted_link(vid, posted.get(comment.comment_id)),
         ))
 
     # rail over all ordered

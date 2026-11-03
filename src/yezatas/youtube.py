@@ -1,5 +1,6 @@
-"""The YouTube Data API behind small interfaces: reads for the catalog pull, and one write
-(videos.update) that only a push of creator-approved drafts uses."""
+"""The YouTube Data API behind small interfaces: reads for the catalog pull, and the writes that
+only come after the creator confirmed them (videos.update in a push, thumbnails.set, and posting a
+comment or a reply)."""
 
 from __future__ import annotations
 
@@ -172,3 +173,35 @@ class GoogleYouTubeWriter(GoogleYouTubeReader):
 
         media = MediaInMemoryUpload(image, mimetype="image/jpeg", resumable=False)
         return self._service.thumbnails().set(videoId=video_id, media_body=media).execute()
+
+
+class CommentWriter(Protocol):
+    """What posting a comment needs; each call returns what the API returned."""
+
+    def insert_reply(self, parent_id: str, text: str) -> dict[str, Any]: ...
+
+    def insert_top_level(self, video_id: str, text: str) -> dict[str, Any]: ...
+
+
+class GoogleCommentWriter:
+    """CommentWriter backed by google-api-python-client. Thin on purpose; not unit-tested.
+
+    Both calls cost 50 quota units and need the youtube.force-ssl scope. The API cannot pin a
+    comment: pinning is done in YouTube Studio.
+    """
+
+    def __init__(self, credentials: Any) -> None:
+        from googleapiclient.discovery import build
+
+        self._service = build("youtube", "v3", credentials=credentials, cache_discovery=False)
+
+    def insert_reply(self, parent_id: str, text: str) -> dict[str, Any]:
+        """comments.insert: reply to the top-level comment `parent_id`."""
+        body = {"snippet": {"parentId": parent_id, "textOriginal": text}}
+        return self._service.comments().insert(part="snippet", body=body).execute()
+
+    def insert_top_level(self, video_id: str, text: str) -> dict[str, Any]:
+        """commentThreads.insert: a new top-level comment on a video."""
+        body = {"snippet": {"videoId": video_id,
+                            "topLevelComment": {"snippet": {"textOriginal": text}}}}
+        return self._service.commentThreads().insert(part="snippet", body=body).execute()
