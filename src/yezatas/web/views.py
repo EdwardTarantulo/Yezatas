@@ -578,6 +578,7 @@ class ChangeCard:
     fingerprint: str
     summary: str
     origin: str
+    unchecked: tuple[str, ...] = ()  # translations going out that no check passed
 
     @property
     def video_id(self) -> str:
@@ -606,6 +607,22 @@ class ChangeCard:
     @property
     def sends_language(self) -> bool:
         return self.diff.language is not None
+
+
+def unchecked_translations(row: DraftRow, records: Iterable[Any]) -> tuple[str, ...]:
+    """Sentences for each translation this draft would send that no check passed: the text in the
+    draft matches a stored translation marked flagged or unverified. Text the creator typed has no record and no sentence."""
+    sent = row.localizations or {}
+    found = []
+    for r in records:
+        key = next((k for k in sent if same_language(k, r.language)), None)
+        if key is None or r.status not in ("flagged", "unverified"):
+            continue
+        entry = sent[key]
+        if entry.get("title") == r.title and entry.get("description") == r.description \
+                and row.base_localizations.get(key) != entry:
+            found.append(f"{lang_name(key)}: {'failed a check' if r.status == 'flagged' else 'never checked'}")
+    return tuple(found)
 
 
 def build_change_card(row: DraftRow, video: Video) -> ChangeCard:
@@ -643,8 +660,20 @@ def build_change_card(row: DraftRow, video: Video) -> ChangeCard:
     )
 
 
-def change_cards(pairs: Iterable[tuple[DraftRow, Video]]) -> list[ChangeCard]:
-    return [build_change_card(row, video) for row, video in pairs]
+def change_cards(pairs: Iterable[tuple[DraftRow, Video]],
+                 translations: Callable[[str], Iterable[Any]] | None = None) -> list[ChangeCard]:
+    """`translations` gives a video's latest stored translations, to warn about unchecked ones."""
+    cards = []
+    for row, video in pairs:
+        card = build_change_card(row, video)
+        unchecked = unchecked_translations(row, translations(row.video_id)) if translations else ()
+        if unchecked:
+            card = replace(card, unchecked=unchecked, warnings=card.warnings + (Issue(
+                "localizations", "translations_unchecked", "warning",
+                "You ticked translations that no check passed: " + "; ".join(unchecked)
+                + ". They go to YouTube as they are."),))
+        cards.append(card)
+    return cards
 
 
 def plan_lines(lines: Iterable[tuple[str, int, int]]) -> list[dict[str, Any]]:

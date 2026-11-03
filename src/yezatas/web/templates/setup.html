@@ -416,7 +416,7 @@
     </label>
     <label class="choice" for="primary-ai-local">
       <input id="primary-ai-local" type="radio" name="primary_ai" value="local"{% if primary_ai == 'local' %} checked{% endif %}{% if primary_ai_source == 'environment' %} disabled{% endif %}>
-      <span><strong>Muse Glimmer on this computer</strong><br>Free and private: nothing leaves this computer. Runs in Ollama, needs about 18 GB of memory.</span>
+      <span><strong>Muse Glimmer on this computer</strong><br>Free and private: every text feature, translations included, stays on this computer, even with other keys saved. Runs in Ollama, needs about 18 GB of memory. Transcripts from a video file, subject and face sizes, and thumbnail variants have no local model: they use Meta's API, and only when you press their button. In this mode one model translates and checks.</span>
     </label>
     {% if primary_ai_source != 'environment' %}<button type="submit" class="button primary">Save the choice</button>{% endif %}
   </form>

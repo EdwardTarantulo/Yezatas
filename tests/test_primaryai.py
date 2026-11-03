@@ -175,7 +175,9 @@ def test_the_translator_order_is_baseten_then_modal_then_the_primary_ai(tmp_path
     # Modal needs both its key and its endpoint
     translate.save_modal_key(config, "MODAL-KEY-1234")
     assert translate.translator_from_config(config, LOCAL).model == config.verifier_model
-    modal_env = {**LOCAL, "MODAL_ENDPOINT_URL": "https://example.invalid/v1/"}
+    modal_env = {"MODAL_ENDPOINT_URL": "https://example.invalid/v1/"}
+    # Local stays local, whatever keys are saved
+    assert translate.translator_from_config(config, {**LOCAL, **modal_env}).model == config.verifier_model
     assert translate.translator_from_config(config, modal_env).model == DEFAULT_MODAL_MODEL
     assert translate.translator_key_source(config, modal_env) == "modal"
     # a Baseten key beats Modal
@@ -325,7 +327,7 @@ def test_the_primary_ai_card_in_meta_and_local_mode(
     card = card_of(make_ui(tmp_path / "a").setup_html(), "step-ai")
     assert 'name="primary_ai" value="meta" checked' in card
     assert "Needs a Meta API key; each feature shows its price." in card
-    assert "Free and private: nothing leaves this computer. Runs in Ollama, needs about 18 GB of memory." in card
+    assert "Free and private: every text feature, translations included, stays on this computer" in card
     assert "ollama pull muse-glimmer:30b" in card and "https://ollama.com/download" in card
     assert "Three features need Meta" not in card  # only when Local is chosen
     go_local(monkeypatch)

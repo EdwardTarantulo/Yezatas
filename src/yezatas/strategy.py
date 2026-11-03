@@ -165,8 +165,14 @@ def build_context(store: Store, as_of: datetime) -> StrategyContext:
     below_pairs = tuple(
         (ref_of[s.video_id], outliers.ratio_label(s.ratio)) for s in outliers.below_norm(scores))
 
-    context = seo.channel_context(videos)
-    cards = [seo.score_video(v, context) for v in videos]
+    from .web.views import stale_youtube_keys  # here: views imports the feature modules
+
+    # the same inputs as the SEO page, so the average matches it
+    judged = {vid: seo.CategoryJudgment(c.current_id, c.suggested_id, bool(c.confirmed_at), c.reason)
+              for vid, c in store.category_checks().items() if c.status == "done"}
+    stale = {v.video_id: keys for v in videos
+             if (keys := stale_youtube_keys(v, store.latest_translations(v.video_id)))}
+    cards = list(seo.score_catalog(videos, stale, judged, store.pinned_states()).values())
     average_seo = round(sum(c.score for c in cards) / len(cards), 1) if cards else 0.0
     titles: dict[str, str] = {}
     for card in cards:

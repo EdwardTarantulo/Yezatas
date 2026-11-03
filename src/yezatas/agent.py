@@ -19,7 +19,7 @@ from typing import Any, Callable, Mapping, Protocol
 
 from . import edits, seo
 from .config import Config, ensure_dirs
-from .facts import check_facts, extract_urls
+from .facts import check_facts, extract_urls, numbers_in
 from .store import Store, Video
 from .validate import Draft, validate_draft
 
@@ -306,6 +306,7 @@ class _Toolbox:
         self._store = store
         self._video = video
         self.allowed_urls: set[str] = set()
+        self.allowed_numbers: set[str] = set()  # numbers in the transcript the model read
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "get_current_metadata": self._metadata,
             "get_scorecard": self._scorecard,
@@ -512,12 +513,13 @@ def _suggestion_dict(s: Suggestion) -> dict[str, Any]:
             "not_fixed": [asdict(n) for n in s.not_fixed]}
 
 
-def _problems(video: Video, suggestion: Suggestion, allowed_urls: set[str]) -> list[str]:
+def _problems(video: Video, suggestion: Suggestion, allowed_urls: set[str],
+              allowed_numbers: set[str] = frozenset()) -> list[str]:
     original = Draft(video.title, video.description, tuple(video.tags))
     new = Draft(suggestion.title, suggestion.description, suggestion.tags)
     found = [f"The {i.field}: {i.message}" for i in validate_draft(new, original)
              if i.severity == "error"]
-    found += [p.message for p in check_facts(new, original, allowed_urls)]
+    found += [p.message for p in check_facts(new, original, allowed_urls, allowed_numbers)]
     return found
 
 
@@ -571,7 +573,7 @@ def _converse(store: Store, client: ModelClient, video: Video, tally: _Tally,
     reply = tally.complete(client, messages, response_format=RESPONSE_FORMAT)
     try:
         suggestion = parse_suggestion(reply.content)
-        problems = _problems(video, suggestion, toolbox.allowed_urls)
+        problems = _problems(video, suggestion, toolbox.allowed_urls, toolbox.allowed_numbers)
     except _BadAnswer as exc:  # one unusable answer gets the same single repair round
         problems = [f"{exc} Reply with only the JSON object that matches the schema."]
     if problems:
@@ -585,7 +587,7 @@ def _converse(store: Store, client: ModelClient, video: Video, tally: _Tally,
               "replace it with other invented facts.")})
         reply = tally.complete(client, messages, response_format=RESPONSE_FORMAT)
         suggestion = parse_suggestion(reply.content)
-        problems = _problems(video, suggestion, toolbox.allowed_urls)
+        problems = _problems(video, suggestion, toolbox.allowed_urls, toolbox.allowed_numbers)
         if problems:
             log.append({"type": "problems", "round": 2, "problems": problems})
             return ("rejected", "Stopped by the checks, so nothing was drafted: "

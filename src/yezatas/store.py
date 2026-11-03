@@ -430,10 +430,13 @@ _SCHEMA_V16: tuple[str, ...] = (
 )
 
 # MIGRATIONS[i] upgrades the database from user_version i to i + 1.
+# v17: a complete pull marks videos it no longer returns (deleted, or another channel's).
+_SCHEMA_V17: tuple[str, ...] = ("ALTER TABLE videos ADD COLUMN gone_at TEXT",)
+
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
     _SCHEMA_V1, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
     _SCHEMA_V8, _SCHEMA_V9, _SCHEMA_V10, _SCHEMA_V11, _SCHEMA_V12, _SCHEMA_V13, _SCHEMA_V14, _SCHEMA_V15,
-    _SCHEMA_V16,
+    _SCHEMA_V16, _SCHEMA_V17,
 )
 
 _ORDER_COLUMNS = frozenset(
@@ -875,9 +878,10 @@ class Store:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
+        self._conn = sqlite3.connect(self.path, timeout=30)  # wait for another writer, don't fail
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._migrate()
 
     def __enter__(self) -> "Store":
@@ -911,6 +915,17 @@ class Store:
                 self._conn.isolation_level = ""
 
     # --- pulls -----------------------------------------------------------
+    def mark_gone_except(self, channel_video_ids: Iterable[str], now: datetime | None = None) -> int:
+        """After a complete pull: videos it did not return leave the lists (deleted, or another
+        channel's). `get_video`, drafts and history still find them; a later pull brings them back."""
+        keep = set(channel_video_ids)
+        ids = [r[0] for r in self._conn.execute("SELECT video_id FROM videos WHERE gone_at IS NULL")
+               if r[0] not in keep]
+        with self._conn:
+            self._conn.executemany("UPDATE videos SET gone_at = ? WHERE video_id = ?",
+                                   [(_iso(now), i) for i in ids])
+        return len(ids)
+
     def begin_pull(self, channel_id: str, now: datetime | None = None) -> int:
         with self._conn:
             cur = self._conn.execute(
@@ -956,7 +971,7 @@ class Store:
                     published_at=excluded.published_at, duration=excluded.duration,
                     view_count=excluded.view_count, like_count=excluded.like_count,
                     comment_count=excluded.comment_count,
-                    localizations_json=excluded.localizations_json,
+                    localizations_json=excluded.localizations_json, gone_at=NULL,
                     thumbnails_json=excluded.thumbnails_json, raw_json=excluded.raw_json,
                     updated_at=excluded.updated_at, last_pull_id=excluded.last_pull_id
                 """,
@@ -1008,7 +1023,7 @@ class Store:
         if direction not in ("asc", "desc"):
             raise ValueError(f"invalid order_by: {order_by!r}")
         rows = self._conn.execute(
-            f"SELECT * FROM videos ORDER BY {parts[0]} {direction}, video_id"
+            f"SELECT * FROM videos WHERE gone_at IS NULL ORDER BY {parts[0]} {direction}, video_id"
         ).fetchall()
         return [self._row_to_video(r) for r in rows]
 

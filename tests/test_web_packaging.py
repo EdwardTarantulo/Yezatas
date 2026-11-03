@@ -381,7 +381,7 @@ def test_a_check_that_takes_too_long_is_given_up_on(tmp_path: Path) -> None:
     assert fetch.entered.wait(5)
     now[0] = 10_000.0
     snap = ui.web.packaging_job.snapshot()
-    assert snap.status == "failed" and snap.error_kind == "timeout" and "5 minutes" in snap.message
+    assert snap.status == "failed" and snap.error_kind == "timeout" and "20 minutes" in snap.message
     gate.set()
     ui.web.packaging_job.wait()
     assert ui.web.packaging_job.snapshot().status == "failed"  # the late result is ignored

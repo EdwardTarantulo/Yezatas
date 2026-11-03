@@ -320,18 +320,21 @@ def test_numbers_from_earlier_turns_pass(store: Store) -> None:
 
 
 def test_numbers_from_a_tool_result_pass_and_others_do_not(store: Store) -> None:
+    v12 = store.get_video(vid(12))
+    pull = store.begin_pull("UC_fake", NOW)
+    store.upsert_video(replace(v12, description="It sold 4321 pots."), pull, NOW)
     table_numbers = copilot._numbers(copilot._Catalog(store.list_videos("video_id"), AS_OF).table())
-    assert "650" not in table_numbers  # V12's peer median is only in the get_video result
+    assert "4321" not in table_numbers  # only in the get_video result
 
     turn, client = run(store, [tool_reply(("get_video", {"ref": "V12"})),
-                               answer("The peers' median is 650 views.")])
+                               answer("It sold 4321 pots.")])
     assert len(client.calls) == 2 and turn.notes == []
 
-    turn, client = run(store, chat_id=2, script=[answer("The peers' median is 650 views."),
+    turn, client = run(store, chat_id=2, script=[answer("It sold 4321 pots."),
                                tool_reply(("get_video", {"ref": "V12"})),
-                               answer("The peers' median is 650 views.")])
+                               answer("It sold 4321 pots.")])
     assert len(client.calls) == 3 and turn.notes == []  # the repair round may call a tool
-    assert turn.answer == "The peers' median is 650 views."
+    assert turn.answer == "It sold 4321 pots."
 
 
 def test_repair_round_asks_again_and_keeps_a_clean_answer(store: Store) -> None:
@@ -429,8 +432,8 @@ def test_find_videos_sorts(box: copilot._Toolbox) -> None:
     assert order("newest")[:2] == ["V13", "V12"] and order("oldest")[:2] == ["V1", "V2"]
     assert order("views")[:3] == ["V12", "V11", "V10"] and order("views")[-1] == "V2"
     ratio = order("ratio")
-    assert ratio[0] == "V12" and ratio[-1] in {"V3", "V13"}  # unscored videos come last
-    assert ratio.index("V2") == len([r for r in ratio if r not in {"V3", "V13"}]) - 1
+    assert ratio[0] == "V12" and ratio[-1] in {"V3", "V4", "V13"}  # unscored videos come last
+    assert ratio.index("V2") == len([r for r in ratio if r not in {"V3", "V4", "V13"}]) - 1
     scores = [box._catalog.by_ref[r].card.score for r in order("score")]
     assert scores == sorted(scores)
 
@@ -508,7 +511,7 @@ def test_get_video_returns_text_scorecard_and_outlier_fields(box: copilot._Toolb
     chapters = next(c for c in data["failed_checks"] if c["id"] == "description_chapters")
     assert chapters["detail"] and chapters["fix"] and chapters["title"]
     assert data["vs_norm"].endswith("×") and data["outlier_status"] == "scored"
-    assert data["peer_median_views"] == 650
+    assert data["peer_median_views"] == 700
     assert data["has_transcript"] is False and data["has_draft"] is False
 
 

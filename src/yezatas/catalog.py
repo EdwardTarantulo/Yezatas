@@ -106,11 +106,16 @@ def pull_catalog(
 
     pull_id = store.begin_pull(channel_id, now)
     stored = 0
+    returned: set[str] = set()
     for batch in batches:
         units += guard.charge("videos.list", note="catalog pull")
         response = reader.videos(batch, VIDEO_PARTS)
         for item in response.get("items") or []:
-            store.upsert_video(video_from_api(item), pull_id, now)
+            video = video_from_api(item)
+            store.upsert_video(video, pull_id, now)
+            returned.add(video.video_id)
             stored += 1
     store.finish_pull(pull_id, stored, now)
+    if stored:  # an empty answer is more likely a fault than a channel with no videos left
+        store.mark_gone_except(returned, now)
     return PullResult(pull_id, channel_id, stored, units)

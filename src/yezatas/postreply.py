@@ -13,6 +13,7 @@ made, and the store marks it posted only if it is still open.
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +23,8 @@ from urllib.parse import urlencode
 from .quota import QuotaExceeded, QuotaGuard
 from .store import Store
 from .youtube import CommentWriter, api_error_info
+
+logger = logging.getLogger(__name__)
 
 MAX_CHARS = 10_000  # YouTube's limit for one comment
 REPLY_OPERATION = "comments.insert"
@@ -164,6 +167,8 @@ def post_reply(store: Store, writer: CommentWriter, guard: QuotaGuard, reply_id:
         except Exception as exc:  # noqa: BLE001 - every failure becomes a plain sentence
             raise api_failure(exc, pinned) from exc
         youtube_id = _new_comment_id(response, pinned)
-        store.mark_comment_reply_posted(draft.id, clean, youtube_id, now=now)
+        if not store.mark_comment_reply_posted(draft.id, clean, youtube_id, now=now):
+            # It IS on YouTube; the draft changed meanwhile. Keep the record truthful, say so.
+            logger.warning("reply draft %s was no longer open when its post finished", draft.id)
     return PostedReply(draft.id, draft.video_id, youtube_id, clean, pinned, units,
                        posted_url(draft.video_id, youtube_id))

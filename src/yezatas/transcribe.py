@@ -52,6 +52,9 @@ NO_FFMPEG_MESSAGE = "ffmpeg was not found. Install ffmpeg and restart Yezatas."
 AUTH_MESSAGE = "The transcription API key was refused. Check it in Configuration."
 
 
+MAX_LENGTH_GAP_SECONDS = 5  # a re-encoded export can differ by a moment
+
+
 class TranscribeError(RuntimeError):
     """Something in the transcript pipeline failed. `kind` is "file" (the media file), "ffmpeg",
     "auth", "rate_limit", "network", "api" or "answer" (the API answered in an unexpected shape)."""
@@ -397,6 +400,24 @@ def _piece_text(client: AsrClient, wav: Path, piece: Piece, language: str,
     return error or TranscribeError("api", "The transcription failed.")
 
 
+def _check_length(file_ms: int, video_duration: str) -> None:
+    """Refuse a file clearly longer or shorter than the video: its times would be false chapters."""
+    from .seo import parse_duration
+
+    seconds = parse_duration(video_duration)
+    if seconds is None:
+        return
+    apart = abs(file_ms / 1000 - seconds)
+    if apart > max(MAX_LENGTH_GAP_SECONDS, 0.02 * seconds):
+        raise TranscribeError(
+            "file", f"This file is {_clock(file_ms // 1000)} long but the video is {_clock(seconds)}, "
+                    "so it looks like a different video. Nothing was sent. Choose the video's own file.")
+
+
+def _clock(seconds: int) -> str:
+    return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+
+
 def transcribe_video(
     store: Store,
     client: AsrClient,
@@ -443,6 +464,8 @@ def transcribe_video(
             duration_ms = wav_duration_ms(wav)
             if duration_ms <= 0:
                 raise TranscribeError("ffmpeg", "This file has no sound to transcribe.")
+            known = store.get_video(video_id)
+            _check_length(duration_ms, known.duration if known is not None else "")
             silences = detect_silences(program, wav, runner)
             levels = loudness_profile(program, wav, runner)
             pieces = plan_pieces(duration_ms, silences,

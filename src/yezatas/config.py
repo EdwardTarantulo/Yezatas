@@ -70,16 +70,24 @@ def _parse_quota(raw: str) -> int:
     return value
 
 
+def _refuse_contributor(setting: str, model: str) -> str:
+    if model.casefold().endswith("-contributor"):
+        raise ConfigError(
+            f"{setting} {model!r} is a Contributor model, which may train on your data. "
+            "Use a Standard model such as muse-spark-1.3."
+        )
+    return model
+
+
 def _parse_model(raw: str) -> str:
     model = raw.strip()
     if not model:
         raise ConfigError("YEZATAS_MODEL must not be empty")
-    if model.endswith("-contributor"):
-        raise ConfigError(
-            f"YEZATAS_MODEL {model!r} is a Contributor model, which may train on your data. "
-            "Use a Standard model such as muse-spark-1.3."
-        )
-    return model
+    return _refuse_contributor("YEZATAS_MODEL", model)
+
+
+def _optional_model(env: Mapping[str, str], setting: str, default: str) -> str:
+    return _refuse_contributor(setting, env.get(setting, "").strip() or default)
 
 
 def load_config(env: Mapping[str, str] | None = None) -> Config:
@@ -102,12 +110,12 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         daily_quota_budget=budget,
         model=model,
         model_key_path=credentials_dir / "model_api_key",
-        translator_model=env.get("YEZATAS_TRANSLATOR_MODEL", "").strip() or DEFAULT_TRANSLATOR_MODEL,
+        translator_model=_optional_model(env, "YEZATAS_TRANSLATOR_MODEL", DEFAULT_TRANSLATOR_MODEL),
         translator_url=env.get("YEZATAS_TRANSLATOR_URL", "").strip() or DEFAULT_TRANSLATOR_URL,
         translator_key_path=credentials_dir / "translator_api_key",
-        verifier_model=env.get("YEZATAS_VERIFIER_MODEL", "").strip() or DEFAULT_VERIFIER_MODEL,
+        verifier_model=_optional_model(env, "YEZATAS_VERIFIER_MODEL", DEFAULT_VERIFIER_MODEL),
         verifier_url=(env.get("YEZATAS_VERIFIER_URL", "").strip() or DEFAULT_VERIFIER_URL).rstrip("/"),
-        modal_model=env.get("YEZATAS_MODAL_MODEL", "").strip() or DEFAULT_MODAL_MODEL,
+        modal_model=_optional_model(env, "YEZATAS_MODAL_MODEL", DEFAULT_MODAL_MODEL),
         modal_url=env.get("MODAL_ENDPOINT_URL", "").strip().rstrip("/"),
         modal_key_path=credentials_dir / "modal_api_key",
         primary_ai_path=credentials_dir / "primary_ai",

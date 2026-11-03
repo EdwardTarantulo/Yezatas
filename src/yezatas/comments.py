@@ -1,7 +1,7 @@
 """Comments assistant: sort a video's comments and draft replies for the creator to post.
 
-Drafts only: the creator posts replies themself. Comments are only read; nothing is sent to
-YouTube, and a reply draft is never posted by this code. One Muse Spark call sorts the stored
+Drafts only: this module never sends anything to YouTube. Posting a draft is a separate step the
+creator confirms (see postreply.py). One Muse Spark call sorts the stored
 comments into categories and writes reply drafts and a pinned-comment draft. Code checks every
 draft: a draft that links to an address that is not in the video's description, or that uses a
 number that is not in the comment it answers or in the video's own text, is dropped with a plain
@@ -309,6 +309,8 @@ def _guard(data: dict[str, Any], video_title: str, video_description: str,
         if len(kept) >= MAX_REPLIES:
             notes.append(f"A reply was dropped: only the first {MAX_REPLIES} replies are kept.")
             continue
+        if len(text.strip()) > DRAFT_CHARS:
+            notes.append(f"A reply was cut to {DRAFT_CHARS} characters. Read its end before posting.")
         kept.append((comment.comment_id, text.strip()[:DRAFT_CHARS]))
 
     pinned = data["pinned"].strip()
@@ -346,7 +348,9 @@ def assist(store: Store, client: ModelClient, video_id: str, *,
         raise ValueError("This video is not in your catalog. Pull your videos first.")
     say = report or (lambda line: None)
     say("Reading the comments")
-    comments = store.list_comments(video_id)[:MAX_COMMENTS_TO_MODEL]
+    # Unsorted comments first, newest first within each group, so repeated runs reach all of them.
+    comments = sorted(store.list_comments(video_id), key=lambda c: c.category in CATEGORIES)[
+        :MAX_COMMENTS_TO_MODEL]
     if not comments:
         raise CommentsError("There are no comments to sort yet. Fetch the comments first.")
     messages = [{"role": "system", "content": SYSTEM_PROMPT},

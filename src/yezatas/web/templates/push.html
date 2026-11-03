@@ -48,9 +48,10 @@
       that allows it, so Google's text also names things Yezatas never touches.</li>
     <li>The changes Yezatas sends are <strong>videos.update</strong> for a video's title,
       description and tags, only for drafts you approved and confirmed on this page, and
-      <strong>thumbnails.set</strong> when you confirm a new thumbnail on its own page.</li>
+      <strong>thumbnails.set</strong> when you confirm a new thumbnail on its own page, and
+      <strong>commentThreads.insert</strong> or <strong>comments.insert</strong> when you confirm posting a reply or a comment.</li>
     <li>Everything else is reading (your channel, your uploads list and your videos). Yezatas never deletes or uploads videos,
-      rates, comments or changes captions.</li>
+      rates, or changes captions, and it never posts a comment you did not confirm.</li>
     <li>The permission is saved only on this computer, in your Yezatas folder.</li>
   </ul>
   <h3>How to remove it</h3>
@@ -126,7 +127,7 @@
   <h2 id="h-list">{{ ready|length }} approved change{{ '' if ready|length == 1 else 's' }} will be sent to YouTube</h2>
   <ul class="push-items">
     {% for c in ready %}
-    <li><a href="/changes#d-{{ c.video_id|urlencode }}">{{ c.row.title }}</a><br><span class="muted">{{ c.summary }}</span></li>
+    <li><a href="/changes#d-{{ c.video_id|urlencode }}">{{ c.row.title }}</a><br><span class="muted">{{ c.summary }}</span>{% if c.unchecked %}<br><span class="push-unchecked"><strong>No check passed:</strong> {{ c.unchecked|join('; ') }}</span>{% endif %}</li>
     {% endfor %}
   </ul>
   {% if waiting %}<p class="hint">{{ waiting }} other draft{{ '' if waiting == 1 else 's' }} {{ 'is' if waiting == 1 else 'are' }} not approved and will stay as {{ 'a draft' if waiting == 1 else 'drafts' }}.</p>{% endif %}

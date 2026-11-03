@@ -10,6 +10,7 @@ through Bulk edit, which makes drafts.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import socket
 import ssl
@@ -208,6 +209,24 @@ def outcome_for_error(exc: BaseException, url: str = "") -> LinkOutcome:
     return LinkOutcome("error", None, "", "Yezatas could not check this link. Open it yourself.")
 
 
+PRIVATE_HOST_MESSAGE = "This link points to a private address, so Yezatas did not visit it."
+
+
+def _is_private_host(url: str) -> bool:
+    """A link to this computer or the local network, by name or as an address. A public name
+    that resolves to a private address is not caught here (nothing is resolved before the visit)."""
+    try:
+        host = (urlsplit(url if "://" in url else "https://" + url).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".lan")):
+        return True
+    try:
+        return not ipaddress.ip_address(host).is_global
+    except ValueError:
+        return False
+
+
 def fetch_url(url: str, timeout: float = TIMEOUT_SECONDS) -> LinkOutcome:
     """Visit one link with the standard library: HEAD, then GET (body unread) if HEAD is refused."""
     target = url if "://" in url else "https://" + url
@@ -276,6 +295,8 @@ def check_links(
         say(f"Checking the {len(chosen)} links with the most reach; {not_checked} are not checked.")
 
     def one(url: str) -> LinkOutcome:
+        if _is_private_host(url):
+            return LinkOutcome("error", None, "", PRIVATE_HOST_MESSAGE)
         try:
             return visit(url)
         except Exception as exc:  # a failing fetch must not stop the others

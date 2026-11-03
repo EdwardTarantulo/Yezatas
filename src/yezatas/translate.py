@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from . import agent, primaryai
 from .config import Config, ensure_dirs
-from .facts import _EMAIL, _HANDLE, _TIME, extract_urls
+from .facts import _EMAIL, _HANDLE, _TIME, NUMBER, RATIO, extract_urls, number_key
 from .seo import _HASHTAG, _URL
 from .store import Store, TranslationRecord
 
@@ -423,18 +423,18 @@ class OllamaVerifier:
 
 # --- the keys and the configured clients -------------------------------------------------------------
 def translator_key_source(config: Config, env: Mapping[str, str] | None = None) -> str:
-    """Which translator is used, in order: "environment" or "saved" (a Baseten key), "modal" (a Modal
-    key and endpoint), "local" (Primary AI is Local), "meta" (the Meta API key) or "" (none)."""
+    """Which translator is used, in order: "local" (Primary AI is Local, whatever keys are saved), "environment" or "saved" (a Baseten key), "modal" (a Modal
+    key and endpoint), "meta" (the Meta API key) or "" (none)."""
     if env is None:
         env = os.environ
+    if primaryai.is_local(config, env):  # Local means local: a saved key must not send text away
+        return "local"
     if env.get(TRANSLATOR_KEY_ENV, "").strip():
         return "environment"
     if config.translator_key_path is not None and config.translator_key_path.is_file():
         return "saved"
     if modal_ready(config, env):
         return "modal"
-    if primaryai.is_local(config, env):
-        return "local"
     return "meta" if agent.key_source(config, env) else ""
 
 
@@ -540,8 +540,15 @@ def delete_modal_key(config: Config) -> bool:
 
 
 def translator_from_config(config: Config, env: Mapping[str, str] | None = None) -> Translator | None:
-    """Spark Open with the Baseten key; else Spark Open on Modal (key and endpoint); else the
-    Primary AI (Glimmer through Ollama, or Spark 1.3 with the Meta key); else None."""
+    """Primary AI Local: Glimmer through Ollama, whatever keys are saved, so nothing leaves the
+    computer. Otherwise Spark Open with the Baseten key; else Spark Open on Modal (key and endpoint);
+    else Spark 1.3 with the Meta key; else None."""
+    if primaryai.is_local(config, env):
+        found = primaryai.text_model(config, env)
+        if found is None:
+            return None
+        return ChatTranslator(found.api_key, found.model, found.base_url,
+                              timeout=primaryai.LOCAL_TIMEOUT, local=True)
     key = load_translator_key(config, env)
     if key:
         return ChatTranslator(key, config.translator_model, config.translator_url)
@@ -572,11 +579,13 @@ def _facts(text: str) -> dict[str, Any]:
         "time": Counter(m.group(0) for m in _TIME.finditer(rest)),
         "hashtag": set(_HASHTAG.findall(rest)),
         "handle": {m.group(0).rstrip(".-") for m in _HANDLE.finditer(rest)},
+        "number": Counter(number_key(m.group(0)) for m in NUMBER.finditer(
+            _HANDLE.sub(" ", _HASHTAG.sub(" ", RATIO.sub(" ", _TIME.sub(" ", rest)))))),
     }
 
 
 _KINDS = (("link", "link"), ("time", "time"), ("hashtag", "hashtag"), ("handle", "@handle"),
-          ("email", "email address"))
+          ("email", "email address"), ("number", "number"))
 
 
 def check_translation(source_title: str, source_description: str, title: str,
@@ -600,7 +609,7 @@ def check_translation(source_title: str, source_description: str, title: str,
     new = _facts(title + "\n" + description)
     for key, label in _KINDS:
         before, after = old[key], new[key]
-        if key == "time":
+        if key in ("time", "number"):
             missing = sorted((before - after).elements())
             added = sorted((after - before).elements())
         else:

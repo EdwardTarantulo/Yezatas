@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Iterable
 from zoneinfo import ZoneInfo
 
 from .store import Store
+
+_CHARGE_LOCK = threading.Lock()
 
 QUOTA_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -111,10 +114,11 @@ class QuotaGuard:
         now = self._now()
         day = quota_day(now)
         total = sum(units for _, _, units in lines)
-        remaining = self.budget - self._store.quota_used(day)
-        if total > remaining:
-            raise QuotaExceeded(f"need {total} units but only {remaining} remaining for {day}")
-        self._store.add_quota_entries(
-            [(op, units, count, note) for op, count, units in lines], quota_day=day, now=now
-        )
+        with _CHARGE_LOCK:  # two jobs must not both spend the last units
+            remaining = self.budget - self._store.quota_used(day)
+            if total > remaining:
+                raise QuotaExceeded(f"need {total} units but only {remaining} remaining for {day}")
+            self._store.add_quota_entries(
+                [(op, units, count, note) for op, count, units in lines], quota_day=day, now=now
+            )
         return total

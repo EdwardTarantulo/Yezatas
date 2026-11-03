@@ -128,9 +128,9 @@ TRANSCRIBE_TIMEOUT_MESSAGE = (
     "The transcription took more than 60 minutes, so Yezatas stopped waiting. Try again, or use a "
     "shorter file."
 )
-CHAPTERS_TIMEOUT_SECONDS = 10 * 60.0
+CHAPTERS_TIMEOUT_SECONDS = 20 * 60.0
 CHAPTERS_TIMEOUT_MESSAGE = (
-    "Making the chapters took more than 10 minutes, so Yezatas stopped waiting. The Agent log "
+    "Making the chapters took more than 20 minutes, so Yezatas stopped waiting. The Agent log "
     "shows what finished."
 )
 SUBTITLES_TIMEOUT_SECONDS = 60 * 60.0
@@ -138,25 +138,25 @@ SUBTITLES_TIMEOUT_MESSAGE = (
     "The subtitles took more than 60 minutes, so Yezatas stopped waiting. Languages that "
     "finished are kept below."
 )
-PACKAGING_TIMEOUT_SECONDS = 5 * 60.0
+PACKAGING_TIMEOUT_SECONDS = 20 * 60.0
 PACKAGING_TIMEOUT_MESSAGE = (
-    "The packaging check took more than 5 minutes, so Yezatas stopped waiting. Try again."
+    "The packaging check took more than 20 minutes, so Yezatas stopped waiting. Try again."
 )
-VARIANTS_TIMEOUT_SECONDS = 10 * 60.0
+VARIANTS_TIMEOUT_SECONDS = 20 * 60.0
 VARIANTS_TIMEOUT_MESSAGE = (
-    "Making the variants took more than 10 minutes, so Yezatas stopped waiting. Variants that "
+    "Making the variants took more than 20 minutes, so Yezatas stopped waiting. Variants that "
     "finished are kept on this page."
 )
-OUTLIERS_TIMEOUT_SECONDS = 10 * 60.0
+OUTLIERS_TIMEOUT_SECONDS = 20 * 60.0
 OUTLIERS_TIMEOUT_MESSAGE = (
-    "Explaining the outliers took more than 10 minutes, so Yezatas stopped waiting. Try again."
+    "Explaining the outliers took more than 20 minutes, so Yezatas stopped waiting. Try again."
 )
-STRATEGY_TIMEOUT_SECONDS = 5 * 60.0
-COMPETITORS_TIMEOUT_SECONDS = 5 * 60.0
-COMPETITORS_TIMEOUT_MESSAGE = ("Reading or explaining the other channels took more than 5 minutes, so "
+STRATEGY_TIMEOUT_SECONDS = 20 * 60.0
+COMPETITORS_TIMEOUT_SECONDS = 20 * 60.0
+COMPETITORS_TIMEOUT_MESSAGE = ("Reading or explaining the other channels took more than 20 minutes, so "
                                "Yezatas stopped waiting. Try again.")
-SEARCHGAPS_TIMEOUT_SECONDS = 5 * 60.0
-SEARCHGAPS_TIMEOUT_MESSAGE = ("Reading or ranking the search terms took more than 5 minutes, so "
+SEARCHGAPS_TIMEOUT_SECONDS = 20 * 60.0
+SEARCHGAPS_TIMEOUT_MESSAGE = ("Reading or ranking the search terms took more than 20 minutes, so "
                               "Yezatas stopped waiting. Try again.")
 ANALYTICS_DISABLED = ("The YouTube Analytics API is not enabled in your Google Cloud project. Enable "
                       "it (APIs & Services, Library, YouTube Analytics API), wait a minute, then try again.")
@@ -169,7 +169,7 @@ CHANNEL_STATS_TIMEOUT_MESSAGE = ("Reading the channel's numbers took more than 5
 ANALYTICS_SIGN_IN_CHANNEL = ("Google did not accept the YouTube Analytics sign-in. Click Connect "
                              "Analytics and sign in again.")
 STRATEGY_TIMEOUT_MESSAGE = (
-    "The strategy report took more than 5 minutes, so Yezatas stopped waiting. Try again."
+    "The strategy report took more than 20 minutes, so Yezatas stopped waiting. Try again."
 )
 COPILOT_TIMEOUT_SECONDS = 5 * 60.0
 COPILOT_TIMEOUT_MESSAGE = (
@@ -2380,6 +2380,7 @@ def create_app(
             "has_translator": translator is not None, "model": model, "provider": provider,
             "verifier_model": verifier.model if verifier is not None else config.verifier_model,
             "verifier_ready": True if running else verifier_ready(verifier),
+            "same_model": verifier is not None and model == verifier.model,
         }
 
     def job_panel(snap: JobSnapshot, job_video: str, video_id: str) -> dict[str, Any]:
@@ -2447,7 +2448,7 @@ def create_app(
                                              "files you want."),
             }
         panel.update({k: tr[k] for k in ("has_translator", "model", "provider", "verifier_model",
-                                         "verifier_ready")})
+                                         "verifier_ready", "same_model")})
         return panel
 
     def packaging_tools_or_none() -> "packaging_mod.PackagingTools | None":
@@ -3489,7 +3490,7 @@ def create_app(
     def changes_data() -> list[Any]:
         """Every pending draft as a card, most viewed video first (worker thread)."""
         with Store(config.catalog_db) as store:
-            return change_cards(edits.pending(store))
+            return change_cards(edits.pending(store), lambda vid: store.latest_translations(vid).values())
 
     def titles_of(ids: Sequence[str]) -> dict[str, str]:
         with Store(config.catalog_db) as store:

@@ -21,6 +21,7 @@ from .packaging import (LINE_MAX, PackagingError, _BadAnswer, _data_url, _format
                         _parse_object, _Tally, best_thumbnail_url, clean_line, measure_image,
                         thumbnail_url_problem)
 from .store import OutlierReport, Store, Video
+from .seo import is_short
 from .subtitle_translate import _NUMBER, _digits
 
 OUTLIER_THRESHOLD = 10.0  # views at least this many times the peers' median
@@ -81,7 +82,7 @@ def score_videos(videos: Sequence[Video], as_of: datetime, *, peers: int = PEERS
 
     Eligible: public, with a duration, a readable publish time and at least `min_age_days` of age. The
     others get the status that left them out (checked in that order) and no median or ratio. Peers are
-    the `peers` other eligible videos nearest by publish time (ties by video_id); fewer than
+    the `peers` other eligible videos of the same format (Short or long) nearest by publish time (ties by video_id); fewer than
     `MIN_PEERS` other eligible videos means "few_peers".
     """
     as_of = _utc(as_of)
@@ -105,11 +106,12 @@ def score_videos(videos: Sequence[Video], as_of: datetime, *, peers: int = PEERS
         plain.append(row)
 
     views = {v.video_id: v.view_count for v in videos}
+    shorts = {v.video_id: is_short(v) for v in videos}
     ordered = sorted(rows.items(), key=lambda item: (item[1][1], item[0]))
     scored: dict[str, OutlierScore] = {}
     for video_id, (row, stamp) in ordered:
         others = [(abs(other_stamp - stamp), other_id) for other_id, (_, other_stamp) in ordered
-                  if other_id != video_id]
+                  if other_id != video_id and shorts[other_id] == shorts[video_id]]
         if len(others) < MIN_PEERS:
             scored[video_id] = OutlierScore(row.video_id, row.views, row.published_at, row.age_days,
                                             (), None, None, "few_peers")

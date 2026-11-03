@@ -53,7 +53,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Audit** | SEO overview, Videos, Video | A 27-check SEO scorecard per video with a one-line fix for each, **Fix next** ranked by views × missing points, and a searchable table that sorts by any column. The video page shows what to fix first, quick-info tiles that open the place where each thing is changed, and a Details section: the category checked by Muse Spark, and whether a comment from the channel is there to pin (with a suggestion to post). |
 | **Edit safely** | Changes, History | Drafts shown as diffs, approved one by one, pushed with a quota preview; a backup before every update, restore one video or undo a whole push. |
 | **Suggest** | Video, Copilot | A suggestion agent with read-only tools and a fact guard, and a channel copilot with the whole catalog in one context. Edits are only ever proposals. |
-| **Translate** | Translate, Subtitles, Translations | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. A glossary of the creator's terms (kept as they are or with a fixed translation), checked by code, and a list of every translation made from older text. |
+| **Translate** | Translate, Subtitles, Translations | Titles, descriptions and subtitles translated by one Meta model and checked blind by another (in fully local mode, Muse Glimmer does both, and the page says so); every link, time and number must survive. A glossary of the creator's terms (kept as they are or with a fixed translation), checked by code, and a list of every translation made from older text. |
 | **Transcribe** | Transcript, Shorts finder | Transcripts from the captions already on YouTube (free to read, times taken from YouTube's file) or from the creator's own video file picked in the browser; music and sound captions such as [Music] or [Applause] for videos without speech (PANNs, on this computer, with times from the real audio); chapter starts chosen by segment number (code sets the times), SRT downloads, and moments that could stand alone as a Short (picked by segment number; times and quotes from the transcript). |
 | **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download, preview in a feed or set as the thumbnail after a confirmation (the old one is saved in History). |
 | **Insights** | Outliers, Strategy, Competitors, Search gaps | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos; the same outlier rule on up to 5 other public channels; and the real YouTube search terms whose words are missing from the titles. |
@@ -108,9 +108,11 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
    ```bash
    python -m yezatas ui
    ```
-   - It listens on 127.0.0.1 only and opens a one-time sign-in link in your browser.
+   - It listens on 127.0.0.1 only and opens a private sign-in link in your browser (valid until Yezatas restarts).
 3. Follow the **Configuration** page: about 10 minutes, free. It ends with a read-only pull of your catalog, and
    lets you pick the Primary AI (Meta's API or local Muse Glimmer).
+
+To run the tests: `pip install -e ".[dev]"`, then `python -m pytest`.
 
 The written version of the Google setup, with troubleshooting, is [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md).
 
@@ -196,10 +198,10 @@ docs/SETUP_GOOGLE.md         # the Google Cloud setup guide
 | Edit validator | Every draft | YouTube's length and byte limits, forbidden characters, placeholder links, tag and chapter rules; warns about removed links and changed chapter times. |
 | Fact guard | Every model-written edit | No new links unless a tool returned them; no new timestamps, @handles or emails. One repair round, then the suggestion is dropped. |
 | Number guard | Copilot answers, critiques, explanations | Every number must come from code, a tool or the question; otherwise the sentence is removed with a note. |
-| Translation checks | Every translation | Links, times, numbers, hashtags and handles must survive; Muse Glimmer back-translates blind and scores it. |
+| Translation checks | Every translation | Links, times, numbers, hashtags and handles must survive; Muse Glimmer back-translates blind and scores it. A translation no check passed needs a tick, and is named again on Changes and Push. |
 | Studio check | Every push | Videos changed in YouTube Studio since the last pull are detected and skipped. |
 
-> **Note:** contributor models, which may train on the data, are refused for anything that touches channel data.
+> **Note:** contributor models, which may train on the data, are refused in every model setting.
 
 ### Never Invent Facts
 
@@ -213,7 +215,7 @@ be in the text they name.
 
 - **Local first.** The catalog, OAuth token and every draft stay on the creator's machine.
 - **Read-only by default.** The write scope is requested only when the creator chooses to push.
-- **Numbers come from code, models write words.** Every model answer is checked by code before anyone sees it.
+- **Numbers come from code, models write words.** Every model answer is checked by code before anyone sees it: a suggestion or translation with a number its source does not have is refused or flagged. Code checks that a number exists in the data, not what a sentence claims about it, so the creator still reads the diff.
 - **Drafts, never direct edits.** AI suggestions and bulk edits go through the same diff and approval as a hand edit.
 - **Advice, not verdicts.** Checks explain what they found and why; YouTube and the creator decide.
 
@@ -538,6 +540,11 @@ as it lands; the git history is the detailed record.
 - **2026-11-03**: **Post replies to YouTube.** A reply draft can be posted after a page shows the exact, editable
   text and the comment it answers; only **Post to YouTube** sends it. A lock refuses posting twice, the post is
   listed in History with a link, and every reply button explains on hover what it does.
+- **2026-11-03**: **Audit fixes.** A clean install now has every dependency. Local mode ignores saved cloud keys and
+  says when one model translates and checks. The fact guard and translation check refuse new or changed numbers, and
+  the number guards tell 4.2 from 42. Translations no check passed are named on Changes and Push. Every model setting
+  refuses Contributor models. Deleted videos leave the lists, Shorts and long videos are no longer compared as
+  outliers, a file of the wrong length is refused for transcripts, and writers wait instead of hitting a locked database.
 
 ---
 

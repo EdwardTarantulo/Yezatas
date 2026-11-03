@@ -54,7 +54,7 @@ def store(tmp_path: Path):
 
 def test_creates_parent_dirs_and_version(tmp_path: Path) -> None:
     with Store(tmp_path / "a" / "b" / "c.sqlite") as s:
-        assert s.schema_version == len(MIGRATIONS) == 16
+        assert s.schema_version == len(MIGRATIONS) == 17
         assert s._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -64,7 +64,7 @@ def test_migrations_idempotent_on_reopen(tmp_path: Path) -> None:
         pid = s.begin_pull("chan0000001", now=T0)
         s.upsert_video(make_video(), pid, now=T0)
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         assert s.get_video("vid00000001") is not None
         assert len(s.snapshots_for("vid00000001")) == 1
 
@@ -162,10 +162,10 @@ def test_v1_database_migrates_to_the_latest_and_keeps_its_data(tmp_path: Path) -
     conn.executescript("DROP TABLE drafts; DROP TABLE pushes; DROP TABLE agent_runs; "
                        "DROP TABLE translations; DROP TABLE transcripts; DROP TABLE subtitle_translations; "
                        "DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
-                       "DROP TABLE push_runs; " + BACK_TO_V9 + "PRAGMA user_version = 1;")
+                       "DROP TABLE push_runs; " + BACK_TO_V9 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 1;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         video = s.get_video("vid00000001")
         assert video is not None and video.title == "How to repot a cactus"
         assert s.quota_used("2026-10-01") == 1
@@ -191,7 +191,7 @@ def test_v3_drafts_get_the_catalog_language_as_their_base(tmp_path: Path) -> Non
         "ALTER TABLE drafts DROP COLUMN default_language; "
         "ALTER TABLE drafts DROP COLUMN localizations_json; "
         "ALTER TABLE drafts DROP COLUMN base_default_language; "
-        "ALTER TABLE drafts DROP COLUMN base_localizations_json; " + BACK_TO_V8 + "PRAGMA user_version = 3;")
+        "ALTER TABLE drafts DROP COLUMN base_localizations_json; " + BACK_TO_V8 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 3;")
     conn.close()
     with Store(path) as s:
         row = s.get_draft("vid00000001")
@@ -316,10 +316,10 @@ def test_v8_database_upgrades_and_keeps_its_pushes(tmp_path: Path) -> None:
         push = s.begin_push("vid00000001", "manual", {"title": "old"}, now=T0)
         s.finish_push(push, "pushed", {"title": "new"}, "ok", now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 8 database
-    conn.executescript(BACK_TO_V8 + "PRAGMA user_version = 8;")
+    conn.executescript(BACK_TO_V8 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 8;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         record = s.get_push(push)
         assert record is not None and record.run_id is None and record.status == "pushed"
         assert record.before == {"title": "old"} and record.after == {"title": "new"}
@@ -333,10 +333,10 @@ def test_v9_database_upgrades_and_keeps_its_push_runs(tmp_path: Path) -> None:
         run = s.begin_push_run(now=T0)
         push = s.begin_push("vid00000001", "manual", {"title": "old"}, now=T0, run_id=run)
     conn = sqlite3.connect(path)  # turn it back into a version 9 database
-    conn.executescript(BACK_TO_V9 + "PRAGMA user_version = 9;")
+    conn.executescript(BACK_TO_V9 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 9;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         record = s.get_push(push)
         assert record is not None and record.run_id == run
         assert s.latest_copilot_chat_id() is None and s.next_copilot_chat_id() == 1
@@ -382,10 +382,10 @@ def test_v10_database_upgrades_to_v11_and_keeps_its_copilot_turns(tmp_path: Path
     with Store(path) as s:
         turn = s.begin_copilot_turn(1, "What should I fix?", "muse-spark-1.3", now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 10 database
-    conn.executescript(BACK_TO_V10 + "PRAGMA user_version = 10;")
+    conn.executescript(BACK_TO_V10 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 10;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         assert s.get_copilot_turn(turn) is not None
         assert s.latest_link_checks() == {} and s.latest_ad_check("vid00000001") is None
 
@@ -547,10 +547,10 @@ def test_v5_database_upgrades_to_v6_and_keeps_its_data(tmp_path: Path) -> None:
                          now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 5 database
     conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
-                       "DROP TABLE subtitle_translations; " + BACK_TO_V8 + "PRAGMA user_version = 5;")
+                       "DROP TABLE subtitle_translations; " + BACK_TO_V8 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 5;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         assert s.get_video("vid00000001") is not None and s.get_draft("vid00000001") is not None
         transcript = s.latest_transcript("vid00000001")
         assert transcript is not None and transcript.segments[0]["text"] == "Hello"
@@ -617,10 +617,10 @@ def test_v6_database_upgrades_to_v7_and_keeps_its_data(tmp_path: Path) -> None:
         s.add_subtitle_translation(make_subtitles("es"), now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 6 database
     conn.executescript("DROP TABLE packaging_reviews; DROP TABLE thumbnail_variants; DROP TABLE outlier_reports; "
-                       "" + BACK_TO_V8 + "PRAGMA user_version = 6;")
+                       "" + BACK_TO_V8 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 6;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         assert s.get_video("vid00000001") is not None
         assert len(s.list_subtitle_translations("vid00000001")) == 1
         assert s.latest_packaging_review("vid00000001") is None
@@ -664,10 +664,10 @@ def test_v7_database_upgrades_to_v8_and_keeps_its_data(tmp_path: Path) -> None:
         s.upsert_video(make_video(), pid, now=T0)
         s.add_packaging_review(make_review(), now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 7 database
-    conn.executescript("DROP TABLE outlier_reports; " + BACK_TO_V8 + "PRAGMA user_version = 7;")
+    conn.executescript("DROP TABLE outlier_reports; " + BACK_TO_V8 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 7;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         assert s.get_video("vid00000001") is not None
         assert s.latest_packaging_review("vid00000001") is not None
         assert s.latest_outlier_report() is None
@@ -769,10 +769,10 @@ def test_v15_database_upgrades_to_v16_and_keeps_its_replies(tmp_path: Path) -> N
     with Store(path) as s:
         rid = s.add_comment_reply("vid00000001", "cmt00000001", "Weekly.", "muse-spark-1.3", [], now=T0)
     conn = sqlite3.connect(path)
-    conn.executescript(BACK_TO_V15 + "PRAGMA user_version = 15;")
+    conn.executescript(BACK_TO_V15 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 15;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         row = s.get_comment_reply(rid)
         assert (row.text, row.status, row.posted_comment_id, row.posted_at) == ("Weekly.", "open", "", "")
 
@@ -841,10 +841,10 @@ def test_v12_database_upgrades_to_v13_and_keeps_its_data(tmp_path: Path) -> None
         rule = {"kind": "must_link", "domain": "example.com", "visibility": "public"}
         s.add_custom_rule("Newsletter link", "every public video must link it", rule, now=T0)
     conn = sqlite3.connect(path)
-    conn.executescript(BACK_TO_V12 + "PRAGMA user_version = 12;")
+    conn.executescript(BACK_TO_V12 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 12;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         assert s.list_custom_rules()[0].name == "Newsletter link"
         assert s.latest_shorts_find("vid00000001") is None
         from yezatas.store import ShortsFind
@@ -859,10 +859,10 @@ def test_v11_database_upgrades_to_v12_and_keeps_its_data(tmp_path: Path) -> None
         turn = s.begin_copilot_turn(1, "What should I fix?", "muse-spark-1.3", now=T0)
         s.save_link_check("https://example.com/page", "ok", 200, now=T0)
     conn = sqlite3.connect(path)  # turn it back into a version 11 database
-    conn.executescript(BACK_TO_V11 + "PRAGMA user_version = 11;")
+    conn.executescript(BACK_TO_V11 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 11;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         assert s.get_copilot_turn(turn) is not None
         assert set(s.latest_link_checks()) == {"https://example.com/page"}
         assert s.list_comments("vid00000001") == [] and s.list_reply_templates() == []
@@ -893,10 +893,10 @@ def test_v13_database_upgrades_to_v14_and_keeps_its_comments(tmp_path: Path) -> 
     with Store(path) as s:
         s.upsert_comments([make_comment()], now=T0)
     conn = sqlite3.connect(path)
-    conn.executescript(BACK_TO_V13 + "PRAGMA user_version = 13;")
+    conn.executescript(BACK_TO_V13 + "ALTER TABLE videos DROP COLUMN gone_at; PRAGMA user_version = 13;")
     conn.close()
     with Store(path) as s:
-        assert s.schema_version == 16
+        assert s.schema_version == 17
         kept = s.list_comments("vid00000001")
         assert [c.comment_id for c in kept] == ["cmt00000001"] and kept[0].owner_replied is False
 

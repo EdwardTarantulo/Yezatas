@@ -42,7 +42,7 @@ def store(tmp_path: Path):
         s.upsert_video(Video(video_id=V1, channel_id="UC_fake", title="Repotting a cactus",
                              description="How to repot.", tags=["cactus"],
                              privacy_status="public", published_at="2026-01-01T10:00:00Z",
-                             duration="PT5M", default_language="en"), pull, NOW)
+                             duration="PT1M10S", default_language="en"), pull, NOW)
         yield s
 
 

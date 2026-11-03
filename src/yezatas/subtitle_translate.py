@@ -25,6 +25,7 @@ from .store import Store, SubtitleTranslationRecord
 if TYPE_CHECKING:
     from .glossary import GlossaryTerm
 
+from .facts import number_key
 from .subtitles import to_srt
 from .transcribe import ASR_LANGUAGES
 from .translate import (
@@ -234,9 +235,9 @@ _NUMBER = re.compile(r"\d{1,3}(?:[   ]\d{3})+(?:[.,]\d+)?|\d[\d.,]*\d|\d")
 
 
 def _digits(number: str) -> str:
-    """A number without separators (1,000 = 1.000 = 1 000 = 1000); digits of other scripts
-    become 0-9."""
-    return "".join(str(unicodedata.decimal(c)) for c in number if c.isdecimal())
+    """A number in one spelling (1,000 = 1.000 = 1 000 = 1000, 4,2 = 4.2, but 4.2 is not 42);
+    digits of other scripts become 0-9."""
+    return number_key(number)
 
 
 def check_segments(numbers: Sequence[int], source_texts: Sequence[str],
@@ -264,6 +265,8 @@ def check_segments(numbers: Sequence[int], source_texts: Sequence[str],
                             "been added.")
     old, new = _facts("\n".join(source_texts)), _facts("\n".join(texts))
     for key, label in _KINDS:
+        if key == "number":  # numbers are checked per segment above
+            continue
         before_facts, after_facts = old[key], new[key]
         if key == "time":
             missing = sorted((before_facts - after_facts).elements())
