@@ -1,6 +1,6 @@
 {% extends "shell.html" %}
 
-{% block title %}Setup - Yezatas{% endblock %}
+{% block title %}Configuration - Yezatas{% endblock %}
 
 {% macro card(step) %}
 <section class="card {{ step.status }}{% if current == step.key %} current{% endif %}{% if not step.enabled %} locked{% endif %}" id="step-{{ step.key }}">
@@ -101,7 +101,7 @@
 
 {% block content %}
 <div class="narrow">
-<h1 class="page-title">Setup</h1>
+<h1 class="page-title">Configuration</h1>
 <p class="intro">Connect your channel in eight short steps. Yezatas only <strong>reads</strong> your
   channel here. Nothing is changed on YouTube. Use the Google account that owns the channel for every step.</p>
 
@@ -398,13 +398,30 @@
 
 <section class="card" id="step-ai">
   <header class="card-head">
-    <h2>AI suggestions (optional)</h2>
-    {% if model_key == 'environment' %}<span class="pill done">Key from the environment</span>
+    <h2>Primary AI</h2>
+    {% if primary_ai == 'local' %}<span class="pill done">Muse Glimmer on this computer</span>
+    {% elif model_key == 'environment' %}<span class="pill done">Key from the environment</span>
     {% elif model_key == 'saved' %}<span class="pill done">Key saved</span>
     {% else %}<span class="pill">No key</span>{% endif %}
   </header>
-  <p>With a Meta API key, <strong>{{ model }}</strong> can suggest better titles, descriptions and tags for your videos.
-    Every suggestion becomes a draft that you review. Nothing is sent to YouTube without your approval.</p>
+  <p>The Primary AI suggests better titles, descriptions and tags, checks categories, answers the Copilot and does the other text work. Every suggestion becomes a draft that you review. Nothing is sent to YouTube without your approval.</p>
+  {% if primary_ai_source == 'environment' %}
+  <p class="result" id="primary-ai-status">The choice comes from the <code>{{ primary_ai_env }}</code> environment variable. To change it, change the variable and restart Yezatas.</p>
+  {% endif %}
+  <form method="post" action="/setup/primary-ai" class="choice-form" id="primary-ai-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="choice" for="primary-ai-meta">
+      <input id="primary-ai-meta" type="radio" name="primary_ai" value="meta"{% if primary_ai == 'meta' %} checked{% endif %}{% if primary_ai_source == 'environment' %} disabled{% endif %}>
+      <span><strong>Meta's Model API</strong><br>Muse Spark 1.3. Needs a Meta API key; each feature shows its price.</span>
+    </label>
+    <label class="choice" for="primary-ai-local">
+      <input id="primary-ai-local" type="radio" name="primary_ai" value="local"{% if primary_ai == 'local' %} checked{% endif %}{% if primary_ai_source == 'environment' %} disabled{% endif %}>
+      <span><strong>Muse Glimmer on this computer</strong><br>Free and private: nothing leaves this computer. Runs in Ollama, needs about 18 GB of memory.</span>
+    </label>
+    {% if primary_ai_source != 'environment' %}<button type="submit" class="button primary">Save the choice</button>{% endif %}
+  </form>
+
+  <h3 class="run-h">Meta's Model API</h3>
   <p class="hint" id="ai-data">Each AI feature says, next to its button, what it sends. Text sent to Meta's Model API is handled under your Meta account's terms; on free credits Meta may use it to improve its products.</p>
   {% if model_key == 'environment' %}
   <p class="result" id="model-key-status">The key comes from the <code>{{ key_env }}</code> environment variable. To change it, change the variable and restart Yezatas.</p>
@@ -419,26 +436,65 @@
   </form>
   {% if model_key == 'saved' %}{{ post_button('/setup/model-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
   {% endif %}
+
+  <h3 class="run-h">Muse Glimmer on this computer</h3>
+  <p id="local-ai-status"><strong>{{ verifier_model }}</strong> at <code>{{ verifier_url }}</code>:
+    {% if verifier_ready %}<span class="pill done">Ollama running with {{ verifier_model }}</span>{% else %}<span class="pill warn">Not running</span>{% endif %}</p>
+  {% if not verifier_ready %}
+  <div id="local-ai-help">
+    <p>To get started:</p>
+    <ol>
+      <li>Install Ollama from <a href="https://ollama.com/download" rel="noopener noreferrer">https://ollama.com/download</a>.</li>
+      <li>Run <code>ollama pull {{ verifier_model }}</code> in a terminal.</li>
+      <li>Start Ollama.</li>
+      <li>Reload this page.</li>
+    </ol>
+  </div>
+  {% endif %}
+  {% if primary_ai == 'local' %}
+  <div id="local-ai-meta-features">
+    {% if meta_key_set %}
+    <p>Three features need Meta's API. Your saved Meta key is used for them, and they show their price.</p>
+    {% else %}
+    <p>Three features need Meta's API. Add a Meta key above to use them.</p>
+    {% endif %}
+    <ul>
+      <li>Transcripts from a video file (Muse Voice Transcribe, about {{ asr_price }} / hour)</li>
+      <li>Subject and face sizes in the packaging check (SAM 3.1)</li>
+      <li>Thumbnail variants (Muse Image)</li>
+    </ul>
+    <p class="hint">Translations made on Glimmer are checked by Glimmer too, so they are marked Self-checked.</p>
+  </div>
+  {% endif %}
+
 </section>
 
 <section class="card" id="step-translate">
   <header class="card-head">
-    <h2>Translations (optional)</h2>
-    {% if translator_key == 'environment' %}<span class="pill done">Key from the environment</span>
-    {% elif translator_key == 'saved' %}<span class="pill done">Key saved</span>
-    {% elif translator_key == 'meta' %}<span class="pill done">Using the Meta key</span>
+    <h2>Third-party alternatives</h2>
+    {% if translator_used == 'environment' %}<span class="pill done">Key from the environment</span>
+    {% elif translator_used == 'saved' %}<span class="pill done">Key saved</span>
+    {% elif translator_used == 'modal' %}<span class="pill done">Using Modal</span>
+    {% elif translator_used == 'local' %}<span class="pill done">Using Muse Glimmer</span>
+    {% elif translator_used == 'meta' %}<span class="pill done">Using the Meta key</span>
     {% else %}<span class="pill">No key</span>{% endif %}
   </header>
-  <p>Yezatas can translate a video's title and description into other languages. <strong>{{ translator_model }}</strong> (Muse Spark Open, on Baseten) translates, code checks that every link, time, hashtag, @handle and email survived, and <strong>{{ verifier_model }}</strong> on this computer translates each result back and compares it. Translations become part of the draft. Nothing is sent to YouTube without your approval.</p>
-  <h3 class="run-h">Translator</h3>
-  {% if translator_key == 'meta' %}
-  <p id="translator-key-status">No Baseten key is set, so translations use your Meta API key with <strong>{{ model }}</strong>. A Baseten key switches them to {{ translator_model }}.</p>
-  {% elif translator_key == 'environment' %}
+  <p>Other companies that host Meta's open model, Muse Spark Open, for translations. Your text goes to them under their terms.</p>
+  <p class="hint" id="translator-order">Yezatas translates on Baseten if it has a Baseten key, else on Modal if it has a Modal key and endpoint, else with the Primary AI. Code checks that every link, time, hashtag, @handle and email survived, and <strong>{{ verifier_model }}</strong> on this computer translates each result back and compares it. Translations become part of the draft. Nothing is sent to YouTube without your approval.</p>
+
+  <h3 class="run-h">Baseten</h3>
+  {% if translator_key == 'environment' %}
   <p class="result" id="translator-key-status">The key comes from the <code>{{ translator_env }}</code> environment variable. To change it, change the variable and restart Yezatas.</p>
   {% elif translator_key == 'saved' %}
-  <p id="translator-key-status">A Baseten key is saved on this computer, in <code>{{ home }}</code>. It is not shown again.</p>
+  <p id="translator-key-status">A Baseten key is saved on this computer, in <code>{{ home }}</code>. It is not shown again. <strong>{{ translator_model }}</strong> translates.</p>
+  {% elif translator_used == 'modal' %}
+  <p id="translator-key-status">No Baseten key is set, so translations use Modal. A Baseten key switches them to {{ translator_model }}.</p>
+  {% elif translator_used == 'local' %}
+  <p id="translator-key-status">No Baseten key is set, so translations use Muse Glimmer on this computer. A Baseten key switches them to {{ translator_model }}.</p>
+  {% elif translator_used == 'meta' %}
+  <p id="translator-key-status">No Baseten key is set, so translations use your Meta API key with <strong>{{ model }}</strong>. A Baseten key switches them to {{ translator_model }}.</p>
   {% else %}
-  <p id="translator-key-status">No translation key is set. Add a Baseten API key (or a Meta API key in the step above).</p>
+  <p id="translator-key-status">No translation key is set. Add a Baseten API key (or a Meta API key in the Primary AI card).</p>
   {% endif %}
   {% if translator_key != 'environment' %}
   <form method="post" action="/setup/translator-key" class="upload" autocomplete="off">
@@ -449,6 +505,27 @@
   </form>
   {% if translator_key == 'saved' %}{{ post_button('/setup/translator-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
   {% endif %}
+
+  <h3 class="run-h">Modal</h3>
+  <p id="modal-url-status">Endpoint: {% if modal_url %}<code>{{ modal_url }}</code>{% else %}not set. Set the <code>{{ modal_url_env }}</code> environment variable to your Modal endpoint and restart Yezatas.{% endif %}
+    The model is <strong>{{ modal_model }}</strong>.</p>
+  {% if modal_key == 'environment' %}
+  <p class="result" id="modal-key-status">The key comes from the <code>{{ modal_env }}</code> environment variable. To change it, change the variable and restart Yezatas.</p>
+  {% elif modal_key == 'saved' %}
+  <p id="modal-key-status">A Modal key is saved on this computer, in <code>{{ home }}</code>. It is not shown again.</p>
+  {% else %}
+  <p id="modal-key-status">No Modal key is set.</p>
+  {% endif %}
+  {% if modal_key != 'environment' %}
+  <form method="post" action="/setup/modal-key" class="upload" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="modal-key">{{ 'Replace the saved key' if modal_key == 'saved' else 'Modal API key' }}</label>
+    <input id="modal-key" type="password" name="api_key" autocomplete="off" spellcheck="false" maxlength="500" required>
+    <button type="submit" class="button primary">Save the key</button>
+  </form>
+  {% if modal_key == 'saved' %}{{ post_button('/setup/modal-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
+  {% endif %}
+
   <h3 class="run-h">Checker</h3>
   <p id="verifier-status"><strong>{{ verifier_model }}</strong> at <code>{{ verifier_url }}</code>:
     {% if verifier_ready %}<span class="pill done">Ready</span>{% else %}<span class="pill warn">Not running</span>{% endif %}</p>
@@ -457,11 +534,30 @@
 
 <section class="card" id="step-transcripts">
   <header class="card-head">
-    <h2>Transcripts (optional)</h2>
+    <h2>Transcripts and sounds</h2>
     {% if ffmpeg %}<span class="pill done">ffmpeg found</span>{% else %}<span class="pill warn">ffmpeg not found</span>{% endif %}
   </header>
   <p id="ffmpeg-status">{% if ffmpeg %}ffmpeg was found on this computer.{% else %}ffmpeg was not found on this computer. Install it and restart Yezatas.{% endif %}
-    Transcripts, chapters and subtitles need it to read the sound of a video file. They also use the Meta API key from the AI suggestions step.</p>
+    Transcripts, chapters and subtitles need it to read the sound of a video file. They also use the Meta API key from the Primary AI step.</p>
+  <p id="panns-status">Sound tagger (PANNs):
+    {% if panns %}<span class="pill done">Installed</span>{% else %}<span class="pill warn">Not installed</span>{% endif %}
+    It labels music and sounds in videos without speech.</p>
+  {% if not ffmpeg or not panns %}
+  <h3 class="run-h">How to install</h3>
+  <p>Run these in a terminal, then restart Yezatas. The sound model (about 300 MB) downloads the first time it is used.</p>
+  {% if not ffmpeg %}
+  <p class="hint">ffmpeg:</p>
+  <details class="os-help" id="install-ffmpeg-windows"><summary>Windows</summary><pre>winget install Gyan.FFmpeg</pre></details>
+  <details class="os-help" id="install-ffmpeg-macos"><summary>macOS</summary><pre>brew install ffmpeg</pre></details>
+  <details class="os-help" id="install-ffmpeg-ubuntu"><summary>Ubuntu</summary><pre>sudo apt install ffmpeg</pre></details>
+  {% endif %}
+  {% if not panns %}
+  <p class="hint">Sound tagger (PANNs), with Yezatas's own Python:</p>
+  <details class="os-help" id="install-panns-windows"><summary>Windows</summary><pre>.venv\Scripts\pip install panns-inference</pre></details>
+  <details class="os-help" id="install-panns-macos"><summary>macOS</summary><pre>.venv/bin/pip install panns-inference</pre></details>
+  <details class="os-help" id="install-panns-ubuntu"><summary>Ubuntu</summary><pre>.venv/bin/pip install panns-inference</pre></details>
+  {% endif %}
+  {% endif %}
 </section>
 
 {% include "_footer.html" %}

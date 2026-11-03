@@ -9,7 +9,7 @@
 
 <section class="card" id="checks-ask" aria-labelledby="h-checks-ask">
   <h2 id="h-checks-ask">Ask for a check</h2>
-  {% if not has_key %}<p class="hint" id="checks-no-key">There is no Meta API key yet, so Yezatas cannot turn your words into a check. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  {% if not has_key %}<p class="hint" id="checks-no-key">There is no Meta API key yet, so Yezatas cannot turn your words into a check. <a href="/setup#step-ai">Add one in Configuration</a>.</p>{% endif %}
   <form class="edit-form" method="post" action="/checks/ask" id="checks-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="field">
@@ -17,7 +17,7 @@
       <textarea id="ck-request" name="request" rows="3" maxlength="{{ request_max }}" data-count-limit="{{ request_max }}" data-count-unit="characters" data-count-for="ck-count" placeholder="For example: every public video links example.com"></textarea>
       <p class="hint counter" id="ck-count" aria-live="off">Up to {{ request_max }} characters.</p>
     </div>
-    <p class="hint">Your words go to Meta's Model API ({{ model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>). The model only picks a rule from the fixed list; Yezatas code checks every video. Nothing is sent to YouTube.</p>
+    <p class="hint">Your words go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>).{% endif %} The model only picks a rule from the fixed list; Yezatas code checks every video. Nothing is sent to YouTube.</p>
     <div class="actions"><button type="submit" class="button primary"{% if not has_key %} disabled{% endif %}>Make the check</button></div>
   </form>
 </section>
@@ -26,7 +26,7 @@
 <section class="card" id="checks-proposal" aria-labelledby="h-checks-proposal">
   <h2 id="h-checks-proposal">Proposed check</h2>
   <p id="ck-explain">{{ proposal.explain }}</p>
-  <p class="muted" id="ck-cost">{{ proposal.model }} &middot; {{ proposal.tokens }} tokens &middot; cost {{ proposal.cost }}</p>
+  <p class="muted" id="ck-cost">{{ proposal.model }} &middot; {{ proposal.tokens }} tokens{% if not ai_local() %} &middot; cost {{ proposal.cost }}{% endif %}</p>
   <form class="edit-form" method="post" action="/checks/save">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="request" value="{{ proposal.request }}">

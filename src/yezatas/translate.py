@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
-from . import agent
+from . import agent, primaryai
 from .config import Config, ensure_dirs
 from .facts import _EMAIL, _HANDLE, _TIME, extract_urls
 from .seo import _HASHTAG, _URL
@@ -44,11 +44,12 @@ LANGUAGES: dict[str, str] = {
 DEFAULT_TARGETS: tuple[str, ...] = ("es", "pt", "de", "fr", "ru")
 
 TRANSLATOR_KEY_ENV = "BASETEN_API_KEY"
+MODAL_KEY_ENV = "MODAL_API_KEY"
 MAX_TITLE = 100
 MAX_DESCRIPTION_BYTES = 5000
 PASS_SCORE = 4  # a score of 3 or less is flagged
 
-AUTH_MESSAGE = "The translation API key was refused. Check it in Setup."
+AUTH_MESSAGE = "The translation API key was refused. Check it in Configuration."
 
 
 class TranslateError(RuntimeError):
@@ -185,12 +186,15 @@ class Completion:
 
 
 class ChatTranslator:
-    """OpenAI-compatible chat model: Spark Open on Baseten, or Spark 1.3 on Meta's API."""
+    """OpenAI-compatible chat model: Spark Open on Baseten or Modal, Spark 1.3 on Meta's API, or
+    Muse Glimmer through Ollama on this computer (`local`)."""
 
-    def __init__(self, api_key: str, model: str, base_url: str, timeout: float = 120) -> None:
+    def __init__(self, api_key: str, model: str, base_url: str, timeout: float = 120,
+                 local: bool = False) -> None:
         import openai  # lazy: the module imports without the SDK
 
         self.model = model
+        self.local = local
         self._openai = openai
         self._key = api_key
         self._client = openai.OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
@@ -212,6 +216,10 @@ class ChatTranslator:
                 "rate_limit", "The translation service is limiting requests. Try again in a minute."
             ) from exc
         except (openai.APITimeoutError, openai.APIConnectionError) as exc:
+            if self.local:
+                raise TranslateError(
+                    "network", "Could not reach Muse Glimmer on this computer. Start Ollama with "
+                              "that model and try again.") from exc
             raise TranslateError(
                 "network", "Could not reach the translation service. Check your internet "
                            "connection and try again.") from exc
@@ -415,15 +423,29 @@ class OllamaVerifier:
 
 # --- the keys and the configured clients -------------------------------------------------------------
 def translator_key_source(config: Config, env: Mapping[str, str] | None = None) -> str:
-    """Where the translation key comes from: "environment" (BASETEN_API_KEY), "saved", "meta" (the
-    Meta API key is used instead) or "" (none)."""
+    """Which translator is used, in order: "environment" or "saved" (a Baseten key), "modal" (a Modal
+    key and endpoint), "local" (Primary AI is Local), "meta" (the Meta API key) or "" (none)."""
     if env is None:
         env = os.environ
     if env.get(TRANSLATOR_KEY_ENV, "").strip():
         return "environment"
     if config.translator_key_path is not None and config.translator_key_path.is_file():
         return "saved"
+    if modal_ready(config, env):
+        return "modal"
+    if primaryai.is_local(config, env):
+        return "local"
     return "meta" if agent.key_source(config, env) else ""
+
+
+def _read_key(path: Any) -> str | None:
+    if path is None:
+        return None
+    try:
+        key = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return key or None
 
 
 def load_translator_key(config: Config, env: Mapping[str, str] | None = None) -> str | None:
@@ -431,33 +453,23 @@ def load_translator_key(config: Config, env: Mapping[str, str] | None = None) ->
     if env is None:
         env = os.environ
     key = env.get(TRANSLATOR_KEY_ENV, "").strip()
-    if key:
-        return key
-    if config.translator_key_path is None:
-        return None
-    try:
-        key = config.translator_key_path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    return key or None
+    return key or _read_key(config.translator_key_path)
 
 
-def save_translator_key(config: Config, key: str) -> None:
-    """Save the key atomically next to the other credentials."""
+def _save_key(config: Config, path: Any, prefix: str, key: str) -> None:
     key = key.strip()
     if not key or any(c.isspace() for c in key):
         raise ValueError("The key must be one line with no spaces.")
-    if config.translator_key_path is None:
+    if path is None:
         raise ValueError("This configuration has no place for the key.")
     ensure_dirs(config)
-    fd, tmp_name = tempfile.mkstemp(dir=config.credentials_dir, prefix="translator_api_key.",
-                                    suffix=".tmp")
+    fd, tmp_name = tempfile.mkstemp(dir=config.credentials_dir, prefix=prefix, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(key)
         if sys.platform != "win32":
             os.chmod(tmp_name, 0o600)
-        os.replace(tmp_name, config.translator_key_path)
+        os.replace(tmp_name, path)
     except BaseException:
         try:
             os.unlink(tmp_name)
@@ -466,26 +478,81 @@ def save_translator_key(config: Config, key: str) -> None:
         raise
 
 
-def delete_translator_key(config: Config) -> bool:
-    """Delete the saved key. Returns True if there was one."""
-    if config.translator_key_path is None:
+def _delete_key(path: Any) -> bool:
+    if path is None:
         return False
     try:
-        config.translator_key_path.unlink()
+        path.unlink()
     except FileNotFoundError:
         return False
     return True
 
 
+def save_translator_key(config: Config, key: str) -> None:
+    """Save the key atomically next to the other credentials."""
+    _save_key(config, config.translator_key_path, "translator_api_key.", key)
+
+
+def delete_translator_key(config: Config) -> bool:
+    """Delete the saved key. Returns True if there was one."""
+    return _delete_key(config.translator_key_path)
+
+
+# --- Modal: the same open model on another host ------------------------------------------------------
+def modal_key_source(config: Config, env: Mapping[str, str] | None = None) -> str:
+    """Where the Modal key comes from: "environment" (MODAL_API_KEY), "saved" or "" (none)."""
+    if env is None:
+        env = os.environ
+    if env.get(MODAL_KEY_ENV, "").strip():
+        return "environment"
+    if config.modal_key_path is not None and config.modal_key_path.is_file():
+        return "saved"
+    return ""
+
+
+def load_modal_key(config: Config, env: Mapping[str, str] | None = None) -> str | None:
+    """The Modal key: MODAL_API_KEY from the environment, else the saved key file."""
+    if env is None:
+        env = os.environ
+    key = env.get(MODAL_KEY_ENV, "").strip()
+    return key or _read_key(config.modal_key_path)
+
+
+def modal_url(config: Config, env: Mapping[str, str] | None = None) -> str:
+    """The Modal endpoint (MODAL_ENDPOINT_URL), read live so a test or a restart can change it."""
+    if env is None:
+        env = os.environ
+    return env.get("MODAL_ENDPOINT_URL", "").strip().rstrip("/") or config.modal_url
+
+
+def modal_ready(config: Config, env: Mapping[str, str] | None = None) -> bool:
+    return bool(load_modal_key(config, env)) and bool(modal_url(config, env))
+
+
+def save_modal_key(config: Config, key: str) -> None:
+    """Save the Modal key atomically next to the other credentials."""
+    _save_key(config, config.modal_key_path, "modal_api_key.", key)
+
+
+def delete_modal_key(config: Config) -> bool:
+    """Delete the saved Modal key. Returns True if there was one."""
+    return _delete_key(config.modal_key_path)
+
+
 def translator_from_config(config: Config, env: Mapping[str, str] | None = None) -> Translator | None:
-    """Spark Open with the Baseten key; else Spark 1.3 with the Meta key; else None."""
+    """Spark Open with the Baseten key; else Spark Open on Modal (key and endpoint); else the
+    Primary AI (Glimmer through Ollama, or Spark 1.3 with the Meta key); else None."""
     key = load_translator_key(config, env)
     if key:
         return ChatTranslator(key, config.translator_model, config.translator_url)
-    meta_key = agent.load_api_key(config, env)
-    if meta_key:
-        return ChatTranslator(meta_key, config.model, agent.MODEL_BASE_URL)
-    return None
+    if modal_ready(config, env):
+        return ChatTranslator(load_modal_key(config, env) or "", config.modal_model,
+                              modal_url(config, env))
+    found = primaryai.text_model(config, env)
+    if found is None:
+        return None
+    return ChatTranslator(found.api_key, found.model, found.base_url,
+                          timeout=primaryai.LOCAL_TIMEOUT if found.local else 120, local=found.local)
 
 
 def verifier_from_config(config: Config) -> Verifier:

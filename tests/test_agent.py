@@ -276,7 +276,7 @@ def test_common_closing_line_urls_are_allowed(store: Store) -> None:
 
 
 def test_model_error_fails_the_run(store: Store) -> None:
-    refused = "The Meta API key was refused. Check it in Setup."
+    refused = "The Meta API key was refused. Check it in Configuration."
     client = FakeModelClient([
         tool_reply(("get_scorecard", "{}"), tokens=(100, 0, 5)), ModelError("auth", refused)])
     result = suggest_for_video(store, client, V1, now=NOW)
@@ -539,5 +539,5 @@ def test_meta_client_maps_errors(monkeypatch: pytest.MonkeyPatch) -> None:
         assert "sk-test-key" not in str(raised.value)
     assert str(raised.value) == "The Meta API returned an error (HTTP 400): It failed."
     client, _, _ = meta_client(monkeypatch, status_error(openai.AuthenticationError, 401))
-    with pytest.raises(ModelError, match="The Meta API key was refused. Check it in Setup."):
+    with pytest.raises(ModelError, match="The Meta API key was refused. Check it in Configuration."):
         client.complete([])

@@ -5,7 +5,7 @@
   <p class="muted">Each tool makes a draft or advice. Nothing goes to YouTube until you approve it. Open a tool to use it.</p>
   <div class="vtools-grid">
   <details class="tool" id="tool-suggest" data-keep>
-    <summary><span class="tool-icon">{{ icon('changes') }}</span><span class="tool-text"><span class="tool-name">Suggestions from Muse Spark</span><span class="tool-what">A better title, description and tags, as a draft</span></span>{% if sg.running %}<span class="tool-state">Running</span>{% endif %}</summary>
+    <summary><span class="tool-icon">{{ icon('changes') }}</span><span class="tool-text"><span class="tool-name">Suggestions from {{ ai_name() }}</span><span class="tool-what">A better title, description and tags, as a draft</span></span>{% if sg.running %}<span class="tool-state">Running</span>{% endif %}</summary>
     {% include "_suggest_card.html" %}
   </details>
   <details class="tool" id="tool-translations" data-keep>

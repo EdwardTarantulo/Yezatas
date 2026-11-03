@@ -18,6 +18,11 @@ DEFAULT_TRANSLATOR_MODEL = "meta-models/muse-spark-open-1026"
 DEFAULT_TRANSLATOR_URL = "https://inference.baseten.co/v1"
 DEFAULT_VERIFIER_MODEL = "muse-glimmer:30b"
 DEFAULT_VERIFIER_URL = "http://127.0.0.1:11434"
+# Modal hosts the same open model for translations (the endpoint URL is the creator's own deployment).
+DEFAULT_MODAL_MODEL = "meta-models/Muse-Spark-Open-816B-A42B"
+# Primary AI: "meta" (Muse Spark through Meta's Model API) or "local" (Muse Glimmer through Ollama).
+PRIMARY_AI_CHOICES = ("meta", "local")
+DEFAULT_PRIMARY_AI = "meta"
 
 
 class ConfigError(ValueError):
@@ -39,6 +44,10 @@ class Config:
     translator_key_path: Path | None = None  # the saved Baseten key (BASETEN_API_KEY wins)
     verifier_model: str = DEFAULT_VERIFIER_MODEL
     verifier_url: str = DEFAULT_VERIFIER_URL
+    modal_model: str = DEFAULT_MODAL_MODEL
+    modal_url: str = ""  # the creator's Modal endpoint (MODAL_ENDPOINT_URL); empty: not set up
+    modal_key_path: Path | None = None  # the saved Modal key (MODAL_API_KEY wins)
+    primary_ai_path: Path | None = None  # the saved choice, "meta" or "local" (YEZATAS_PRIMARY_AI wins)
 
 
 def _default_home(env: Mapping[str, str]) -> Path:
@@ -98,6 +107,10 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         translator_key_path=credentials_dir / "translator_api_key",
         verifier_model=env.get("YEZATAS_VERIFIER_MODEL", "").strip() or DEFAULT_VERIFIER_MODEL,
         verifier_url=(env.get("YEZATAS_VERIFIER_URL", "").strip() or DEFAULT_VERIFIER_URL).rstrip("/"),
+        modal_model=env.get("YEZATAS_MODAL_MODEL", "").strip() or DEFAULT_MODAL_MODEL,
+        modal_url=env.get("MODAL_ENDPOINT_URL", "").strip().rstrip("/"),
+        modal_key_path=credentials_dir / "modal_api_key",
+        primary_ai_path=credentials_dir / "primary_ai",
     )
 
 

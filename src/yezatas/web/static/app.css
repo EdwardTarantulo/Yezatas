@@ -1140,3 +1140,12 @@ button.gbtn { cursor: pointer; }
   .an-row { grid-template-columns: minmax(0, 1.2fr) minmax(56px, 1fr) 40px; }
   .an-views { display: none; }
 }
+
+/* Configuration: Primary AI choice and the install help */
+.choice-form { display: grid; gap: 10px; margin: 14px 0; }
+.choice { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.choice input { margin-top: 3px; }
+.choice-form button { justify-self: start; }
+.os-help { margin: 6px 0; }
+.os-help > summary { cursor: pointer; font-weight: 500; }
+.os-help pre { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); overflow-x: auto; }

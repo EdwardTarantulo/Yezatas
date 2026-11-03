@@ -12,7 +12,7 @@
 {% if pull_running %}
 <p class="waiting" id="today-pull"><span class="spinner" aria-hidden="true"></span> <span id="pull-msg" role="status" aria-live="polite">{{ pull_message or 'Starting…' }}</span></p>
 {% elif pull_failed %}
-<div class="flash error" role="alert" id="today-pull-failed">{{ pull_failed }} <a href="/setup#step-pull">Open Setup</a></div>
+<div class="flash error" role="alert" id="today-pull-failed">{{ pull_failed }} <a href="/setup#step-pull">Open Configuration</a></div>
 {% endif %}
 
 {% if draft_count %}

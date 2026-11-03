@@ -359,8 +359,8 @@ def test_a_second_question_while_one_runs_is_refused_and_the_page_polls(tmp_path
 
 
 @pytest.mark.parametrize("error, shown", [
-    (copilot.CopilotError("There is no pulled catalog yet. Pull it in Setup first."),
-     "There is no pulled catalog yet. Pull it in Setup first."),
+    (copilot.CopilotError("There is no pulled catalog yet. Pull it in Configuration first."),
+     "There is no pulled catalog yet. Pull it in Configuration first."),
     (ModelError("auth", "The key was refused."), "The key was refused."),
     (RuntimeError("secret internals"), "The answer stopped unexpectedly (RuntimeError)."),
 ])

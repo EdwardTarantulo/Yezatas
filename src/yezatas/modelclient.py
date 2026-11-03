@@ -13,13 +13,14 @@ import openai
 from . import agent
 from .agent import ModelError, ModelReply, ToolCall
 
-AUTH_MESSAGE = "The Meta API key was refused. Check it in Setup."
+AUTH_MESSAGE = "The Meta API key was refused. Check it in Configuration."
 
 
 class MetaModelClient:
     def __init__(self, api_key: str, model: str, base_url: str = agent.MODEL_BASE_URL,
-                 timeout: float = 120) -> None:
+                 timeout: float = 120, local: bool = False) -> None:
         self.model = model
+        self.local = local  # Muse Glimmer through Ollama on this computer: the messages say so
         self._client = openai.OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
 
     def complete(
@@ -42,12 +43,16 @@ class MetaModelClient:
             raise ModelError("rate_limit",
                              "The Meta API is limiting requests. Try again in a minute.") from exc
         except (openai.APITimeoutError, openai.APIConnectionError) as exc:
+            if self.local:
+                raise ModelError("network", "Could not reach Muse Glimmer on this computer. "
+                                            "Start Ollama with that model and try again.") from exc
             raise ModelError("network", "Could not reach the Meta API. Check your "
                                         "internet connection and try again.") from exc
         except openai.APIError as exc:
             status = getattr(exc, "status_code", None)
             detail = " ".join(str(getattr(exc, "message", "") or "").split())[:200]
-            text = "The Meta API returned an error" + (f" (HTTP {status})" if status else "")
+            text = ("Muse Glimmer (Ollama) returned an error" if self.local
+                    else "The Meta API returned an error") + (f" (HTTP {status})" if status else "")
             raise ModelError("api", f"{text}: {detail}" if detail else f"{text}.") from exc
         return _to_reply(response)
 

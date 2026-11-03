@@ -14,7 +14,7 @@
       <span class="muted history-when">Run #{{ r.run.id }} &middot; {{ r.when }} &middot; {{ r.run.model }}</span>
     </div>
     {% if r.run.summary %}<p>{{ r.run.summary }}</p>{% endif %}
-    <p class="muted run-cost">{{ r.tokens }} &middot; Estimated cost: {{ r.cost }}</p>
+    <p class="muted run-cost">{{ r.tokens }}{% if not ai_local() %} &middot; Estimated cost: {{ r.cost }}{% endif %}</p>
     {% if r.has_details %}
     <details class="backup">
       <summary>Show the steps</summary>

@@ -310,7 +310,7 @@ def test_a_job_without_a_translator_fails_with_a_clear_message(tmp_path: Path) -
     assert ui.web.start_translate(V1, "en", ["es"], "sid")
     finish(ui)
     snap = ui.web.translate_job.snapshot()
-    refusal = "There is no translation key. Add one in Setup. Nothing was sent."
+    refusal = "There is no translation key. Add one in Configuration. Nothing was sent."
     assert snap.status == "failed" and snap.message == refusal
     html = ui.client.get(f"/videos/{V1}").text
     assert 'class="flash error"' in html and refusal in html
@@ -671,7 +671,7 @@ def test_setup_shows_the_translation_step_without_a_key(tmp_path: Path) -> None:
     html = ui.setup_html()
     assert html.index('id="step-ai"') < html.index('id="step-translate"')
     section = html.split('id="step-translate"')[1].split("</section>")[0]
-    assert "Translations (optional)" in section and "No key" in section
+    assert "Third-party alternatives" in section and "No key" in section
     assert 'action="/setup/translator-key"' in section and 'type="password"' in section
     assert "/setup/translator-key/delete" not in section
     assert ui.config.verifier_model in section and "Not running" in section and "install Ollama" in section
@@ -744,7 +744,7 @@ def test_a_translation_key_from_the_environment_hides_the_form(tmp_path: Path,
     html = ui.setup_html()
     section = html.split('id="step-translate"')[1].split("</section>")[0]
     assert "Key from the environment" in section and translate.TRANSLATOR_KEY_ENV in section
-    assert 'type="password"' not in section and "/setup/translator-key" not in section
+    assert 'id="translator-key"' not in section and "/setup/translator-key" not in section
     assert FAKE_KEY not in html
     nf(ui, "/setup/translator-key", data={"api_key": "FAKE-OTHER-KEY"})
     assert not ui.config.translator_key_path.exists()

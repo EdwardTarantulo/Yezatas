@@ -66,7 +66,7 @@
   {% endif %}
   {% for p in t.proposals %}{{ proposal_card(p, csrf) }}{% endfor %}
   {% if t.status in ('answered', 'failed') %}
-  <p class="muted cp-foot">{{ t.model }} &middot; {{ t.tokens }} &middot; about {{ t.cost }}{% if t.tool_calls %} &middot; {{ t.tool_calls|length }} tool call{{ '' if t.tool_calls|length == 1 else 's' }}{% endif %}</p>
+  <p class="muted cp-foot">{{ t.model }} &middot; {{ t.tokens }}{% if not ai_local() %} &middot; about {{ t.cost }}{% endif %}{% if t.tool_calls %} &middot; {{ t.tool_calls|length }} tool call{{ '' if t.tool_calls|length == 1 else 's' }}{% endif %}</p>
   {% if t.tool_calls or t.events %}
   <details class="backup">
     <summary>Show what it looked at</summary>
@@ -106,7 +106,7 @@
   <p class="hint">This can take a minute or two. You can leave this page. The answer shows here.</p>
   {% else %}
   {% if failed %}<div class="flash error" role="alert" id="copilot-failed">{{ failed }}</div>{% endif %}
-  {% if not has_key %}<p class="hint" id="copilot-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  {% if not has_key %}<p class="hint" id="copilot-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Configuration</a>.</p>{% endif %}
   <form class="edit-form" method="post" action="/copilot/ask" id="copilot-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="field">
@@ -114,7 +114,7 @@
       <textarea id="cp-question" name="question" rows="3" maxlength="{{ limit }}" data-count-limit="{{ limit }}" data-count-unit="characters" data-count-for="cp-count" placeholder="For example: which videos mention a topic, or write a better title for V12"></textarea>
       <p class="hint counter" id="cp-count" aria-live="off">Up to {{ limit }} characters.</p>
     </div>
-    <p class="hint">Your question, your video titles and stats, and the parts of descriptions and transcripts it asks to read go to Meta's Model API ({{ model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>). Nothing is sent to YouTube.</p>
+    <p class="hint">Your question, your video titles and stats, and the parts of descriptions and transcripts it asks to read go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>).{% endif %} Nothing is sent to YouTube.</p>
     <div class="actions"><button type="submit" class="button primary" id="copilot-ask"{% if not has_key %} disabled{% endif %}>Ask</button></div>
   </form>
   {% endif %}

@@ -27,10 +27,10 @@ from urllib.parse import urlsplit
 import openai
 from PIL import Image, ImageOps, ImageStat
 
-from . import agent
+from . import agent, primaryai
 from .agent import ModelClient, ModelError, estimate_cost
 from .config import Config
-from .modelclient import AUTH_MESSAGE, MetaModelClient
+from .modelclient import AUTH_MESSAGE
 from .store import PackagingReview, Store, ThumbnailVariant, Video
 from .subtitle_translate import _NUMBER, _digits
 
@@ -282,14 +282,36 @@ class PackagingTools:
                 f"maker={self.maker.model!r})")
 
 
+class _MetaOnlyMissing:
+    """Stands in for SAM or Muse Image when Primary AI is Local and no Meta key is saved: using it
+    says what to do instead of failing in the network layer."""
+
+    def __init__(self, model: str, feature: str) -> None:
+        self.model = model
+        self._message = primaryai.meta_only_message(feature)
+
+    def detect(self, image_bytes: bytes, mime: str, phrase: str) -> list[Box]:
+        raise ModelError("auth", self._message)
+
+    def edit(self, image_bytes: bytes, mime: str, instruction: str) -> bytes:
+        raise ModelError("auth", self._message)
+
+
 def packaging_tools_from_config(config: Config, env: Mapping[str, str] | None = None
                                 ) -> PackagingTools | None:
-    """The real clients from the saved or environment key, or None when there is no key. The vision
-    model is always the configured standard model (`Config` refuses Contributor models)."""
+    """The real clients, or None when there is no way to run them. The text and vision model comes
+    from `primaryai` (the configured standard Meta model, or Glimmer when Primary AI is Local);
+    SAM and Muse Image always use the Meta key, so in Local mode without one they are stand-ins that
+    refuse with a plain sentence."""
+    vision = primaryai.text_model(config, env)
+    if vision is None:
+        return None
     key = agent.load_api_key(config, env)
     if not key:
-        return None
-    return PackagingTools(MetaModelClient(key, config.model), MetaSamClient(key), MetaImageClient(key))
+        return PackagingTools(primaryai.text_client(config, env),
+                              _MetaOnlyMissing(SAM_MODEL, "Subject and face sizes"),
+                              _MetaOnlyMissing(IMAGE_MODEL, "Thumbnail variants"))
+    return PackagingTools(primaryai.text_client(config, env), MetaSamClient(key), MetaImageClient(key))
 
 
 # --- the thumbnail -------------------------------------------------------------------------------
@@ -590,8 +612,9 @@ class _Tally:
         self.output += reply.output_tokens
         return reply
 
-    def cost(self, model: str) -> float | None:
-        vision = estimate_cost(model, self.input, self.cached, self.output)
+    def cost(self, model: str, free: bool = False) -> float | None:
+        """USD spent; `free` is a vision model on this computer (only SAM calls cost money)."""
+        vision = 0.0 if free else estimate_cost(model, self.input, self.cached, self.output)
         return None if vision is None else round(vision + SAM_PRICE * self.sam_calls, 6)
 
 
@@ -768,7 +791,7 @@ def review_packaging(
         id=0, video_id=video_id, title=title, thumbnail_url=url, image_file=image_file,
         measurements=measurements, reading=reading, critique=critique, problems=problems,
         status=status, error=error, models=models, input_tokens=tally.input,
-        cached_tokens=tally.cached, output_tokens=tally.output, cost_usd=tally.cost(vision.model),
+        cached_tokens=tally.cached, output_tokens=tally.output, cost_usd=tally.cost(vision.model, getattr(vision, "local", False)),
         created_at="")
     review_id = store.add_packaging_review(review, now)
     stored = store.get_packaging_review(review_id)
@@ -892,7 +915,7 @@ def make_variants(
             record["error"] = str(exc)
         except PackagingError as exc:
             record["error"] = str(exc)
-        vision_cost = tally.cost(vision.model)
+        vision_cost = tally.cost(vision.model, getattr(vision, "local", False))
         record["cost_usd"] = (None if vision_cost is None else round(spent + vision_cost, 6))
         ids.append(store.add_thumbnail_variant(ThumbnailVariant(**record), now))  # type: ignore[arg-type]
     variants = tuple(v for v in (store.get_thumbnail_variant(i) for i in ids) if v is not None)

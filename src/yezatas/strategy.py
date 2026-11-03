@@ -152,7 +152,7 @@ def build_context(store: Store, as_of: datetime) -> StrategyContext:
     """The facts for one strategy report, made by code only. Writes nothing to the store."""
     videos = store.list_videos("video_id")
     if not videos:
-        raise StrategyError("There is no pulled catalog yet. Pull it in Setup first.")
+        raise StrategyError("There is no pulled catalog yet. Pull it in Configuration first.")
     catalog = Catalog(videos, as_of)
     catalog_table = catalog.table()
     refs = catalog_refs(videos)

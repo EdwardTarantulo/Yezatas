@@ -9,6 +9,7 @@ threads.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import secrets
@@ -47,9 +48,9 @@ from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
 from .. import thumbswap as thumbswap_mod
 from .. import transcribe as transcribe_mod
-from .. import translate
+from .. import primaryai, translate
 from ..catalog import NoChannelError, PullResult, pull_catalog
-from ..config import Config, ensure_dirs
+from ..config import PRIMARY_AI_CHOICES, Config, ensure_dirs
 from .. import affiliate as affiliate_mod
 from .. import bulkask as bulkask_mod
 from .. import comments as comments_mod
@@ -177,7 +178,7 @@ SHORTS_TIMEOUT_SECONDS = 3 * 60.0
 SHORTS_TIMEOUT_MESSAGE = (
     "Finding Shorts took more than 3 minutes, so Yezatas stopped waiting. Try again.")
 NO_SHORTS_KEY = (
-    "There is no Baseten or Meta API key yet, so the Shorts finder cannot run. Add one in Setup.")
+    "There is no Baseten or Meta API key yet, so the Shorts finder cannot run. Add one in Configuration.")
 ADCHECK_TIMEOUT_SECONDS = 3 * 60.0
 ADCHECK_TIMEOUT_MESSAGE = (
     "The advertiser-friendly check took more than 3 minutes, so Yezatas stopped waiting. Try again."
@@ -205,7 +206,7 @@ CHANNEL_SORT_TIMEOUT_MESSAGE = (
     "Sorting the comments took more than 30 minutes, so Yezatas stopped waiting. Try again."
 )
 CHANNEL_COMMENTS_PATH = "/comments"
-NO_PACKAGING_KEY = "There is no Meta API key. Add one in Setup. Nothing was sent."
+NO_PACKAGING_KEY = "There is no Meta API key. Add one in Configuration. Nothing was sent."
 MAX_ID_DIGITS = 12  # a variant id in a URL; longer is never a real one
 MAX_PATH_CHARS = 1000
 MAX_KEYWORDS = 20
@@ -354,8 +355,9 @@ def map_packaging_error(exc: BaseException) -> tuple[str, str]:
 
 
 def has_meta_key(config: Config) -> bool:
-    """Whether a Meta API key is set (environment or saved). Reads the key only; builds no client."""
-    return bool(agent.load_api_key(config))
+    """Whether the text features can start: Primary AI is Local, or a Meta API key is set
+    (environment or saved). Reads the key only; builds no client."""
+    return primaryai.text_ai_ready(config)
 
 
 def map_outliers_error(exc: BaseException) -> tuple[str, str]:
@@ -416,12 +418,7 @@ def make_default_strategy(config: Config) -> StrategyFn:
     """The real strategy report: Muse Spark 1.3 through Meta's Model API, one client per report."""
 
     def run(store: Store, home: Path, as_of: datetime, report: Report) -> "strategy_mod.StrategyReport":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, strategy_mod.STRATEGY_MODEL)
+        client = primaryai.text_client(config, model=strategy_mod.STRATEGY_MODEL)
         made = strategy_mod.make_report(store, client, as_of=as_of, report=report)
         strategy_mod.save_report(home, made)
         return made
@@ -470,12 +467,7 @@ def make_default_competitor_explain(config: Config) -> CompetitorExplainFn:
         channels: list["competitors_mod.CompetitorChannel"],
         report: Report,
     ) -> "competitors_mod.CompetitorInsight":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        client = primaryai.text_client(config)
         report("Asking the model")
         made = competitors_mod.explain(channels, client)
         competitors_mod.save_insight(config.home, made)
@@ -512,12 +504,7 @@ def make_default_gap_rank(config: Config) -> GapRankFn:
         gaps: list["searchgaps_mod.SearchGap"],
         report: Report,
     ) -> "searchgaps_mod.GapRanking":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        client = primaryai.text_client(config)
         report("Asking the model")
         made = searchgaps_mod.rank_gaps(terms, gaps, client)
         searchgaps_mod.save_ranking(config.home, made)
@@ -530,12 +517,7 @@ def make_default_copilot(config: Config) -> CopilotFn:
     """The real copilot function: Muse Spark through Meta's Model API, one client per question."""
 
     def run(store: Store, question: str, chat_id: int, as_of: datetime, report: Report) -> int:
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        client = primaryai.text_client(config)
         return copilot_mod.ask(store, client, question, chat_id=chat_id, as_of=as_of,
                                report=report)
 
@@ -572,12 +554,7 @@ def make_default_adcheck(config: Config) -> AdcheckFn:
     """The real check: Muse Spark through Meta's Model API, one client per check."""
 
     def run(store: Store, video_id: str, now: datetime, report: Report) -> "AdCheck":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        client = primaryai.text_client(config)
         return adcheck_mod.check_video(store, client, video_id, now=now, report=report)
 
     return run
@@ -595,12 +572,7 @@ def make_default_category(config: Config) -> CategoryFn:
     """The real check: Muse Spark through Meta's Model API, one client per check."""
 
     def run(store: Store, video_id: str, now: datetime, report: Report) -> "CategoryCheck":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        client = primaryai.text_client(config)
         return categorycheck_mod.judge_category(store, client, video_id, now=now, report=report)
 
     return run
@@ -618,12 +590,7 @@ def make_default_pinned(config: Config) -> PinnedFn:
     """The real suggestion: Muse Spark through Meta's Model API, one client per call."""
 
     def run(store: Store, video_id: str, now: datetime, report: Report) -> "PinnedComment":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        client = primaryai.text_client(config)
         return pinnedcomment_mod.suggest_pinned(store, client, video_id, now=now, report=report)
 
     return run
@@ -667,12 +634,7 @@ def make_default_comments_assist(config: Config) -> CommentsAssistFn:
     """The real sort: Muse Spark through Meta's Model API, one client per sort."""
 
     def run(store: Store, video_id: str, now: datetime, report: Report) -> "comments_mod.AssistResult":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        client = primaryai.text_client(config)
         return comments_mod.assist(store, client, video_id, now=now, report=report)
 
     return run
@@ -682,12 +644,7 @@ def make_default_rule_maker(config: Config) -> RuleMakerFn:
     """The real rule maker: Muse Spark through Meta's Model API, one client per ask."""
 
     def run(request: str) -> "customchecks_mod.RuleDraft":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        client = primaryai.text_client(config)
         return customchecks_mod.rule_from_request(client, request)
 
     return run
@@ -697,12 +654,7 @@ def make_default_bulk_asker(config: Config) -> BulkAskerFn:
     """The real bulk asker: Muse Spark through Meta's Model API, one client per ask."""
 
     def run(store: Store, request: str) -> "bulkask_mod.AskProposal":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.ModelError("auth", NO_PACKAGING_KEY)
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        client = primaryai.text_client(config)
         return bulkask_mod.propose(client, store, request)
 
     return run
@@ -728,12 +680,9 @@ def make_default_chapters(config: Config) -> ChaptersFn:
     """The real chapters function: Muse Spark picks transcript segments, code makes the times."""
 
     def run(store: Store, video_id: str, report: Report) -> "chapters_mod.ChaptersResult":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.AgentError("No Meta API key is set. Add one in Setup.")
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        if not primaryai.text_ai_ready(config):
+            raise agent.AgentError("No Meta API key is set. Add one in Configuration.")
+        client = primaryai.text_client(config)
         return chapters_mod.suggest_chapters(store, client, video_id, report=report)
 
     return run
@@ -779,12 +728,9 @@ def make_default_suggest(config: Config) -> SuggestFn:
     """
 
     def run(store: Store, video_id: str, report: Report) -> "agent.SuggestResult":
-        key = agent.load_api_key(config)
-        if not key:
-            raise agent.AgentError("No Meta API key is set. Add one in Setup.")
-        from ..modelclient import MetaModelClient
-
-        client = MetaModelClient(key, config.model)
+        if not primaryai.text_ai_ready(config):
+            raise agent.AgentError("No Meta API key is set. Add one in Configuration.")
+        client = primaryai.text_client(config)
         return agent.suggest_for_video(store, client, video_id, report=report)
 
     return run
@@ -1195,7 +1141,7 @@ class WebState:
         translator, verifier = self._translate_tools(self.config)
         if translator is None:
             raise translate.TranslateError(
-                "auth", "There is no translation key. Add one in Setup. Nothing was sent.")
+                "auth", "There is no translation key. Add one in Configuration. Nothing was sent.")
         try:
             glossary_terms = glossary_mod.load_glossary(
                 self.config.home / glossary_mod.GLOSSARY_FILE
@@ -1254,7 +1200,7 @@ class WebState:
         translator, verifier = self._translate_tools(self.config)
         if translator is None:
             raise translate.TranslateError(
-                "auth", "There is no translation key. Add one in Setup. Nothing was sent.")
+                "auth", "There is no translation key. Add one in Configuration. Nothing was sent.")
         try:
             glossary_terms = glossary_mod.load_glossary(
                 self.config.home / glossary_mod.GLOSSARY_FILE
@@ -1470,7 +1416,7 @@ class WebState:
         with Store(self.config.catalog_db) as store:
             pull = store.latest_pull()
             if pull is None:
-                raise ValueError("There is no pulled catalog yet. Pull it in Setup first.")
+                raise ValueError("There is no pulled catalog yet. Pull it in Configuration first.")
             return outliers_mod.explain_outliers(
                 store, tools.vision, as_of=pull_moment(pull), fetch=self._packaging_fetch)
 
@@ -1496,7 +1442,7 @@ class WebState:
         with Store(self.config.catalog_db) as store:
             pull = store.latest_pull()
             if pull is None:
-                raise ValueError("There is no pulled catalog yet. Pull it in Setup first.")
+                raise ValueError("There is no pulled catalog yet. Pull it in Configuration first.")
             return self._strategy(store, self.config.home, pull_moment(pull), report)
 
     def strategy_state(self) -> JobSnapshot:
@@ -1584,7 +1530,7 @@ class WebState:
             reader = self._analytics_reader(creds)
         with Store(self.config.catalog_db) as store:
             if store.latest_pull() is None:
-                raise searchgaps_mod.SearchGapsError("There is no pulled catalog yet. Pull it in Setup first.")
+                raise searchgaps_mod.SearchGapsError("There is no pulled catalog yet. Pull it in Configuration first.")
             videos = store.list_videos("video_id")
         terms = searchgaps_mod.fetch_terms(reader, videos, report=report)
         searchgaps_mod.save_terms(self.config.home, terms)
@@ -1707,7 +1653,7 @@ class WebState:
         with Store(self.config.catalog_db) as store:
             pull = store.latest_pull()
             if pull is None:
-                raise ValueError("There is no pulled catalog yet. Pull it in Setup first.")
+                raise ValueError("There is no pulled catalog yet. Pull it in Configuration first.")
             return self._copilot(store, question, chat_id, pull_moment(pull), report)
 
     def copilot_state(self) -> JobSnapshot:
@@ -1731,7 +1677,7 @@ class WebState:
         report("Starting…")
         with Store(self.config.catalog_db) as store:
             if store.latest_pull() is None:
-                raise ValueError("There is no pulled catalog yet. Pull it in Setup first.")
+                raise ValueError("There is no pulled catalog yet. Pull it in Configuration first.")
             entries = links_mod.inventory(store.list_videos(), store.latest_link_checks())
             return links_mod.check_links(store, entries, fetch=self._link_fetch, report=report)
 
@@ -2054,6 +2000,13 @@ def create_app(
     templates.env.undefined = StrictUndefined
     templates.env.filters["lang_name"] = lang_name
     templates.env.filters["num"] = _num
+    # The Primary AI, read on every render: Local hides the prices and names Glimmer.
+    templates.env.globals["ai_local"] = lambda: primaryai.is_local(config)
+    templates.env.globals["ai_name"] = lambda: "Muse Glimmer" if primaryai.is_local(config) else "Muse Spark"
+
+    def text_model_name() -> str:
+        """The text model's name for the current Primary AI, for the labels next to the buttons."""
+        return config.verifier_model if primaryai.is_local(config) else config.model
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -2207,7 +2160,7 @@ def create_app(
         batch = snap.result if (snap.status == "done" and is_batch and not video_id
                                 and isinstance(snap.result, SuggestBatch)) else None
         return {
-            "has_key": bool(agent.key_source(config)), "model": config.model,
+            "has_key": primaryai.text_ai_ready(config), "model": text_model_name(),
             "running": snap.running and (mine or not video_id),
             "busy": snap.running and not mine and bool(video_id),
             "message": snap.message, "batch": batch,
@@ -2225,7 +2178,7 @@ def create_app(
     down_until = [0.0]  # a refused connection takes about 2 seconds on Windows: remember "down"
 
     def verifier_ready(verifier: "translate.Verifier | None", fresh: bool = False) -> bool:
-        """Is the checker up? The Setup page always asks (`fresh`); other pages reuse a slow "no"."""
+        """Is the checker up? The Configuration page always asks (`fresh`); other pages reuse a slow "no"."""
         if verifier is None:
             return False
         if not fresh and clock() < down_until[0]:
@@ -2245,9 +2198,11 @@ def create_app(
         running = snap.running and mine
         translator, verifier = tools_or_none()
         source = translate.translator_key_source(config)
-        provider = "meta" if source == "meta" else "baseten" if source else "other"
+        provider = (source if source in ("meta", "modal", "local") else "baseten" if source
+                    else "other")
         model = translator.model if translator is not None else (
-            config.model if source == "meta" else config.translator_model)
+            config.model if source == "meta" else config.modal_model if source == "modal"
+            else config.verifier_model if source == "local" else config.translator_model)
         return {
             "running": running, "busy": snap.running and not mine,
             "message": snap.message if running else "",
@@ -2337,9 +2292,22 @@ def create_app(
                 snap.result, packaging_mod.VariantsResult):
             making["done"] = {"tone": "ok" if snap.result.status == "done" else "error",
                               "text": snap.result.message}
-        return {"has_tools": has_packaging_key(),
-                "vision": config.model, "segmenter": packaging_mod.SAM_MODEL,
+        return {"has_tools": has_packaging_key(), "meta_blocked": primaryai.meta_only_blocked(config),
+                "vision": text_model_name(), "segmenter": packaging_mod.SAM_MODEL,
                 "maker": packaging_mod.IMAGE_MODEL, "check": checking, "variants": making}
+
+    def baseten_key_source() -> str:
+        """Where the Baseten key comes from ("environment", "saved" or ""), apart from which translator is used."""
+        if os.environ.get(translate.TRANSLATOR_KEY_ENV, "").strip():
+            return "environment"
+        return "saved" if config.translator_key_path is not None and config.translator_key_path.is_file() else ""
+
+    def soundtags_installed() -> bool:
+        """Is the sound tagger (PANNs) installed? Looked up without importing it."""
+        try:
+            return importlib.util.find_spec("panns_inference") is not None
+        except (ImportError, ValueError):
+            return False
 
     def has_shorts_key() -> bool:
         if shorts_key is not None:
@@ -2356,7 +2324,7 @@ def create_app(
         """What the advertiser-friendly check job is doing, for one video page."""
         snap, job_video = state.adcheck_state()
         panel = job_panel(snap, job_video, video_id)
-        panel.update({"has_key": has_key, "model": config.model})
+        panel.update({"has_key": has_key, "model": text_model_name()})
         return panel
 
     def category_panel(video_id: str, has_key: bool) -> dict[str, Any]:
@@ -2376,7 +2344,7 @@ def create_app(
     def comments_panel(video_id: str, has_write: bool) -> dict[str, Any]:
         snap, job_video = state.comments_state()
         panel = job_panel(snap, job_video, video_id)
-        panel.update({"has_write": has_write, "model": config.model})
+        panel.update({"has_write": has_write, "model": text_model_name()})
         return panel
 
     def assist_panel(video_id: str, has_key: bool, has_comments: bool) -> dict[str, Any]:
@@ -2393,7 +2361,7 @@ def create_app(
                 "drafts": found.drafts, "notes": list(found.notes), "model": found.model,
                 "tokens": f"{total:,}", "cost": format_cost(cost),
             }
-        panel.update({"has_key": has_key, "has_comments": has_comments, "model": config.model, "result": result})
+        panel.update({"has_key": has_key, "has_comments": has_comments, "model": text_model_name(), "result": result})
         return panel
 
     def channel_fetch_panel(has_write: bool, videos: int) -> dict[str, Any]:
@@ -2424,7 +2392,7 @@ def create_app(
                 "drafts": found.drafts, "notes": list(found.notes), "model": found.model,
                 "tokens": f"{total:,}", "cost": format_cost(cost),
             }
-        return {"running": running, "message": message, "failed": failed, "has_key": has_key, "videos": videos, "model": config.model, "result": result}
+        return {"running": running, "message": message, "failed": failed, "has_key": has_key, "videos": videos, "model": text_model_name(), "result": result}
 
     def video_not_found(request: Request) -> Response:
         return render(request, "error.html", {
@@ -2873,7 +2841,7 @@ def create_app(
         snap = state.outliers_state()
         return render(request, "outliers.html", {
             "active": "outliers", "ov": view, "as_of": _local_time(as_of.isoformat()),
-            "has_key": has_packaging_key(), "model": config.model,
+            "has_key": has_packaging_key(), "model": text_model_name(),
             "running": snap.running, "message": snap.message,
             "failed": snap.message if snap.status == "failed" else "",
             "poll": snap.running,
@@ -2903,11 +2871,12 @@ def create_app(
                     estimate = format_cost(agent.estimate_cost(
                         strategy_mod.STRATEGY_MODEL, input_tokens, 0, 4000))
             else:
-                context_error = "There is no pulled catalog yet. Pull it in Setup first."
+                context_error = "There is no pulled catalog yet. Pull it in Configuration first."
         snap = state.strategy_state()
         return render(request, "strategy.html", {
             "active": "strategy", "view": view, "has_key": has_packaging_key(),
-            "model": strategy_mod.STRATEGY_MODEL, "estimate": estimate,
+            "model": (config.verifier_model if primaryai.is_local(config)
+                      else strategy_mod.STRATEGY_MODEL), "estimate": estimate,
             "estimate_cost": estimate, "context_error": context_error,
             "running": snap.running, "message": snap.message,
             "failed": snap.message if snap.status == "failed" else "",
@@ -2936,7 +2905,7 @@ def create_app(
             "calls": terms.calls if terms else 0,
             "ranking": build_ranking_view(searchgaps_mod.latest_ranking(config.home), _local_time),
             "has_key": has_packaging_key(),
-            "model": config.model,
+            "model": text_model_name(),
             "days": searchgaps_mod.ANALYTICS_DAYS,
             "max_videos": searchgaps_mod.MAX_VIDEOS,
             "max_sent": searchgaps_mod.MAX_SENT,
@@ -2959,7 +2928,7 @@ def create_app(
         await read_form(request)
         client, _ = read_saved_client(config)
         if client is None:
-            flash(request, "error", "Add the OAuth client file first, in Setup (step 5).")
+            flash(request, "error", "Add the OAuth client file first, in Configuration (step 5).")
         elif not state.start_analytics_sign_in():
             flash(request, "error", "A sign-in is already waiting for you in the browser.")
         return see_other("/search-gaps")
@@ -3011,7 +2980,7 @@ def create_app(
         form = await read_form(request)
         client, _ = read_saved_client(config)
         if client is None:
-            flash(request, "error", "Add the OAuth client file first, in Setup (step 5).")
+            flash(request, "error", "Add the OAuth client file first, in Configuration (step 5).")
         elif not state.start_analytics_sign_in():
             flash(request, "error", "A sign-in is already waiting for you in the browser.")
         return see_other(analytics_back(form))
@@ -3044,7 +3013,7 @@ def create_app(
             "insight": insight,
             "signed_in": config.token_path.is_file(),
             "has_key": has_packaging_key(),
-            "model": config.model,
+            "model": text_model_name(),
             "max_channels": competitors_mod.MAX_CHANNELS,
             "max_videos": competitors_mod.MAX_VIDEOS,
             "units": competitors_mod.estimate_units(),
@@ -3080,7 +3049,7 @@ def create_app(
             "active": "copilot",
             "turns": build_copilot_turns(turns, proposals, videos, drafts, snap.running,
                                          _local_time),
-            "as_of": _local_time(pull_moment(pull).isoformat()), "model": config.model,
+            "as_of": _local_time(pull_moment(pull).isoformat()), "model": text_model_name(),
             "has_key": has_packaging_key(), "starters": STARTER_QUESTIONS,
             "limit": copilot_mod.MAX_QUESTION_CHARS, "running": snap.running,
             "message": snap.message, "failed": failed, "poll": snap.running,
@@ -3116,9 +3085,20 @@ def create_app(
         data["flash"] = state.pop_flash(request.state.session_id)
         _, verifier = tools_or_none()
         data.update({
-            "translator_key": translate.translator_key_source(config),
+            "translator_key": baseten_key_source(),
+            "translator_used": translate.translator_key_source(config),
             "translator_env": translate.TRANSLATOR_KEY_ENV,
             "translator_model": config.translator_model,
+            "modal_key": translate.modal_key_source(config),
+            "modal_env": translate.MODAL_KEY_ENV,
+            "modal_url": translate.modal_url(config), "modal_model": config.modal_model,
+            "modal_url_env": "MODAL_ENDPOINT_URL",
+            "primary_ai": primaryai.load_primary_ai(config),
+            "primary_ai_source": primaryai.primary_ai_source(config),
+            "primary_ai_env": primaryai.PRIMARY_AI_ENV,
+            "meta_key_set": bool(agent.load_api_key(config)),
+            "asr_price": f"${transcribe_mod.ASR_PRICE_PER_HOUR:.2f}",
+            "panns": soundtags_installed(),
             "verifier_model": config.verifier_model, "verifier_url": config.verifier_url,
             "verifier_ready": verifier_ready(verifier, fresh=True),
             "ffmpeg": transcribe_mod.find_ffmpeg() is not None,
@@ -3462,7 +3442,7 @@ def create_app(
         await read_form(request)
         client, _ = read_saved_client(config)
         if client is None:
-            flash(request, "error", "Add the OAuth client file first, in Setup (step 5).")
+            flash(request, "error", "Add the OAuth client file first, in Configuration (step 5).")
         elif not state.start_write_sign_in():
             flash(request, "error", "A sign-in is already waiting for you in the browser.")
         return see_other("/changes/push")
@@ -3552,7 +3532,7 @@ def create_app(
                   ask_plan_json: str = "") -> dict[str, Any]:
         return {"active": "bulk", "form": form, "error": error, "preview": preview,
                 "hidden": form.pairs(), "max_bulk": bulk.MAX_BULK,
-                "has_key": has_packaging_key(), "model": config.model,
+                "has_key": has_packaging_key(), "model": text_model_name(),
                 "request_max": bulkask_mod.REQUEST_MAX, "ask_proposal": proposal,
                 "ask_preview": ask_preview, "ask_request": ask_request,
                 "ask_plan_json": ask_plan_json}
@@ -3953,7 +3933,7 @@ def create_app(
                                for found in customchecks_mod.run_rules(store, enabled)}
                 except customchecks_mod.RuleError as exc:
                     results_error = str(exc)
-        return {"active": "checks", "has_key": has_packaging_key(), "model": config.model,
+        return {"active": "checks", "has_key": has_packaging_key(), "model": text_model_name(),
                 "request_max": customchecks_mod.REQUEST_MAX, "proposal": proposal,
                 "checks": build_checks_view(rules, results, titles),
                 "results_error": results_error}
@@ -4065,7 +4045,7 @@ def create_app(
         problem = await run_in_threadpool(check)
         if problem == "missing":
             return video_not_found(request)
-        if not agent.key_source(config):
+        if not primaryai.text_ai_ready(config):
             flash(request, "error", "Add a Meta API key first. Nothing was sent to Meta.", "ai")
             return back
         if problem == "draft":
@@ -4096,7 +4076,7 @@ def create_app(
         if not count:
             flash(request, "error", "Choose 1, 3, 5 or 10 videos.")
             return back
-        if not agent.key_source(config):
+        if not primaryai.text_ai_ready(config):
             flash(request, "error", "Add a Meta API key first. Nothing was sent to Meta.", "ai")
             return back
         ids = await run_in_threadpool(fix_next_ids, count)
@@ -4128,7 +4108,7 @@ def create_app(
         check_titles = check_title_map(data["entries"]) if data else {}
         snap = state.suggest_job.snapshot()
         return render(request, "agent.html", {
-            "active": "agent", "limit": AGENT_LOG_LIMIT, "model": config.model,
+            "active": "agent", "limit": AGENT_LOG_LIMIT, "model": text_model_name(),
             "rows": [run_view(r, titles, check_titles, _local_time, interrupted=not snap.running)
                      for r in runs],
         })
@@ -4162,6 +4142,29 @@ def create_app(
         removed = await run_in_threadpool(agent.delete_api_key, config)
         flash(request, "ok", "The saved key was deleted." if removed
               else "There was no saved key.", "ai")
+        return back_to_setup("ai")
+
+    # --- the Primary AI: Meta's Model API or Muse Glimmer on this computer ----------------------
+    @app.post("/setup/primary-ai")
+    async def save_primary_ai(request: Request) -> Response:
+        form = await read_form(request)
+        choice = str(form.get("primary_ai") or "")
+        if primaryai.primary_ai_source(config) == "environment":
+            flash(request, "error", f"The choice comes from the {primaryai.PRIMARY_AI_ENV} "
+                  "environment variable, so nothing was saved.", "ai")
+        elif choice not in PRIMARY_AI_CHOICES:
+            flash(request, "error", "Choose Meta's Model API or Muse Glimmer on this computer. "
+                  "Nothing was saved.", "ai")
+        else:
+            try:
+                await run_in_threadpool(primaryai.save_primary_ai, config, choice)
+            except (ValueError, OSError):
+                flash(request, "error", "The choice could not be saved. Check that "
+                      f"{config.credentials_dir} is writable.", "ai")
+            else:
+                flash(request, "ok", "Primary AI is now "
+                      + ("Muse Glimmer on this computer." if choice == "local"
+                         else "Meta's Model API."), "ai")
         return back_to_setup("ai")
 
     # --- translations -----------------------------------------------------------------------
@@ -4466,6 +4469,8 @@ def create_app(
             return video_not_found(request)
         if await run_in_threadpool(packaging_tools_or_none) is None:
             flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif primaryai.meta_only_blocked(config):
+            flash(request, "error", primaryai.meta_only_message("Subject and face sizes"), "ai")
         elif not state.start_packaging(video_id):
             flash(request, "error", "A packaging check is already running. Wait for it to finish.")
         return back
@@ -4801,7 +4806,7 @@ def create_app(
             return see_other("/competitors")
         creds = await run_in_threadpool(state.read_credentials)
         if creds is None:
-            flash(request, "error", "Reading other channels needs the YouTube sign-in. Sign in in Setup first.")
+            flash(request, "error", "Reading other channels needs the YouTube sign-in. Sign in in Configuration first.")
             return see_other("/competitors")
         ok = state.start_competitor_fetch(ref, creds)
         if not ok:
@@ -4818,7 +4823,7 @@ def create_app(
             return see_other("/competitors")
         creds = await run_in_threadpool(state.read_credentials)
         if creds is None:
-            flash(request, "error", "Reading other channels needs the YouTube sign-in. Sign in in Setup first.")
+            flash(request, "error", "Reading other channels needs the YouTube sign-in. Sign in in Configuration first.")
             return see_other("/competitors")
         ok = state.start_competitor_fetch(competitors_mod.ChannelRef("id", channel_id), creds)
         if not ok:
@@ -4982,6 +4987,8 @@ def create_app(
                   "Run the check first. Nothing was sent.")
         elif await run_in_threadpool(packaging_tools_or_none) is None:
             flash(request, "error", NO_PACKAGING_KEY, "ai")
+        elif primaryai.meta_only_blocked(config):
+            flash(request, "error", primaryai.meta_only_message("Thumbnail variants"), "ai")
         elif not state.start_variants(video_id, review_id):
             flash(request, "error", "Variants are already being made. Wait for them to finish.")
         return back
@@ -5023,6 +5030,38 @@ def create_app(
         removed = await run_in_threadpool(translate.delete_translator_key, config)
         flash(request, "ok", "The saved key was deleted." if removed
               else "There was no saved key.", "translate")
+        return back_to_setup("translate")
+
+    # --- the Modal key (optional): Spark Open on another host ------------------------------------
+    @app.post("/setup/modal-key")
+    async def save_modal_key(request: Request) -> Response:
+        form = await read_form(request)
+        key = str(form.get("api_key") or "").strip()
+        if translate.modal_key_source(config) == "environment":
+            flash(request, "error", f"The key comes from the {translate.MODAL_KEY_ENV} "
+                  "environment variable, so nothing was saved.", "translate")
+        elif not key:
+            flash(request, "error", "Paste your key first.", "translate")
+        elif len(key) > MAX_KEY_CHARS or any(c.isspace() for c in key):
+            flash(request, "error", "That does not look like a key: it must be one line with no "
+                  "spaces. Nothing was saved.", "translate")
+        else:
+            try:
+                await run_in_threadpool(translate.save_modal_key, config, key)
+            except (ValueError, OSError):
+                flash(request, "error", "The key could not be saved. Check that "
+                      f"{config.credentials_dir} is writable.", "translate")
+            else:
+                flash(request, "ok", "Saved the Modal key on this computer. It is not shown again.",
+                      "translate")
+        return back_to_setup("translate")
+
+    @app.post("/setup/modal-key/delete")
+    async def delete_modal_key(request: Request) -> Response:
+        await read_form(request)
+        removed = await run_in_threadpool(translate.delete_modal_key, config)
+        flash(request, "ok", "The saved Modal key was deleted." if removed
+              else "There was no saved Modal key.", "translate")
         return back_to_setup("translate")
 
     return app

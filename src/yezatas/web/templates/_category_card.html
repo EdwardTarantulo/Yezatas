@@ -5,11 +5,11 @@
     <span class="pill {{ cg.tone }}" id="category-chip">{{ cg.chip }}</span>
   </div>
   <p class="cat-now">Set as <strong>{{ cg.current }}</strong> in YouTube Studio.</p>
-  {% if cg.state == "differs" %}<p id="category-suggestion">Muse Spark reads the title and description as <strong>{{ cg.suggested }}</strong>.{% if cg.reason %} {{ cg.reason }}{% endif %}</p>
-  {% elif cg.state == "fits" %}<p id="category-suggestion">Muse Spark agrees.{% if cg.reason %} {{ cg.reason }}{% endif %}</p>
-  {% elif cg.state == "confirmed" %}<p id="category-suggestion">Muse Spark suggested {{ cg.suggested }}; you marked {{ cg.current }} as correct.</p>
-  {% elif cg.state == "changed" %}<p id="category-suggestion">The category changed since Muse Spark checked it. Check again.</p>
-  {% else %}<p class="muted" id="category-suggestion">Muse Spark reads the title, description and tags and names the category that fits. One short call; nothing is sent to YouTube.</p>{% endif %}
+  {% if cg.state == "differs" %}<p id="category-suggestion">{{ ai_name() }} reads the title and description as <strong>{{ cg.suggested }}</strong>.{% if cg.reason %} {{ cg.reason }}{% endif %}</p>
+  {% elif cg.state == "fits" %}<p id="category-suggestion">{{ ai_name() }} agrees.{% if cg.reason %} {{ cg.reason }}{% endif %}</p>
+  {% elif cg.state == "confirmed" %}<p id="category-suggestion">{{ ai_name() }} suggested {{ cg.suggested }}; you marked {{ cg.current }} as correct.</p>
+  {% elif cg.state == "changed" %}<p id="category-suggestion">The category changed since {{ ai_name() }} checked it. Check again.</p>
+  {% else %}<p class="muted" id="category-suggestion">{{ ai_name() }} reads the title, description and tags and names the category that fits. One short call; nothing is sent to YouTube.</p>{% endif %}
   {% if cg.error %}<div class="flash error" role="alert" id="category-error">{{ cg.error }}</div>{% endif %}
   {% if ct.running %}
   <p class="waiting"><span class="spinner" aria-hidden="true"></span> <span id="category-msg" role="status" aria-live="polite">{{ ct.message or 'Starting…' }}</span></p>
@@ -22,7 +22,7 @@
     {% if cg.can_confirm %}<a class="button primary" href="https://studio.youtube.com/video/{{ video.video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">Change in YouTube Studio</a>
     <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/category/correct"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">It's correct</button></form>{% endif %}
     {% if ct.has_key %}<form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/category/check"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button {{ 'primary' if cg.state == 'unchecked' else 'secondary' }}"{% if ct.running or ct.busy %} disabled{% endif %}>{{ 'Check category' if cg.state == 'unchecked' else 'Check again' }}</button></form>
-    {% else %}<p class="hint" id="category-no-key">Checking the category needs a Meta API key. Add one in <a href="/setup">Setup</a>.</p>{% endif %}
+    {% else %}<p class="hint" id="category-no-key">Checking the category needs a Meta API key. Add one in <a href="/setup">Configuration</a>.</p>{% endif %}
   </div>
   {% if cg.when %}<p class="hint cat-when">Checked {{ cg.when }}.</p>{% endif %}
 </section>

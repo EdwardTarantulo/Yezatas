@@ -140,7 +140,7 @@ def test_no_key_disables_asking_and_sends_nothing(tmp_path: Path) -> None:
     ui = make_bulk_ui(tmp_path, key=False)
     html = ui.client.get("/bulk").text
     assert 'id="bulk-ask-no-key"' in html
-    assert "There is no Meta API key. Add one in Setup. Nothing was sent." in html
+    assert "There is no Meta API key. Add one in Configuration. Nothing was sent." in html
     form = html.split('id="bulk-ask-form"')[1].split("</form>")[0]
     assert 'class="button primary" disabled' in form or "button primary\" disabled" in form
     resp = ui.post("/bulk/ask", data={"request": REQUEST}, follow_redirects=False)

@@ -320,7 +320,7 @@ def test_without_a_key_the_post_says_so_and_starts_nothing(tmp_path: Path) -> No
     assert resp.status_code == 303
     assert NO_PACKAGING_KEY in page(ui)
     assert ui.web.packaging_job.snapshot().status == "idle" and fetch.urls == []
-    assert NO_PACKAGING_KEY == "There is no Meta API key. Add one in Setup. Nothing was sent."
+    assert NO_PACKAGING_KEY == "There is no Meta API key. Add one in Configuration. Nothing was sent."
 
 
 def test_the_worker_itself_refuses_when_the_key_disappears(tmp_path: Path) -> None:

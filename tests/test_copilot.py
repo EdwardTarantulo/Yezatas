@@ -126,7 +126,7 @@ def test_question_of_the_maximum_length_is_accepted(store: Store) -> None:
 def test_no_catalog_raises_before_a_turn(tmp_path: Path) -> None:
     with Store(tmp_path / "empty.sqlite") as empty:
         client = FakeModelClient([])
-        with pytest.raises(CopilotError, match="no pulled catalog yet. Pull it in Setup first."):
+        with pytest.raises(CopilotError, match="no pulled catalog yet. Pull it in Configuration first."):
             ask(empty, client, "Hello?", chat_id=1, as_of=AS_OF)
         assert empty.list_copilot_turns(1) == [] and client.calls == []
 

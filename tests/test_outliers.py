@@ -463,7 +463,7 @@ def test_a_model_failure_gives_an_error_report(store: Store) -> None:
 
 
 def test_a_refused_key_is_raised_and_nothing_is_stored(store: Store) -> None:
-    client = FakeModelClient([ModelError("auth", "The Meta API key was refused. Check it in Setup.")])
+    client = FakeModelClient([ModelError("auth", "The Meta API key was refused. Check it in Configuration.")])
     with pytest.raises(ModelError) as caught:
         explain_with_client(store, client)
     assert caught.value.kind == "auth"

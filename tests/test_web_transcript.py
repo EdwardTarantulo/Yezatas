@@ -516,7 +516,7 @@ def test_the_default_chapters_without_a_key_fails_in_plain_words(tmp_path: Path)
     nf(ui, f"/videos/{V1}/chapters")
     ui.web.chapters_job.wait()
     snap = ui.web.chapters_job.snapshot()
-    assert snap.status == "failed" and snap.message == "No Meta API key is set. Add one in Setup."
+    assert snap.status == "failed" and snap.message == "No Meta API key is set. Add one in Configuration."
 
 
 # --- making chapters ----------------------------------------------------------------------------

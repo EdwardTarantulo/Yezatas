@@ -13,11 +13,11 @@
   <form class="inline" method="post" action="/shorts/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
   {% endif %}
   {% if sp.busy %}<p class="hint" id="shorts-busy">Shorts are being found for another video. Wait for it to finish.</p>{% endif %}
-  {% if not sp.has_key %}<p class="hint" id="shorts-no-key">There is no Baseten or Meta API key yet, so the Shorts finder cannot run. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  {% if not sp.has_key %}<p class="hint" id="shorts-no-key">There is no Baseten or Meta API key yet, so the Shorts finder cannot run. <a href="/setup#step-ai">Add one in Configuration</a>.</p>{% endif %}
   {% if not sp.has_transcript %}<p class="hint" id="shorts-no-transcript">Transcribe the video first. <a href="#transcript">Go to the transcript</a>.</p>{% endif %}
   <form class="sh-form" method="post" action="/videos/{{ video.video_id|urlencode }}/shorts">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <p class="hint">The transcript goes to {{ sp.model }}{% if sp.provider == 'baseten' %} on Baseten{% else %} on Meta's Model API{% endif %}. Nothing is sent to YouTube and nothing is changed.</p>
+    <p class="hint">The transcript goes to {{ sp.model }}{% if sp.provider == 'baseten' %} on Baseten{% elif sp.provider == 'modal' %} on Modal{% elif sp.provider == 'local' %} on this computer, through Ollama{% else %} on Meta's Model API{% endif %}. Nothing is sent to YouTube and nothing is changed.</p>
     <div class="actions"><button type="submit" class="button primary"{% if sp.busy or not sp.has_key or not sp.has_transcript %} disabled{% endif %}>{{ 'Try again' if sr.failed else ('Find again' if sr.find else 'Find Shorts') }}</button></div>
   </form>
   {% endif %}

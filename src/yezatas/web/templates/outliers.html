@@ -76,11 +76,11 @@
   <div class="flash error" role="alert" id="outliers-failed">{{ failed }}</div>
   <form class="inline" method="post" action="/outliers/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
   {% endif %}
-  {% if not has_key %}<p class="hint" id="outliers-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
+  {% if not has_key %}<p class="hint" id="outliers-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Configuration</a>.</p>{% endif %}
   <form class="packaging-form" method="post" action="/outliers/explain">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <p class="hint">The titles, tags, lengths, the first {{ lim.chars }} characters of the descriptions and the thumbnails of up to {{ lim.explained }} outliers and {{ lim.typical }} typical videos go to Meta's Model API ({{ model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>). Nothing is sent to YouTube.</p>
-    <div class="actions"><button type="submit" class="button primary"{% if not has_key %} disabled{% endif %}>Explain with Muse Spark</button></div>
+    <p class="hint">The titles, tags, lengths, the first {{ lim.chars }} characters of the descriptions and the thumbnails of up to {{ lim.explained }} outliers and {{ lim.typical }} typical videos go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>).{% endif %} Nothing is sent to YouTube.</p>
+    <div class="actions"><button type="submit" class="button primary"{% if not has_key %} disabled{% endif %}>Explain with {{ ai_name() }}</button></div>
   </form>
   {% endif %}
 
@@ -120,7 +120,7 @@
     </ul>
     {% endif %}
     {% endif %}
-    <p class="muted">Cost {{ rp.cost }}{% if rp.model %} &middot; {{ rp.model }}{% endif %}{% if rp.tokens %} &middot; {{ rp.tokens }} tokens{% endif %}</p>
+    <p class="muted">{% if not ai_local() %}Cost {{ rp.cost }}{% endif %}{% if rp.model %}{% if not ai_local() %} &middot; {% endif %}{{ rp.model }}{% endif %}{% if rp.tokens %} &middot; {{ rp.tokens }} tokens{% endif %}</p>
   </div>
   {% endif %}
 </section>

@@ -51,10 +51,10 @@ class FakeSuggest:
         run_id = store.begin_agent_run(video_id, MODEL)
         if outcome in ("auth", "rate_limit"):
             store.finish_agent_run(
-                run_id, "failed", "The Meta API key was refused. Check it in Setup.",
+                run_id, "failed", "The Meta API key was refused. Check it in Configuration.",
                 [{"type": "error", "kind": outcome, "message": "refused"}], {})
             return SuggestResult(run_id, video_id, "failed",
-                                 "The Meta API key was refused. Check it in Setup.")
+                                 "The Meta API key was refused. Check it in Configuration.")
         if outcome == "no_change":
             store.finish_agent_run(run_id, "no_change", "Nothing to improve.", [], {})
             return SuggestResult(run_id, video_id, "no_change", "The model found nothing to change.")
@@ -389,7 +389,7 @@ def test_setup_shows_the_ai_section_without_a_key(tmp_path: Path) -> None:
     ui, _ = make_suggest_ui(tmp_path, key=False)
     html = ui.setup_html()
     section = html.split('id="step-ai"')[1].split("</section>")[0]
-    assert "AI suggestions (optional)" in section and "No key" in section
+    assert "Primary AI" in section and "No key" in section
     assert 'action="/setup/model-key"' in section and 'type="password"' in section
     assert "Create an API key in Meta's developer dashboard under API keys." in section
     assert "on free credits Meta may use it to improve its products." in section

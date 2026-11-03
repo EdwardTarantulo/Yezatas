@@ -312,7 +312,7 @@ def test_the_job_without_a_translator_fails_with_a_clear_message(tmp_path: Path)
     ui.web.subtitles_job.wait()
     snap = ui.web.subtitles_job.snapshot()
     assert snap.status == "failed"
-    assert snap.message == "There is no translation key. Add one in Setup. Nothing was sent."
+    assert snap.message == "There is no translation key. Add one in Configuration. Nothing was sent."
 
 
 def test_a_post_without_a_translator_flashes_and_starts_nothing(tmp_path: Path) -> None:

@@ -936,6 +936,14 @@ TRANSLATION_STATUS_LABELS: dict[str, tuple[str, str]] = {
 }
 
 
+def translation_label(record: TranslationRecord | SubtitleTranslationRecord) -> tuple[str, str]:
+    """(label, pill class) of a stored translation. One the same model translated and checked (Muse
+    Glimmer when Primary AI is Local) is "Self-checked", not "Verified"."""
+    if record.status == "verified" and record.verifier and record.verifier == record.translator:
+        return "Self-checked", "working"
+    return TRANSLATION_STATUS_LABELS.get(record.status, (record.status, ""))
+
+
 def lang_name(code: str | None) -> str:
     """'Spanish' for es; 'German (de-DE)' for a regional code; the code itself when unknown."""
     if not code:
@@ -1082,7 +1090,7 @@ def build_translate_view(video: Video, row: DraftRow | None,
     results = []
     for code in ordered:
         record = records[code]
-        label, tone = TRANSLATION_STATUS_LABELS.get(record.status, (record.status, ""))
+        label, tone = translation_label(record)
         outdated = record.source_hash != current
         addable = not outdated and record.status != "failed"
         key = youtube_key(code, pool)
@@ -1239,7 +1247,7 @@ def build_subtitles_view(video_id: str, transcript: TranscriptRecord | None,
         record = records.get(code)
         if record is None:
             continue
-        label, tone = TRANSLATION_STATUS_LABELS.get(record.status, (record.status, ""))
+        label, tone = translation_label(record)
         back = record.back_translation if isinstance(record.back_translation, dict) else {}
         pieces = back.get("segments")
         results.append(SubtitleResult(

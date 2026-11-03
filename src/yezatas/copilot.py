@@ -685,7 +685,7 @@ def ask(store: Store, client: ModelClient, question: str, *, chat_id: int, as_of
         raise CopilotError(f"Keep the question under {MAX_QUESTION_CHARS} characters.")
     videos = store.list_videos("video_id")
     if not videos:
-        raise CopilotError("There is no pulled catalog yet. Pull it in Setup first.")
+        raise CopilotError("There is no pulled catalog yet. Pull it in Configuration first.")
     say = report or (lambda line: None)
     say("Reading the catalog")
     catalog = _Catalog(videos, as_of)
