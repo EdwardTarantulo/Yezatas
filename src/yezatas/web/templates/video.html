@@ -5,7 +5,7 @@
 <p class="backlink"><a href="/videos">{{ icon('back') }}<span>Videos</span></a></p>
 
 <section class="vhead" id="video-head">
-  <div class="vhead-thumb">{{ thumb(big_thumb, 'lg') }}</div>
+  <a class="vhead-thumb" href="#tool-packaging" title="Thumbnail check">{{ thumb(big_thumb, 'lg') }}</a>
   <div class="vhead-info">
     <h1 class="video-title">{{ video.title }}</h1>
     <p class="muted vmeta"><span class="pill">{{ entry.visibility or 'Unknown visibility' }}</span>{% if published %}<span>Published {{ published }}</span>{% endif %}<span class="vid-chip" id="video-id-chip"><span class="vid-k">ID</span><code id="video-id">{{ video.video_id }}</code><button type="button" class="vid-copy" data-copy-target="video-id" aria-label="Copy the video ID" title="Copy the video ID">{{ icon('copy') }}</button></span></p>

@@ -1171,3 +1171,7 @@ button.gbtn { cursor: pointer; }
 .os-help { margin: 6px 0; }
 .os-help > summary { cursor: pointer; font-weight: 500; }
 .os-help pre { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); overflow-x: auto; }
+
+/* The video header's thumbnail opens the Thumbnail row in Video details. */
+a.vhead-thumb { display: block; border-radius: var(--radius); }
+a.vhead-thumb:hover img { opacity: .88; }
