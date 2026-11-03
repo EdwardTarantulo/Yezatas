@@ -256,7 +256,7 @@ def test_unknown_ids(tmp_path: Path) -> None:
     V, vid = seed_variant(ui)
     r = ui.client.get(f"/videos/{V}/packaging/variants/99999/replace", follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"].endswith(f"/videos/{V}#packaging")
+    assert r.headers["location"].endswith(f"/videos/{V}#thumbnail")
     r2 = ui.client.get("/history/thumbnails/99999/backup.jpg")
     assert r2.status_code == 404
     r3 = ui.client.get("/history/thumbnails/99999/restore", follow_redirects=False)

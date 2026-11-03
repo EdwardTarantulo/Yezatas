@@ -5,11 +5,11 @@
   <h2 id="h-details">Video details</h2>
   <p class="muted">Thumbnail, chapters, languages, category and comments, each with its state and what to do.</p>
   <div class="vdetails-list">
-  <details class="tool" id="tool-packaging" data-keep>
+  <details class="tool" id="tool-thumbnail" data-keep>
     <summary><span class="tool-icon">{{ icon('dashboard') }}</span><span class="tool-text"><span class="tool-name">Thumbnail</span><span class="tool-what">How the title and thumbnail work together, and variants</span></span>{% if pk.check.running or pk.variants.running %}<span class="tool-state">Running</span>{% endif %}<span class="row-act">Check with the title</span></summary>
     {% include "_packaging_card.html" %}
   </details>
-  <details class="tool" id="tool-transcript" data-keep>
+  <details class="tool" id="tool-chapters" data-keep>
     <summary><span class="tool-icon">{{ icon('content') }}</span><span class="tool-text"><span class="tool-name">Chapters</span><span class="tool-what">Chapters: {{ fv('chapters') }} &middot; made from the transcript</span></span>{% for f in facts if f.key == 'chapters' and f.tone == 'warn' %}<span class="pill warn">Fix</span>{% endfor %}{% if ts.transcribe.running or ts.chapters.running %}<span class="tool-state">Running</span>{% endif %}<span class="row-act">Make chapters</span></summary>
     {% include "_transcript_card.html" %}
   </details>
@@ -43,7 +43,7 @@
     <summary><span class="tool-icon">{{ icon('changes') }}</span><span class="tool-text"><span class="tool-name">Suggestions from {{ ai_name() }}</span><span class="tool-what">A better title, description and tags, as a draft</span></span>{% if sg.running %}<span class="tool-state">Running</span>{% endif %}</summary>
     {% include "_suggest_card.html" %}
   </details>
-  <details class="tool" id="tool-adcheck" data-keep>
+  <details class="tool" id="tool-ad-check" data-keep>
     <summary><span class="tool-icon">{{ icon('checks') }}</span><span class="tool-text"><span class="tool-name">Advertiser-friendly check</span><span class="tool-what">Words that may limit ads</span></span>{% if ac.running %}<span class="tool-state">Running</span>{% endif %}</summary>
     {% include "_adcheck_card.html" %}
   </details>

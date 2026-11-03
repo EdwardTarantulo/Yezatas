@@ -294,16 +294,16 @@ def test_video_page_puts_the_edit_form_first_and_folds_the_tools(tmp_path: Path)
     html = ui.client.get(f"/videos/{vid}").text
     marks = ['id="video-head"', 'id="what-to-fix"', 'id="edit"', 'id="h-details"', 'id="h-tools"', 'id="checks"']
     assert [html.index(m) for m in marks] == sorted(html.index(m) for m in marks)
-    tids = ["tool-packaging", "tool-transcript", "tool-subtitles", "tool-translations", "tool-comments", "tool-suggest", "tool-adcheck", "tool-shorts"]
+    tids = ["tool-thumbnail", "tool-chapters", "tool-subtitles", "tool-translations", "tool-comments", "tool-suggest", "tool-ad-check", "tool-shorts"]
     for tid in tids:
         needle = f'<details class="tool" id="{tid}" data-keep>'
         assert html.count(needle) == 1
-    for inner in ["suggest", "translations", "transcript", "subtitles", "packaging", "shorts", "adcheck", "comments"]:
+    for inner in ["suggest", "translations", "chapters", "subtitles", "thumbnail", "shorts", "ad-check", "comments"]:
         assert f'id="{inner}"' in html
     assert '<details class="all-checks" id="checks" data-keep>' in html
-    for tid in ["tool-packaging", "tool-transcript", "tool-subtitles", "tool-translations", "tool-comments"]:
+    for tid in ["tool-thumbnail", "tool-chapters", "tool-subtitles", "tool-translations", "tool-comments"]:
         assert html.index('id="h-details"') < html.index(f'id="{tid}"') < html.index('id="h-tools"')
-    for tid in ["tool-suggest", "tool-adcheck", "tool-shorts"]:
+    for tid in ["tool-suggest", "tool-ad-check", "tool-shorts"]:
         assert html.index('id="h-tools"') < html.index(f'id="{tid}"') < html.index('id="checks"')
 
 
@@ -381,7 +381,7 @@ def test_quick_info_tiles_link_to_where_they_are_fixed(tmp_path: Path) -> None:
     html = ui.client.get("/videos/vid000009").text
     facts = html[html.index('id="video-facts"'):html.index("</ul>", html.index('id="video-facts"'))]
     tiles = dict(re.findall(r'<li class="vfact[^"]*" id="fact-([a-z]+)"[^>]*>(.*?)</li>', facts))
-    links = {"category": "#category", "pinned": "#pinned-comment", "chapters": "#tool-transcript",
+    links = {"category": "#category", "pinned": "#pinned-comment", "chapters": "#tool-chapters",
              "hashtags": "#f-description", "captions": "#tool-subtitles", "translations": "#tool-translations"}
     for key, target in links.items():
         assert f'<a class="vfact-go" href="{target}"' in tiles[key], key

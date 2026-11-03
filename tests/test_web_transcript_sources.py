@@ -126,7 +126,7 @@ def page(ui: Any) -> str:
 
 
 def card(html: str) -> str:
-    return html.split('id="transcript"')[1].split("</section>")[0]
+    return html.split('id="chapters"')[1].split("</section>")[0]
 
 
 def block(html: str, ident: str) -> str:
@@ -174,7 +174,7 @@ def test_the_card_offers_captions_first_without_calling_youtube(tmp_path: Path) 
 def test_captions_run_as_a_job_and_become_the_transcript(tmp_path: Path) -> None:
     ui, reader, _, _ = make_src_ui(tmp_path)
     resp = captions_run(ui)
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#transcript"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#chapters"
     assert reader.calls == [("list", V1), ("download", "cap-en")]
     record = stored(ui)
     assert record is not None and record.model == captions.MODEL_NAME and record.language == "en"

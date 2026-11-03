@@ -804,11 +804,11 @@ ACTIVITY: tuple[tuple[str, str, str, str, str, str, str], ...] = (
     ("suggest", "suggest_job", "", "Writing suggestions", "Suggestions ready", "Suggestions stopped", "#tool-suggest"),
     ("translate", "translate_job", "_translate_video", "Translating", "Translations ready", "Translation stopped", "#tool-translations"),
     ("subtitles", "subtitles_job", "_subtitles_video", "Translating subtitles", "Subtitles ready", "Subtitles stopped", "#tool-subtitles"),
-    ("transcribe", "transcribe_job", "_transcribe_video", "Transcribing", "Transcript ready", "Transcribing stopped", "#tool-transcript"),
-    ("chapters", "chapters_job", "_chapters_video", "Making chapters", "Chapters ready", "Chapters stopped", "#tool-transcript"),
-    ("packaging", "packaging_job", "_packaging_video", "Checking the thumbnail", "Thumbnail check ready", "Thumbnail check stopped", "#tool-packaging"),
-    ("variants", "variants_job", "_variants_video", "Making thumbnail options", "Thumbnail options ready", "Thumbnail options stopped", "#tool-packaging"),
-    ("adcheck", "adcheck_job", "_adcheck_video", "Checking for advertisers", "Advertiser check ready", "Advertiser check stopped", "#tool-adcheck"),
+    ("transcribe", "transcribe_job", "_transcribe_video", "Transcribing", "Transcript ready", "Transcribing stopped", "#tool-chapters"),
+    ("chapters", "chapters_job", "_chapters_video", "Making chapters", "Chapters ready", "Chapters stopped", "#tool-chapters"),
+    ("packaging", "packaging_job", "_packaging_video", "Checking the thumbnail", "Thumbnail check ready", "Thumbnail check stopped", "#tool-thumbnail"),
+    ("variants", "variants_job", "_variants_video", "Making thumbnail options", "Thumbnail options ready", "Thumbnail options stopped", "#tool-thumbnail"),
+    ("adcheck", "adcheck_job", "_adcheck_video", "Checking for advertisers", "Advertiser check ready", "Advertiser check stopped", "#tool-ad-check"),
     ("category", "category_job", "_category_video", "Checking the category", "Category check ready", "Category check stopped", "#detail-category"),
     ("pinned", "pinned_job", "_pinned_video", "Writing a pinned comment", "Pinned comment ready", "Pinned comment stopped", "#detail-pinned"),
     ("shorts", "shorts_job", "_shorts_video", "Finding Shorts", "Shorts ideas ready", "Shorts finder stopped", "#tool-shorts"),
@@ -2897,13 +2897,13 @@ def create_app(
         variant = usable_variant(video_id, variant_id)
         if variant is None:
             flash(request, "error", "There is no such variant idea.")
-            return see_other(f"/videos/{quote(video_id)}#packaging")
+            return see_other(f"/videos/{quote(video_id)}#thumbnail")
         page = f"/videos/{quote(video_id)}/packaging/variants/{variant.id}/replace"
         return thumb_page(
             request, video=video, page=page, heading="Replace the current thumbnail",
             new_image=f"/videos/{quote(video_id)}/packaging/variants/{variant.id}.jpg",
             new_alt="Variant idea: " + variant.instruction,
-            back_url=f"/videos/{quote(video_id)}#packaging", back_text="Back to the video")
+            back_url=f"/videos/{quote(video_id)}#thumbnail", back_text="Back to the video")
 
     @app.post("/videos/{video_id}/packaging/variants/{variant_id}/replace")
     async def packaging_replace_do(request: Request, video_id: str, variant_id: str) -> Response:
@@ -2911,7 +2911,7 @@ def create_app(
         variant = usable_variant(video_id, variant_id)
         if variant is None:
             flash(request, "error", "There is no such variant idea.")
-            return see_other(f"/videos/{quote(video_id)}#packaging")
+            return see_other(f"/videos/{quote(video_id)}#thumbnail")
         page = f"/videos/{quote(video_id)}/packaging/variants/{variant.id}/replace"
         back = see_other(page)
         if form.get("confirm") != "yes":
@@ -4510,7 +4510,7 @@ def create_app(
     async def read_video_captions(request: Request, video_id: str) -> Response:
         """Use the captions already on YouTube: one background job, 250 quota units."""
         await read_form(request)
-        back = see_other(f"/videos/{quote(video_id)}#transcript")
+        back = see_other(f"/videos/{quote(video_id)}#chapters")
         found, language = await run_in_threadpool(video_language_of, video_id)
         if not found:
             return video_not_found(request)
@@ -4527,7 +4527,7 @@ def create_app(
         """A video or audio file the browser uploads: speech goes to Muse Voice Transcribe, music
         and sounds are tagged on this computer. The file is a temporary copy, deleted when the
         job ends."""
-        back = see_other(f"/videos/{quote(video_id)}#transcript")
+        back = see_other(f"/videos/{quote(video_id)}#chapters")
         found, _ = await run_in_threadpool(video_language_of, video_id)
         if not found:
             return video_not_found(request)
@@ -4594,12 +4594,12 @@ def create_app(
         form = await read_form(request)
         state.dismiss_transcribe_result()
         video_id = str(form.get("video_id") or "")
-        return see_other(f"/videos/{quote(video_id)}#transcript" if video_id else "/")
+        return see_other(f"/videos/{quote(video_id)}#chapters" if video_id else "/")
 
     @app.post("/videos/{video_id}/chapters")
     async def make_video_chapters(request: Request, video_id: str) -> Response:
         await read_form(request)
-        back = see_other(f"/videos/{quote(video_id)}#transcript")
+        back = see_other(f"/videos/{quote(video_id)}#chapters")
 
         def check() -> str | None:
             with Store(config.catalog_db) as store:
@@ -4623,7 +4623,7 @@ def create_app(
         form = await read_form(request)
         state.dismiss_chapters_result()
         video_id = str(form.get("video_id") or "")
-        return see_other(f"/videos/{quote(video_id)}#transcript" if video_id else "/")
+        return see_other(f"/videos/{quote(video_id)}#chapters" if video_id else "/")
 
     @app.post("/videos/{video_id}/analytics/refresh")
     async def refresh_video_analytics(request: Request, video_id: str) -> Response:
@@ -4732,7 +4732,7 @@ def create_app(
     @app.post("/videos/{video_id}/packaging")
     async def check_video_packaging(request: Request, video_id: str) -> Response:
         await read_form(request)
-        back = see_other(f"/videos/{quote(video_id)}#packaging")
+        back = see_other(f"/videos/{quote(video_id)}#thumbnail")
 
         def exists() -> bool:
             with Store(config.catalog_db) as store:
@@ -4753,7 +4753,7 @@ def create_app(
         form = await read_form(request)
         state.dismiss_packaging_result()
         video_id = str(form.get("video_id") or "")
-        return see_other(f"/videos/{quote(video_id)}#packaging" if video_id else "/")
+        return see_other(f"/videos/{quote(video_id)}#thumbnail" if video_id else "/")
 
     # --- advertiser-friendly check (advice only) ---------------------------------------------
     @app.post("/videos/{video_id}/adcheck")
@@ -4771,7 +4771,7 @@ def create_app(
         elif not state.start_adcheck(video_id):
             flash(request, "error", "An advertiser-friendly check is already running. Wait for it "
                                     "to finish.")
-        return see_other(f"/videos/{quote(video_id)}#adcheck")
+        return see_other(f"/videos/{quote(video_id)}#ad-check")
 
     @app.post("/videos/{video_id}/shorts")
     async def start_shorts(request: Request, video_id: str) -> Response:
@@ -4879,7 +4879,7 @@ def create_app(
         form = await read_form(request)
         state.dismiss_adcheck_result()
         video_id = str(form.get("video_id") or "")
-        return see_other(f"/videos/{quote(video_id)}#adcheck" if video_id else "/")
+        return see_other(f"/videos/{quote(video_id)}#ad-check" if video_id else "/")
 
     # --- comments on one video (G4, G5) ---------------------------------------------------------
     @app.post("/videos/{video_id}/comments/fetch")
@@ -5343,7 +5343,7 @@ def create_app(
     @app.post("/videos/{video_id}/packaging/variants")
     async def make_video_variants(request: Request, video_id: str) -> Response:
         await read_form(request)
-        back = see_other(f"/videos/{quote(video_id)}#packaging")
+        back = see_other(f"/videos/{quote(video_id)}#thumbnail")
 
         def lookup() -> tuple[bool, int]:
             """(the video exists, the id of its newest check if it has ideas to work from, else 0)."""
@@ -5375,7 +5375,7 @@ def create_app(
         form = await read_form(request)
         state.dismiss_variants_result()
         video_id = str(form.get("video_id") or "")
-        return see_other(f"/videos/{quote(video_id)}#packaging" if video_id else "/")
+        return see_other(f"/videos/{quote(video_id)}#thumbnail" if video_id else "/")
 
     # --- the translation key (optional, Baseten; the Meta key is the fallback) -------------------
     @app.post("/setup/translator-key")

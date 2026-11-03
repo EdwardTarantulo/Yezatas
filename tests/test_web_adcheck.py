@@ -93,7 +93,7 @@ def page(ui: Any, video_id: str = V1) -> str:
 
 
 def card(html: str) -> str:
-    return html.split('id="adcheck"')[1].split("</section>")[0]
+    return html.split('id="ad-check"')[1].split("</section>")[0]
 
 
 def run_check(ui: Any, video_id: str = V1) -> Any:
@@ -129,7 +129,7 @@ def finding(**override: Any) -> dict[str, Any]:
 def test_the_card_renders_before_any_check(tmp_path: Path) -> None:
     ui = make_ac_ui(tmp_path)
     html = page(ui)
-    assert html.index('id="edit"') < html.index('id="packaging"') < html.index('id="adcheck"')
+    assert html.index('id="edit"') < html.index('id="thumbnail"') < html.index('id="ad-check"')
     section = card(html)
     assert "Advertiser-friendly check" in section
     assert str(escape(adcheck.ADVICE_LINE)) in section
@@ -208,7 +208,7 @@ def test_no_transcript_line(tmp_path: Path) -> None:
     ui = make_ac_ui(tmp_path)
     seed_check(ui, had_transcript=False)
     section = card(page(ui))
-    assert AD_NO_TRANSCRIPT_LINE in section and 'href="#transcript"' in section
+    assert AD_NO_TRANSCRIPT_LINE in section and 'href="#chapters"' in section
     seed_check(ui, had_transcript=True)
     assert AD_NO_TRANSCRIPT_LINE not in card(page(ui))
 
@@ -244,7 +244,7 @@ def test_view_builder_without_a_check() -> None:
 def test_post_starts_the_job_and_the_card_shows_the_stored_result(tmp_path: Path) -> None:
     ui = make_ac_ui(tmp_path)
     resp = run_check(ui)
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#adcheck"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#ad-check"
     assert ui.fn.calls == [V1]
     assert ui.web.adcheck_job.snapshot().status == "done"
     with Store(ui.config.catalog_db) as store:
@@ -293,7 +293,7 @@ def test_an_unexpected_error_gets_a_plain_sentence_and_can_be_dismissed(tmp_path
     assert snap.message == "The advertiser-friendly check stopped unexpectedly (KeyError)."
     assert 'id="adcheck-failed"' in card(page(ui))
     resp = nf(ui, "/adcheck/done", data={"video_id": V1})
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#adcheck"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#ad-check"
     assert 'id="adcheck-failed"' not in card(page(ui))
 
 
@@ -332,7 +332,7 @@ def test_a_job_that_runs_too_long_gets_the_timeout_message(tmp_path: Path) -> No
 def test_no_key_flashes_and_runs_nothing(tmp_path: Path) -> None:
     ui = make_ac_ui(tmp_path, key=False)
     resp = nf(ui, f"/videos/{V1}/adcheck")
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#adcheck"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#ad-check"
     assert ui.fn.calls == [] and ui.web.adcheck_job.snapshot().status == "idle"
     assert NO_PACKAGING_KEY in ui.client.get(f"/videos/{V1}").text
     with Store(ui.config.catalog_db) as store:

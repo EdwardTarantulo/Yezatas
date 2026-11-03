@@ -164,7 +164,7 @@ def run_assist(ui: Any, video_id: str = V1) -> Any:
 def test_card_after_adcheck_with_fetch_and_sort(tmp_path: Path) -> None:
     ui = make_comments_ui(tmp_path)
     html = page(ui)
-    assert html.index('id="edit"') < html.index('id="comments"') < html.index('id="h-tools"') < html.index('id="adcheck"')
+    assert html.index('id="edit"') < html.index('id="comments"') < html.index('id="h-tools"') < html.index('id="ad-check"')
     section = card(html)
     assert "Comments" in section
     assert f'action="/videos/{V1}/comments/fetch"' in section

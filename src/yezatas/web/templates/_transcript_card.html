@@ -1,7 +1,7 @@
 {# The "Transcript and chapters" card of the video page. `ts` is the tools and job state, `tt` the language choice and the transcript. #}
 {% set tj = ts.transcribe %}
 {% set cj = ts.chapters %}
-<section class="card transcript-card" id="transcript" aria-labelledby="h-transcript">
+<section class="card transcript-card" id="chapters" aria-labelledby="h-transcript">
   <div class="card-title-row">
     <h2 id="h-transcript">Transcript and chapters</h2>
     {% if change %}<a class="button secondary" href="/changes#d-{{ video.video_id|urlencode }}">Review changes</a>{% endif %}

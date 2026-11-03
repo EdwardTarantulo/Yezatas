@@ -37,7 +37,7 @@
 {% endmacro %}
 
 {% block content %}
-<p class="backlink"><a href="/videos/{{ video.video_id|urlencode }}#packaging">{{ icon('back') }}<span>Back to {{ video.title }}</span></a></p>
+<p class="backlink"><a href="/videos/{{ video.video_id|urlencode }}#thumbnail">{{ icon('back') }}<span>Back to {{ video.title }}</span></a></p>
 <h1 class="page-title">Preview in a feed</h1>
 <p class="muted intro">The same video among your own most viewed public videos, drawn the way YouTube's light pages look. This page is made on this computer from your catalog; no model is called and nothing is sent anywhere. The dark label in the bottom-right corner of each picture is the video length, which YouTube draws over the thumbnail. Your video has a blue outline.</p>
 
@@ -53,7 +53,7 @@
   {% else %}<p class="hint" id="preview-note">Showing the thumbnail YouTube shows now.{% if choices|length == 1 %} Make variant ideas on the video page to compare them here.{% endif %}</p>{% endif %}
   {% if draft_title %}<p class="hint">The title is the one in your draft.</p>{% endif %}
   {% if feed.others == 0 %}<p class="hint" id="preview-alone">Your catalog has no other public videos, so the feeds below only show this one.</p>{% endif %}
-  <p class="actions"><a class="button secondary" href="/videos/{{ video.video_id|urlencode }}#packaging">Back to the video page</a></p>
+  <p class="actions"><a class="button secondary" href="/videos/{{ video.video_id|urlencode }}#thumbnail">Back to the video page</a></p>
 </section>
 
 <section class="card" id="preview-desktop" aria-labelledby="h-desktop">

@@ -213,7 +213,7 @@ def test_page_loads_do_not_build_the_packaging_tools(tmp_path: Path, key: bool) 
     video = ui.client.get(f"/videos/{vid(HIGH)}").text
     outlier_page = ui.client.get("/outliers").text
     assert factory.calls == 0
-    packaging_card = video.split('id="packaging"')[1].split("</section>")[0]
+    packaging_card = video.split('id="thumbnail"')[1].split("</section>")[0]
     assert ('id="packaging-no-key"' in packaging_card) is (not key)
     assert ('id="outliers-no-key"' in outlier_page) is (not key)
     assert (" disabled" in button_after(packaging_card, "Research thumbnail")) is (not key)

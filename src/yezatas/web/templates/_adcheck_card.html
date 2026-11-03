@@ -1,5 +1,5 @@
 {# The "Advertiser-friendly check" card of the video page. `ac` is the job state, `av` the newest stored check. Advice only. #}
-<section class="card ac-card" id="adcheck" aria-labelledby="h-adcheck">
+<section class="card ac-card" id="ad-check" aria-labelledby="h-adcheck">
   <h2 id="h-adcheck">Advertiser-friendly check</h2>
   <p class="muted">{{ ac.model }} reads the title, description, tags and transcript of this video and points out words that may limit its ads under YouTube's advertiser-friendly guidelines. Every quote is checked by code against the real text.</p>
   <p class="ac-advice" id="adcheck-advice">{{ av.advice }}</p>
@@ -31,7 +31,7 @@
     <p class="ac-verdict"><span class="pill {{ av.tone }}" id="adcheck-verdict">{{ av.verdict }}</span></p>
     {% if av.summary %}<p id="adcheck-summary">{{ av.summary }}</p>{% endif %}
     {% if av.changed_line %}<p class="flash" id="adcheck-changed">{{ av.changed_line }}</p>{% endif %}
-    {% if av.no_transcript_line %}<p class="hint" id="adcheck-no-transcript">{{ av.no_transcript_line }} <a href="#transcript">Transcribe the video</a> for a full check.</p>{% endif %}
+    {% if av.no_transcript_line %}<p class="hint" id="adcheck-no-transcript">{{ av.no_transcript_line }} <a href="#chapters">Transcribe the video</a> for a full check.</p>{% endif %}
     {% if av.findings %}
     <ul class="ac-findings" id="adcheck-findings">
       {% for f in av.findings %}

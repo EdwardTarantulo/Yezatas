@@ -269,7 +269,7 @@ def test_sam_sizes_say_what_to_do_in_local_mode_without_a_key(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     go_local(monkeypatch)
     ui = packaging_ui(tmp_path)
-    section = card_of(ui.client.get(f"/videos/{V1}").text, "packaging")
+    section = card_of(ui.client.get(f"/videos/{V1}").text, "thumbnail")
     assert "Subject and face sizes need Meta&#39;s API. Primary AI is Local and no Meta key is saved." \
         in section or "Subject and face sizes need Meta's API. Primary AI is Local and no Meta key is saved." in section
     assert '<a href="/setup#step-ai">Add a key in Configuration</a>' in section
@@ -286,14 +286,14 @@ def test_with_a_meta_key_the_button_is_back_in_local_mode(
     go_local(monkeypatch)
     ui = packaging_ui(tmp_path)
     agent.save_api_key(ui.config, FAKE_KEY)
-    section = card_of(ui.client.get(f"/videos/{V1}").text, "packaging")
+    section = card_of(ui.client.get(f"/videos/{V1}").text, "thumbnail")
     assert "Research thumbnail" in section and "need Meta" not in section
 
 
 def test_meta_mode_keeps_the_button(tmp_path: Path) -> None:
     ui = packaging_ui(tmp_path)
     agent.save_api_key(ui.config, FAKE_KEY)
-    section = card_of(ui.client.get(f"/videos/{V1}").text, "packaging")
+    section = card_of(ui.client.get(f"/videos/{V1}").text, "thumbnail")
     assert "Research thumbnail" in section and "need Meta" not in section
 
 

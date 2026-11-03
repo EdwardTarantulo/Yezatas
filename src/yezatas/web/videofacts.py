@@ -23,7 +23,7 @@ FACT_CHECKS: dict[str, str] = {
 FACT_LINKS: dict[str, tuple[str, str]] = {
     "category": ("#category", "Category"),
     "pinned": ("#pinned-comment", "Pinned comment"),
-    "chapters": ("#tool-transcript", "Transcript and chapters"),
+    "chapters": ("#tool-chapters", "Transcript and chapters"),
     "hashtags": ("#f-description", "the description"),
     "captions": ("#tool-subtitles", "Subtitles"),
     "translations": ("#tool-translations", "Translations"),

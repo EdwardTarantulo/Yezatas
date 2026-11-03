@@ -151,7 +151,7 @@ def page(ui: Any, video_id: str = V1) -> str:
 
 def card(html: str) -> str:
     """The Packaging card, up to the end of the card."""
-    return html.split('id="packaging"')[1].split("</section>")[0]
+    return html.split('id="thumbnail"')[1].split("</section>")[0]
 
 
 def fact(section: str, label: str) -> str:
@@ -214,7 +214,7 @@ def test_the_card_renders_before_any_check(tmp_path: Path) -> None:
 def test_a_check_runs_the_job_and_the_card_shows_what_was_found(tmp_path: Path) -> None:
     ui, tools, fetch = make_pk_ui(tmp_path)
     resp = run_check(ui)
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#packaging"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#thumbnail"
     assert fetch.urls == [MAXRES]
     snap = ui.web.packaging_job.snapshot()
     assert snap.status == "done" and snap.result.review.status == "done"
@@ -305,7 +305,7 @@ def test_dismissing_a_finished_check_hides_the_message_but_keeps_the_result(tmp_
     ui, _, _ = make_pk_ui(tmp_path)
     run_check(ui)
     resp = nf(ui, "/packaging/done", data={"video_id": V1})
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#packaging"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#thumbnail"
     section = card(page(ui))
     assert "packaging-done" not in section and "packaging-facts" in section
     assert nf(ui, "/packaging/done", data={}).headers["location"] == "/"
@@ -406,7 +406,7 @@ def test_making_variants_stores_them_and_the_card_shows_each_one(tmp_path: Path)
     ui, tools, _ = make_pk_ui(tmp_path)
     run_check(ui)
     resp = run_variants(ui)
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#packaging"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#thumbnail"
     snap = ui.web.variants_job.snapshot()
     assert snap.status == "done" and snap.result.message == "Made 2 variant ideas."
     assert len(tools.maker.prompts) == 2
@@ -644,7 +644,7 @@ def test_the_preview_shows_the_video_among_the_top_videos_by_views(tmp_path: Pat
     assert titles(search) == [mine, "Other 1", "Other 5", "Other 3"]
     assert "Private one" not in html and "Unlisted one" not in html and "Second video" not in html
     assert "9K views" in desktop(html) and "8K views" in desktop(html)
-    assert f'href="/videos/{V1}#packaging"' in html
+    assert f'href="/videos/{V1}#thumbnail"' in html
 
 
 def test_the_preview_uses_the_current_thumbnails_and_the_duration_badge(tmp_path: Path) -> None:

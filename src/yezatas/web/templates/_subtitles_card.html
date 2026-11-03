@@ -4,7 +4,7 @@
 <section class="card subtitles-card" id="subtitles" aria-labelledby="h-subtitles">
   <div class="card-title-row"><h2 id="h-subtitles">Subtitles in other languages</h2></div>
   {% if not tt.record %}
-  <p class="muted" id="subtitles-need-transcript">Subtitles are made from the transcript, so their times match the speech. Make the transcript first in <a href="#tool-transcript">Transcript and chapters</a>.</p>
+  <p class="muted" id="subtitles-need-transcript">Subtitles are made from the transcript, so their times match the speech. Make the transcript first in <a href="#tool-chapters">Transcript and chapters</a>.</p>
   {% else %}
   <p class="muted">{{ sb.model }} translates the text of each transcript segment and nothing else: every time is copied from the transcript, so the subtitles stay in step with the speech. Code checks the numbers, links and other fixed details, then {{ sb.verifier_model }} on this computer translates each result back without seeing your text and compares. A flagged language needs a careful read before you use it. Yezatas does not upload subtitles to YouTube: download the .srt file and add it in YouTube Studio yourself.</p>
   {% if sb.running %}

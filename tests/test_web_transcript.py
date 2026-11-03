@@ -110,7 +110,7 @@ def nf(ui: Any, path: str, **kwargs: Any) -> Any:
 
 
 def card(html: str) -> str:
-    return html.split('id="transcript"')[1].split("</section>")[0]
+    return html.split('id="chapters"')[1].split("</section>")[0]
 
 
 def page(ui: Any, video_id: str = V1) -> str:
@@ -156,7 +156,7 @@ def test_the_card_has_the_form_the_price_and_sits_before_translations(tmp_path: 
     assert '<option value="en" selected>English</option>' in section
     assert '<select id="ts-language" name="language">' in section
     assert "Latest transcript" not in section and "Make chapters" not in section
-    assert html.index('id="transcript"') < html.index('id="translations"')
+    assert html.index('id="chapters"') < html.index('id="translations"')
     assert "<script>" not in html and "style=" not in html and "onclick" not in html
 
 
@@ -310,7 +310,7 @@ def test_transcribing_runs_the_job_and_stores_the_transcript(tmp_path: Path) -> 
     ui, fake = make_ts_ui(tmp_path)
     path = media(tmp_path)
     resp = start(ui, path, language="de", keywords="Opuntia, Echeveria ,, opuntia")
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#transcript"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#chapters"
     assert len(fake.calls) == 1
     call = fake.calls[0]
     assert call["video_id"] == V1 and call["language"] == "de"
@@ -348,7 +348,7 @@ def test_the_finished_job_shows_its_result_until_dismissed(tmp_path: Path) -> No
     other = card(page(ui, V2))
     assert 'id="transcribe-done"' not in other and "Latest transcript" not in other
     resp = nf(ui, "/transcribe/done", data={"video_id": V1})
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#transcript"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#chapters"
     assert 'id="transcribe-done"' not in card(page(ui))
 
 
@@ -667,7 +667,7 @@ def test_making_chapters_saves_a_draft_and_the_card_links_to_changes(tmp_path: P
     seed_transcript(ui.config, V1)
     resp = nf(ui, f"/videos/{V1}/chapters")
     ui.web.chapters_job.wait()
-    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#transcript"
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#chapters"
     with store_of(ui) as store:
         draft = store.get_draft(V1)
     assert draft is not None and draft.source == "chapters"
