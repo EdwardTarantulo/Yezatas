@@ -21,7 +21,7 @@ def wait_signin(ui: Any) -> None:
 def test_sign_in_success_saves_token_and_runs_the_check(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
     write_client_file(ui.config)
-    resp = ui.post("/setup/signin")
+    resp = ui.post("/configuration/signin")
     assert resp.status_code == 200
     wait_signin(ui)
     assert ui.web.signin_job.snapshot().status == "done"
@@ -50,7 +50,7 @@ def test_setup_says_whether_the_sign_in_can_edit(tmp_path: Path) -> None:
 
 def test_sign_in_needs_a_client_file(tmp_path: Path) -> None:
     ui = make_ui(tmp_path, sign_in=lambda c: (_ for _ in ()).throw(AssertionError("no sign-in")))
-    resp = ui.post("/setup/signin")
+    resp = ui.post("/configuration/signin")
     assert "Add the OAuth client file first" in resp.text
     assert ui.web.signin_job.snapshot().status == "idle"
 
@@ -61,7 +61,7 @@ def test_access_denied_points_to_the_test_user_step(tmp_path: Path) -> None:
 
     ui = make_ui(tmp_path, sign_in=denied)
     write_client_file(ui.config)
-    ui.post("/setup/signin")
+    ui.post("/configuration/signin")
     wait_signin(ui)
     snap = ui.web.signin_job.snapshot()
     assert snap.status == "failed" and snap.error_kind == "access_denied"
@@ -84,7 +84,7 @@ def test_missing_secrets_raised_during_sign_in(tmp_path: Path) -> None:
 
     ui = make_ui(tmp_path, sign_in=missing)
     write_client_file(ui.config)
-    ui.post("/setup/signin")
+    ui.post("/configuration/signin")
     wait_signin(ui)
     assert ui.web.signin_job.snapshot().error_kind == "missing_secrets"
     assert "problem" in step_class(ui.setup_html(), "signin")
@@ -96,7 +96,7 @@ def test_other_errors_show_class_and_message_but_no_secrets(tmp_path: Path) -> N
 
     ui = make_ui(tmp_path, sign_in=broken)
     write_client_file(ui.config)
-    ui.post("/setup/signin")
+    ui.post("/configuration/signin")
     wait_signin(ui)
     assert "OSError: port in use" in ui.setup_html()
 
@@ -119,17 +119,17 @@ def test_no_second_sign_in_while_one_is_waiting_and_retry_after_cancel(tmp_path:
 
     ui = make_ui(tmp_path, sign_in=slow)
     write_client_file(ui.config)
-    ui.post("/setup/signin")
+    ui.post("/configuration/signin")
     assert started.wait(5)
     html = ui.setup_html()
     assert "Waiting for you to finish in the browser tab" in html
     assert "working" in step_class(html, "signin")
 
-    resp = ui.post("/setup/signin")
+    resp = ui.post("/configuration/signin")
     assert "already waiting" in resp.text
     assert len(calls) == 1
 
-    ui.post("/setup/signin/cancel")
+    ui.post("/configuration/signin/cancel")
     snap = ui.web.signin_job.snapshot()
     assert snap.status == "failed" and snap.error_kind == "cancelled"
     assert "todo" in step_class(ui.setup_html(), "signin")  # cancelling is not an error
@@ -151,7 +151,7 @@ def test_timeout_marks_failed_and_allows_retry(tmp_path: Path) -> None:
 
     ui = make_ui(tmp_path, sign_in=hangs, clock=lambda: now[0], sign_in_timeout=300.0)
     write_client_file(ui.config)
-    ui.post("/setup/signin")
+    ui.post("/configuration/signin")
     assert started.wait(5)
     assert ui.web.signin_job.snapshot().status == "running"
 
@@ -174,9 +174,9 @@ def test_sign_out_deletes_token_and_resets_the_check(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
     write_client_file(ui.config)
     write_token(ui.config)
-    ui.post("/setup/check")
+    ui.post("/configuration/check")
     assert ui.web.check is not None
-    resp = ui.post("/setup/signout")
+    resp = ui.post("/configuration/signout")
     assert "Signed out" in resp.text
     assert not ui.config.token_path.exists()
     assert ui.web.check is None
@@ -187,7 +187,7 @@ def test_sign_in_is_refused_when_already_signed_in(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
     write_client_file(ui.config)
     write_token(ui.config)
-    assert "already signed in" in ui.post("/setup/signin").text
+    assert "already signed in" in ui.post("/configuration/signin").text
 
 
 def test_job_reports_progress_and_ignores_stale_runs() -> None:

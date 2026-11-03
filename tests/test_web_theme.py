@@ -14,7 +14,7 @@ def _block(css: str, selector: str) -> str:
 
 def test_theme_script_loads_in_the_head_of_every_page(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
-    for path in ("/setup", "/videos"):
+    for path in ("/configuration", "/videos"):
         html = ui.client.get(path).text
         head = html[:html.index("</head>")]
         assert '<script src="/static/theme.js"></script>' in head, path
@@ -24,7 +24,7 @@ def test_theme_script_loads_in_the_head_of_every_page(tmp_path: Path) -> None:
 
 
 def test_toggle_is_a_hidden_button_until_the_script_runs(tmp_path: Path) -> None:
-    html = make_ui(tmp_path).client.get("/setup").text
+    html = make_ui(tmp_path).client.get("/configuration").text
     button = re.search(r"<button[^>]*data-theme-toggle[^>]*>", html).group(0)
     assert 'type="button"' in button and "hidden" in button
     assert 'aria-pressed="false"' in button and 'aria-label="Dark theme"' in button

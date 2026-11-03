@@ -21,8 +21,8 @@
   <form class="inline" method="post" action="/subtitles/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
   {% endif %}
   {% if sb.busy %}<p class="hint" id="subtitles-busy">Subtitles are being translated for another video. Wait for it to finish.</p>{% endif %}
-  {% if not sb.has_translator %}<p class="hint" id="subtitles-no-key">There is no translation key yet. <a href="/setup#step-translate">Add one in Configuration</a>.</p>{% endif %}
-  {% if not sb.verifier_ready %}<p class="hint" id="subtitles-no-checker">The checker ({{ sb.verifier_model }}) is not running on this computer, so the subtitles will be marked "Unverified". To check them, start Ollama with that model: <a href="/setup#step-translate">see Configuration</a>.</p>{% endif %}
+  {% if not sb.has_translator %}<p class="hint" id="subtitles-no-key">There is no translation key yet. <a href="/configuration#step-translate">Add one in Configuration</a>.</p>{% endif %}
+  {% if not sb.verifier_ready %}<p class="hint" id="subtitles-no-checker">The checker ({{ sb.verifier_model }}) is not running on this computer, so the subtitles will be marked "Unverified". To check them, start Ollama with that model: <a href="/configuration#step-translate">see Configuration</a>.</p>{% endif %}
   <form class="translate-form" id="subtitles-form" method="post" action="/videos/{{ video.video_id|urlencode }}/subtitles">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <fieldset class="lang-grid">

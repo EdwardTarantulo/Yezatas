@@ -11,7 +11,7 @@ from webhelpers import make_ui, make_video, seed_catalog
 
 PAGES = ["/", "/comments", "/videos", "/analytics", "/seo", "/checks", "/bulk", "/copilot", "/translations",
          "/links", "/affiliate", "/replies", "/outliers", "/search-gaps", "/competitors", "/strategy",
-         "/changes", "/history", "/agent", "/setup"]
+         "/changes", "/history", "/agent", "/configuration"]
 
 
 @pytest.fixture(scope="module")

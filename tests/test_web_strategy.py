@@ -22,7 +22,7 @@ PULLED = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 START = datetime(2025, 1, 1, tzinfo=timezone.utc)
 HIGH, LOW = 5, 20  # indexes of the made-up videos far above and far below the norm
 SENT_LINE = ("The video table, the outlier findings and up to 30 viewer questions go to Meta's "
-             "Model API (muse-spark-1.3). Meta's terms apply (<a href=\"/setup#ai-data\">what Meta may do with it</a>). "
+             "Model API (muse-spark-1.3). Meta's terms apply (<a href=\"/configuration#ai-data\">what Meta may do with it</a>). "
              "Nothing is sent to YouTube.")
 
 
@@ -105,13 +105,13 @@ def run(ui: Any) -> Any:
 def test_no_pull_yet_goes_to_setup(tmp_path: Path) -> None:
     ui = make_strategy_ui(tmp_path, seeded=False)
     resp = ui.client.get("/strategy", follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup"
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration"
 
 
 def test_without_a_key_the_button_is_disabled_and_a_run_starts_no_job(tmp_path: Path) -> None:
     ui = make_strategy_ui(tmp_path, key=False)
     html = page(ui)
-    assert 'id="strategy-no-key"' in html and 'href="/setup#step-ai"' in html
+    assert 'id="strategy-no-key"' in html and 'href="/configuration#step-ai"' in html
     assert re.search(r'class="button primary" disabled>Make the strategy report<', html)
     resp = ui.post("/strategy/run", follow_redirects=False)
     assert resp.status_code == 303 and resp.headers["location"] == "/strategy"

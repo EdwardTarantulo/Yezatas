@@ -22,7 +22,7 @@
     {% if cg.can_confirm %}<a class="button primary" href="https://studio.youtube.com/video/{{ video.video_id|urlencode }}/edit" target="_blank" rel="noopener noreferrer">Change in YouTube Studio</a>
     <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/category/correct"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">It's correct</button></form>{% endif %}
     {% if ct.has_key %}<form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/category/check"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button {{ 'primary' if cg.state == 'unchecked' else 'secondary' }}"{% if ct.running or ct.busy %} disabled{% endif %}>{{ 'Check category' if cg.state == 'unchecked' else 'Check again' }}</button></form>
-    {% else %}<p class="hint" id="category-no-key">Checking the category needs a Meta API key. Add one in <a href="/setup">Configuration</a>.</p>{% endif %}
+    {% else %}<p class="hint" id="category-no-key">Checking the category needs a Meta API key. Add one in <a href="/configuration">Configuration</a>.</p>{% endif %}
   </div>
   {% if cg.when %}<p class="hint cat-when">Checked {{ cg.when }}.</p>{% endif %}
 </section>

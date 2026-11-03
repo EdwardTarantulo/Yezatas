@@ -129,9 +129,9 @@ def line(html: str) -> str:
 def test_without_a_pull_everything_goes_to_setup(tmp_path: Path) -> None:
     ui = make_links_ui(tmp_path, seeded=False)
     resp = ui.client.get("/links", follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup"
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration"
     resp = ui.post("/links/check", follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup"
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration"
     assert ui.web.links_job.snapshot().status == "idle"
 
 

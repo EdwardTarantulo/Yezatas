@@ -94,7 +94,7 @@ class Ui:
         return self.app.state.web
 
     def csrf(self) -> str:
-        html = self.client.get("/setup").text
+        html = self.client.get("/configuration").text
         match = re.search(r'name="csrf" value="([^"]+)"', html)
         assert match, "no csrf field on /setup"
         return match.group(1)
@@ -108,11 +108,11 @@ class Ui:
         data = {"csrf": self.csrf()}
         if replace_confirmed:
             data["replace"] = "yes"
-        return self.client.post("/setup/client", data=data,
+        return self.client.post("/configuration/client", data=data,
                                 files={"client_file": ("client.json", content, "application/json")})
 
     def setup_html(self) -> str:
-        return self.client.get("/setup").text
+        return self.client.get("/configuration").text
 
 
 def make_ui(tmp_path: Path, *, signed_in_browser: bool = True,

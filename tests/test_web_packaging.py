@@ -314,7 +314,7 @@ def test_dismissing_a_finished_check_hides_the_message_but_keeps_the_result(tmp_
 def test_without_a_key_the_post_says_so_and_starts_nothing(tmp_path: Path) -> None:
     ui, _, fetch = make_pk_ui(tmp_path, tools=None)
     html = page(ui)
-    assert 'id="packaging-no-key"' in card(html) and 'href="/setup#step-ai"' in card(html)
+    assert 'id="packaging-no-key"' in card(html) and 'href="/configuration#step-ai"' in card(html)
     assert re.search(r'class="button primary" disabled>Research thumbnail<', card(html))
     resp = nf(ui, f"/videos/{V1}/packaging")
     assert resp.status_code == 303
@@ -741,7 +741,7 @@ def test_the_preview_calls_no_model_and_downloads_nothing(tmp_path: Path) -> Non
 def test_the_preview_without_a_catalog_goes_to_setup(tmp_path: Path) -> None:
     ui = make_ui(tmp_path, packaging_tools=Tools(), packaging_fetch=Fetch())
     resp = ui.client.get(f"/videos/{V1}/packaging", follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup"
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration"
 
 
 # --- nothing is uploaded --------------------------------------------------------------------------

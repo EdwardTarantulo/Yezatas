@@ -2,7 +2,7 @@
 {% from "_macros.html" import icon, mark %}
 {% block body_class %}app{% endblock %}
 {% block body %}
-{% set nav_groups = [('Daily', [('today', 'Today', '/'), ('comments', 'Comments', '/comments'), ('content', 'Videos', '/videos'), ('analytics', 'Analytics', '/analytics')]), ('Improve', [('dashboard', 'SEO overview', '/seo'), ('checks', 'Checks', '/checks'), ('bulk', 'Bulk edit', '/bulk'), ('copilot', 'Copilot', '/copilot'), ('translations', 'Translations', '/translations'), ('links', 'Links', '/links'), ('affiliate', 'Affiliate', '/affiliate'), ('replies', 'Reply templates', '/replies')]), ('Research', [('outliers', 'Outliers', '/outliers'), ('search', 'Search gaps', '/search-gaps'), ('competitors', 'Competitors', '/competitors'), ('strategy', 'Strategy', '/strategy')]), ('Review', [('changes', 'Changes', '/changes'), ('history', 'History', '/history'), ('agent', 'Agent log', '/agent'), ('setup', 'Configuration', '/setup')]), ('', [])] %}
+{% set nav_groups = [('Daily', [('today', 'Today', '/'), ('comments', 'Comments', '/comments'), ('content', 'Videos', '/videos'), ('analytics', 'Analytics', '/analytics')]), ('Improve', [('dashboard', 'SEO overview', '/seo'), ('checks', 'Checks', '/checks'), ('bulk', 'Bulk edit', '/bulk'), ('copilot', 'Copilot', '/copilot'), ('translations', 'Translations', '/translations'), ('links', 'Links', '/links'), ('affiliate', 'Affiliate', '/affiliate'), ('replies', 'Reply templates', '/replies')]), ('Research', [('outliers', 'Outliers', '/outliers'), ('search', 'Search gaps', '/search-gaps'), ('competitors', 'Competitors', '/competitors'), ('strategy', 'Strategy', '/strategy')]), ('Review', [('changes', 'Changes', '/changes'), ('history', 'History', '/history'), ('agent', 'Agent log', '/agent'), ('setup', 'Configuration', '/configuration')]), ('', [])] %}
 <header class="topbar">
   <a class="brand" href="/" aria-label="Yezatas home">{{ mark() }}<span class="brand-name">Yezatas</span></a>
   <form class="search" action="/videos" method="get" role="search">
@@ -18,7 +18,7 @@
     </div>
     <div class="job-toasts" id="job-toasts" aria-live="polite"></div>
     <button type="button" class="top-link" data-theme-toggle aria-pressed="false" aria-label="Dark theme" title="Dark theme" hidden>{{ icon('theme') }}</button>
-    <a class="top-link" href="/setup" aria-label="Configuration" title="Configuration">{{ icon('setup') }}</a>
+    <a class="top-link" href="/configuration" aria-label="Configuration" title="Configuration">{{ icon('setup') }}</a>
   </div>
 </header>
 <div class="layout">
@@ -35,7 +35,7 @@
   </nav>
   <main class="main">
     {% for item in shell_flash|default([]) %}
-    <div class="flash {{ item.kind }}" role="{{ 'alert' if item.kind == 'error' else 'status' }}">{{ item.text }}{% if item.step %} <a href="/setup#step-{{ item.step }}">Open Configuration</a>{% endif %}</div>
+    <div class="flash {{ item.kind }}" role="{{ 'alert' if item.kind == 'error' else 'status' }}">{{ item.text }}{% if item.step %} <a href="/configuration#step-{{ item.step }}">Open Configuration</a>{% endif %}</div>
     {% endfor %}
     {% block content %}{% endblock %}
   </main>

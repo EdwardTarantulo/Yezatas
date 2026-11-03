@@ -80,8 +80,8 @@ def test_a_garbled_saved_file_means_meta(tmp_path: Path) -> None:
 
 def test_the_post_saves_the_choice_and_the_page_shows_it(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
-    resp = ui.post("/setup/primary-ai", data={"primary_ai": "local"}, follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup#step-ai"
+    resp = ui.post("/configuration/primary-ai", data={"primary_ai": "local"}, follow_redirects=False)
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration#step-ai"
     assert primaryai.load_primary_ai(ui.config) == "local"
     html = ui.setup_html()
     assert re.search(r'value="local" checked', html) and "Primary AI is now Muse Glimmer" in html
@@ -90,10 +90,10 @@ def test_the_post_saves_the_choice_and_the_page_shows_it(tmp_path: Path) -> None
 def test_the_post_refuses_a_bad_value_and_an_environment_choice(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ui = make_ui(tmp_path)
-    ui.post("/setup/primary-ai", data={"primary_ai": "bogus"}, follow_redirects=False)
+    ui.post("/configuration/primary-ai", data={"primary_ai": "bogus"}, follow_redirects=False)
     assert primaryai.primary_ai_source(ui.config) == ""
     monkeypatch.setenv(primaryai.PRIMARY_AI_ENV, "meta")
-    ui.post("/setup/primary-ai", data={"primary_ai": "local"}, follow_redirects=False)
+    ui.post("/configuration/primary-ai", data={"primary_ai": "local"}, follow_redirects=False)
     assert not ui.config.primary_ai_path.exists()
     html = ui.setup_html()
     assert "YEZATAS_PRIMARY_AI" in html and "Save the choice" not in html
@@ -199,20 +199,20 @@ def test_the_modal_key_is_saved_and_deleted_like_the_baseten_key(tmp_path: Path)
 
 def test_the_modal_key_form_saves_without_showing_the_key(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
-    resp = ui.post("/setup/modal-key", data={"api_key": f"  {FAKE_KEY}  "}, follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup#step-translate"
+    resp = ui.post("/configuration/modal-key", data={"api_key": f"  {FAKE_KEY}  "}, follow_redirects=False)
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration#step-translate"
     assert ui.config.modal_key_path.read_text(encoding="utf-8") == FAKE_KEY
     html = ui.setup_html()
     assert FAKE_KEY not in html and "A Modal key is saved on this computer" in html
     assert "MODAL_ENDPOINT_URL" in html and DEFAULT_MODAL_MODEL in html
-    ui.post("/setup/modal-key/delete", follow_redirects=False)
+    ui.post("/configuration/modal-key/delete", follow_redirects=False)
     assert not ui.config.modal_key_path.exists()
 
 
 def test_the_modal_environment_key_hides_the_form(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MODAL_API_KEY", FAKE_KEY)
     ui = make_ui(tmp_path)
-    ui.post("/setup/modal-key", data={"api_key": "other-key"}, follow_redirects=False)
+    ui.post("/configuration/modal-key", data={"api_key": "other-key"}, follow_redirects=False)
     assert not ui.config.modal_key_path.exists()
     html = ui.setup_html()
     assert 'id="modal-key"' not in html and FAKE_KEY not in html
@@ -272,7 +272,7 @@ def test_sam_sizes_say_what_to_do_in_local_mode_without_a_key(
     section = card_of(ui.client.get(f"/videos/{V1}").text, "thumbnail")
     assert "Subject and face sizes need Meta&#39;s API. Primary AI is Local and no Meta key is saved." \
         in section or "Subject and face sizes need Meta's API. Primary AI is Local and no Meta key is saved." in section
-    assert '<a href="/setup#step-ai">Add a key in Configuration</a>' in section
+    assert '<a href="/configuration#step-ai">Add a key in Configuration</a>' in section
     assert "Research thumbnail" not in section
     # the route refuses too, and starts nothing
     ui.post(f"/videos/{V1}/packaging", follow_redirects=False)
@@ -300,7 +300,7 @@ def test_meta_mode_keeps_the_button(tmp_path: Path) -> None:
 # --- the Configuration page --------------------------------------------------------------------------
 def test_the_page_is_called_configuration_and_keeps_its_urls(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
-    resp = ui.client.get("/setup")
+    resp = ui.client.get("/configuration")
     html = resp.text
     assert resp.status_code == 200
     assert "<title>Configuration - Yezatas</title>" in html
@@ -316,7 +316,7 @@ def test_the_page_is_called_configuration_and_keeps_its_urls(tmp_path: Path) -> 
 def test_the_nav_item_sits_at_the_bottom_of_the_review_group(tmp_path: Path) -> None:
     html = make_ui(tmp_path).client.get("/").text
     review = html.split('<p class="nav-label">Review</p>')[1].split("</div>")[0]
-    assert review.rfind('href="/setup"') > review.rfind('href="/agent"') > 0
+    assert review.rfind('href="/configuration"') > review.rfind('href="/agent"') > 0
     assert 'aria-label="Configuration"' in html
 
 

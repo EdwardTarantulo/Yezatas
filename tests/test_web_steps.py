@@ -119,12 +119,12 @@ def test_page_reflects_each_state(tmp_path: Path) -> None:
     html = ui.setup_html()
     assert "done" in step_class(html, "signin") and "current" in step_class(html, "check")
 
-    assert ui.post("/setup/check").status_code == 200
+    assert ui.post("/configuration/check").status_code == 200
     html = ui.setup_html()
     assert "done" in step_class(html, "check") and "done" in step_class(html, "api")
     assert "current" in step_class(html, "pull")
 
-    ui.post("/setup/pull")
+    ui.post("/configuration/pull")
     ui.web.pull_job.wait()
     html = ui.setup_html()
     assert "done" in step_class(html, "pull")

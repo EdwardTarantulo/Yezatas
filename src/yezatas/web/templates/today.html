@@ -7,12 +7,12 @@
     <h1 class="page-title">Today</h1>
     <p class="muted td-intro">Pulled {{ latest_pull.when }} &middot; {{ latest_pull.videos }} video{{ '' if latest_pull.videos == 1 else 's' }}</p>
   </div>
-  <form class="td-pull" method="post" action="/setup/pull"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/"><button type="submit" class="button secondary"{% if pull_running %} disabled{% endif %}>Pull again</button></form>
+  <form class="td-pull" method="post" action="/configuration/pull"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/"><button type="submit" class="button secondary"{% if pull_running %} disabled{% endif %}>Pull again</button></form>
 </div>
 {% if pull_running %}
 <p class="waiting" id="today-pull"><span class="spinner" aria-hidden="true"></span> <span id="pull-msg" role="status" aria-live="polite">{{ pull_message or 'Starting…' }}</span></p>
 {% elif pull_failed %}
-<div class="flash error" role="alert" id="today-pull-failed">{{ pull_failed }} <a href="/setup#step-pull">Open Configuration</a></div>
+<div class="flash error" role="alert" id="today-pull-failed">{{ pull_failed }} <a href="/configuration#step-pull">Open Configuration</a></div>
 {% endif %}
 
 {% if draft_count %}

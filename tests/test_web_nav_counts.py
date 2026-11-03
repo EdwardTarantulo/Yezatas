@@ -60,4 +60,4 @@ def test_the_sidebar_counts_follow_the_data(tmp_path: Path) -> None:
 
 def test_a_page_with_no_catalog_has_no_counts(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
-    assert counts(ui.client.get("/setup").text) == {}
+    assert counts(ui.client.get("/configuration").text) == {}

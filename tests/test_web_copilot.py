@@ -181,7 +181,7 @@ def test_an_empty_chat_shows_the_intro_the_starters_and_the_safety_line(tmp_path
     assert "Numbers come from Yezatas, not the model" in html
     assert "nothing reaches YouTube until you approve and push it on the Changes page" in html
     assert 'id="copilot-new"' not in html  # nothing to start over yet
-    assert "Meta's terms apply (<a href=\"/setup#ai-data\">what Meta may do with it</a>)." in html and "Nothing is sent to YouTube." in html
+    assert "Meta's terms apply (<a href=\"/configuration#ai-data\">what Meta may do with it</a>)." in html and "Nothing is sent to YouTube." in html
 
 
 def test_the_nav_has_a_copilot_item_after_bulk_edit(tmp_path: Path) -> None:
@@ -251,9 +251,9 @@ def test_the_page_never_calls_the_copilot(tmp_path: Path) -> None:
 def test_no_pulled_catalog_goes_back_to_setup(tmp_path: Path) -> None:
     ui, fake = make_cp_ui(tmp_path, seeded=False)
     resp = ui.client.get("/copilot", follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup"
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration"
     resp = ui.post("/copilot/ask", data={"question": "Hi"}, follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup"
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration"
     assert fake.calls == []
 
 
@@ -326,7 +326,7 @@ def test_a_too_long_question_is_refused_but_the_limit_itself_is_fine(tmp_path: P
 def test_without_a_key_the_buttons_are_disabled_and_ask_sends_nothing(tmp_path: Path) -> None:
     ui, fake = make_cp_ui(tmp_path, key=False)
     html = page(ui)
-    assert 'id="copilot-no-key"' in html and 'href="/setup#step-ai"' in html
+    assert 'id="copilot-no-key"' in html and 'href="/configuration#step-ai"' in html
     assert re.search(r'id="copilot-ask" disabled', html)
     assert html.count("cp-starter") - 1 == len(STARTER_QUESTIONS)
     assert len(re.findall(r'class="button secondary cp-starter" disabled', html)) == 3

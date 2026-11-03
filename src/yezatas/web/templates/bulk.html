@@ -17,7 +17,7 @@
       <p class="hint counter" id="ba-count" aria-live="off">Up to {{ request_max }} characters.</p>
     </div>
     <p class="hint">{{ ai_name() }} only picks steps from a fixed list. Any new text must be in your words; code makes the changes, and only as drafts.</p>
-    <p class="hint">Your words, and the links and repeated lines from your descriptions, go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>).{% endif %} Nothing is sent to YouTube.</p>
+    <p class="hint">Your words, and the links and repeated lines from your descriptions, go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/configuration#ai-data">what Meta may do with it</a>).{% endif %} Nothing is sent to YouTube.</p>
     <div class="actions"><button type="submit" class="button primary"{% if not has_key %} disabled{% endif %}>Plan it with {{ ai_name() }}</button></div>
   </form>
 </section>

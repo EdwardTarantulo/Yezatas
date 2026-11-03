@@ -151,7 +151,7 @@ def test_no_key_disables_asking_with_a_plain_reason(tmp_path: Path) -> None:
     html = page(ui)
     assert 'id="checks-no-key"' in html
     assert "There is no Meta API key yet, so Yezatas cannot turn your words into a check." in html
-    assert '<a href="/setup#step-ai">Add one in Configuration</a>' in html
+    assert '<a href="/configuration#step-ai">Add one in Configuration</a>' in html
     form = html.split('id="checks-form"')[1].split("</form>")[0]
     assert "button primary\" disabled>" in form or 'class="button primary" disabled' in form
 

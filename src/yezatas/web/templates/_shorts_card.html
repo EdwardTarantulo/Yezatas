@@ -13,7 +13,7 @@
   <form class="inline" method="post" action="/shorts/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
   {% endif %}
   {% if sp.busy %}<p class="hint" id="shorts-busy">Shorts are being found for another video. Wait for it to finish.</p>{% endif %}
-  {% if not sp.has_key %}<p class="hint" id="shorts-no-key">There is no Baseten or Meta API key yet, so the Shorts finder cannot run. <a href="/setup#step-ai">Add one in Configuration</a>.</p>{% endif %}
+  {% if not sp.has_key %}<p class="hint" id="shorts-no-key">There is no Baseten or Meta API key yet, so the Shorts finder cannot run. <a href="/configuration#step-ai">Add one in Configuration</a>.</p>{% endif %}
   {% if not sp.has_transcript %}<p class="hint" id="shorts-no-transcript">Transcribe the video first. <a href="#chapters">Go to the transcript</a>.</p>{% endif %}
   <form class="sh-form" method="post" action="/videos/{{ video.video_id|urlencode }}/shorts">
     <input type="hidden" name="csrf" value="{{ csrf }}">

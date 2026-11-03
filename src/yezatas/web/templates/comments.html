@@ -71,10 +71,10 @@
 </div>
 {% endif %}
 {% if cv.unsorted and not sort.has_key %}
-<p class="hint" id="sort-no-key">There is no Meta API key yet, so the sort cannot run. <a href="/setup#step-ai">Add one in Configuration</a>.</p>
+<p class="hint" id="sort-no-key">There is no Meta API key yet, so the sort cannot run. <a href="/configuration#step-ai">Add one in Configuration</a>.</p>
 {% endif %}
 {% if cv.unsorted %}
-<p class="hint">Sorting sends each video's title, description and stored comments to Meta's Model API ({{ sort.model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>). Nothing is sent to YouTube.</p>
+<p class="hint">Sorting sends each video's title, description and stored comments to Meta's Model API ({{ sort.model }}). Meta's terms apply (<a href="/configuration#ai-data">what Meta may do with it</a>). Nothing is sent to YouTube.</p>
 {% endif %}
 </div>
 </section>

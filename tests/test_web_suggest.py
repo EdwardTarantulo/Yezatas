@@ -117,7 +117,7 @@ def test_video_page_has_the_card_button_and_privacy_sentence(tmp_path: Path) -> 
     html = ui.client.get(f"/videos/{V1}").text
     assert "Suggestions from Muse Spark" in html and "Suggest improvements" in html
     assert (f"This video's title, description, tags, stats and scorecard go to Meta's Model API "
-            f"({MODEL}). Meta's terms apply (<a href=\"/setup#ai-data\">what Meta may do with it</a>).") in html
+            f"({MODEL}). Meta's terms apply (<a href=\"/configuration#ai-data\">what Meta may do with it</a>).") in html
 
     assert f'action="/videos/{V1}/suggest"' in html
     assert 'id="suggest-no-key"' not in html and "latest-run" not in html
@@ -127,7 +127,7 @@ def test_video_page_has_the_card_button_and_privacy_sentence(tmp_path: Path) -> 
 def test_without_a_key_the_video_page_points_to_setup(tmp_path: Path) -> None:
     ui, _ = make_suggest_ui(tmp_path, key=False)
     html = ui.client.get(f"/videos/{V1}").text
-    assert 'id="suggest-no-key"' in html and 'href="/setup#step-ai"' in html
+    assert 'id="suggest-no-key"' in html and 'href="/configuration#step-ai"' in html
 
 
 def test_suggest_without_a_key_flashes_and_starts_nothing(tmp_path: Path) -> None:
@@ -135,7 +135,7 @@ def test_suggest_without_a_key_flashes_and_starts_nothing(tmp_path: Path) -> Non
     resp = nf(ui, f"/videos/{V1}/suggest", follow_redirects=False)
     assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}"
     html = ui.client.get(f"/videos/{V1}").text
-    assert "Add a Meta API key first." in html and 'href="/setup#step-ai"' in html
+    assert "Add a Meta API key first." in html and 'href="/configuration#step-ai"' in html
     assert fake.calls == [] and ui.web.suggest_job.snapshot().status == "idle"
 
 
@@ -244,7 +244,7 @@ def test_dashboard_form_with_a_key_and_a_link_without(tmp_path: Path) -> None:
     ui2, _ = make_suggest_ui(tmp_path / "other", key=False)
     html = ui2.client.get("/seo").text
     assert "/suggest/fix-next" not in html
-    assert 'id="suggest-no-key"' in html and 'href="/setup#step-ai"' in html
+    assert 'id="suggest-no-key"' in html and 'href="/configuration#step-ai"' in html
 
 
 def test_fix_next_takes_the_top_public_videos_without_a_draft_in_order(tmp_path: Path) -> None:
@@ -312,7 +312,7 @@ def test_fix_next_needs_a_valid_count_and_a_key(tmp_path: Path) -> None:
     ui2, fake2 = make_suggest_ui(tmp_path / "nokey", key=False)
     nf(ui2, "/suggest/fix-next", data={"count": "3"})
     html = ui2.client.get("/seo").text
-    assert "Add a Meta API key first." in html and 'href="/setup#step-ai"' in html
+    assert "Add a Meta API key first." in html and 'href="/configuration#step-ai"' in html
     assert fake2.calls == [] and ui2.web.suggest_job.snapshot().status == "idle"
 
 
@@ -390,22 +390,22 @@ def test_setup_shows_the_ai_section_without_a_key(tmp_path: Path) -> None:
     html = ui.setup_html()
     section = html.split('id="step-ai"')[1].split("</section>")[0]
     assert "Primary AI" in section and "No key" in section
-    assert 'action="/setup/model-key"' in section and 'type="password"' in section
+    assert 'action="/configuration/model-key"' in section and 'type="password"' in section
     assert "Create an API key in Meta's developer dashboard under API keys." in section
     assert "on free credits Meta may use it to improve its products." in section
-    assert "/setup/model-key/delete" not in section
+    assert "/configuration/model-key/delete" not in section
 
 
 def test_saving_a_key_writes_the_file_and_never_shows_it(tmp_path: Path) -> None:
     ui, _ = make_suggest_ui(tmp_path, key=False)
-    resp = nf(ui, "/setup/model-key", data={"api_key": f"  {FAKE_KEY}  "}, follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup#step-ai"
+    resp = nf(ui, "/configuration/model-key", data={"api_key": f"  {FAKE_KEY}  "}, follow_redirects=False)
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration#step-ai"
     assert ui.config.model_key_path.read_text(encoding="utf-8") == FAKE_KEY
     assert agent.key_source(ui.config) == "saved"
     setup = ui.setup_html()
     assert "Saved the key on this computer." in setup and "Key saved" in setup
-    assert "/setup/model-key/delete" in setup and "Replace the saved key" in setup
-    for path in ("/setup", "/", "/agent", f"/videos/{V1}", "/changes", "/history", "/videos",
+    assert "/configuration/model-key/delete" in setup and "Replace the saved key" in setup
+    for path in ("/configuration", "/", "/agent", f"/videos/{V1}", "/changes", "/history", "/videos",
                  "/api/status"):
         body = ui.client.get(path).text
         assert FAKE_KEY not in body and FAKE_KEY[:12] not in body, path
@@ -417,7 +417,7 @@ def test_saving_a_key_writes_the_file_and_never_shows_it(tmp_path: Path) -> None
 @pytest.mark.parametrize("bad", ["", "   ", "two words", "a\nb", "x" * 501])
 def test_bad_keys_are_refused(tmp_path: Path, bad: str) -> None:
     ui, _ = make_suggest_ui(tmp_path, key=False)
-    nf(ui, "/setup/model-key", data={"api_key": bad})
+    nf(ui, "/configuration/model-key", data={"api_key": bad})
     assert agent.key_source(ui.config) == ""
     html = ui.setup_html()
     assert 'class="flash error"' in html and ("Paste your key first." in html or "one line" in html)
@@ -426,11 +426,11 @@ def test_bad_keys_are_refused(tmp_path: Path, bad: str) -> None:
 def test_removing_the_saved_key(tmp_path: Path) -> None:
     ui, _ = make_suggest_ui(tmp_path)
     assert not ui.config.model_key_path is None and ui.config.model_key_path.is_file()
-    resp = nf(ui, "/setup/model-key/delete", follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup#step-ai"
+    resp = nf(ui, "/configuration/model-key/delete", follow_redirects=False)
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration#step-ai"
     assert not ui.config.model_key_path.exists() and agent.key_source(ui.config) == ""
     assert "The saved key was deleted." in ui.setup_html()
-    nf(ui, "/setup/model-key/delete")
+    nf(ui, "/configuration/model-key/delete")
     assert "There was no saved key." in ui.setup_html()
 
 
@@ -440,9 +440,9 @@ def test_a_key_from_the_environment_hides_the_form(tmp_path: Path, monkeypatch: 
     html = ui.setup_html()
     section = html.split('id="step-ai"')[1].split("</section>")[0]
     assert "Key from the environment" in section and "environment variable" in section
-    assert 'type="password"' not in section and "/setup/model-key" not in section
+    assert 'type="password"' not in section and "/configuration/model-key" not in section
     assert FAKE_KEY not in html
-    nf(ui, "/setup/model-key", data={"api_key": "FAKE-OTHER-KEY"})
+    nf(ui, "/configuration/model-key", data={"api_key": "FAKE-OTHER-KEY"})
     assert not ui.config.model_key_path.exists()
     assert "so nothing was saved" in ui.setup_html()
     assert 'action="/suggest/fix-next"' in ui.client.get("/seo").text  # the key counts
@@ -489,7 +489,7 @@ def test_the_default_suggest_without_a_key_is_a_skipped_video(tmp_path: Path) ->
 
 # --- security -------------------------------------------------------------------------------------
 @pytest.mark.parametrize("path", [f"/videos/{V1}/suggest", "/suggest/fix-next", "/suggest/done",
-                                  "/setup/model-key", "/setup/model-key/delete"])
+                                  "/configuration/model-key", "/configuration/model-key/delete"])
 def test_every_new_post_needs_the_csrf_token(tmp_path: Path, path: str) -> None:
     ui, fake = make_suggest_ui(tmp_path)
     assert ui.client.post(path, data={}).status_code == 403
@@ -508,7 +508,7 @@ def test_new_pages_have_no_inline_script_or_style(tmp_path: Path) -> None:
     ui, fake = make_suggest_ui(tmp_path)
     nf(ui, "/suggest/fix-next", data={"count": "3"})
     finish(ui)
-    for path in ("/", "/agent", "/changes", "/setup", f"/videos/{V4}"):
+    for path in ("/", "/agent", "/changes", "/configuration", f"/videos/{V4}"):
         html = ui.client.get(path).text
         assert "style=" not in html and html.count("<script") == html.count("<script src="), path
         assert not re.search(r"\son\w+=", html), path

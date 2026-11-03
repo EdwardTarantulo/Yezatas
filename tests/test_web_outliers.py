@@ -173,8 +173,8 @@ def test_no_outliers_and_no_below_rows_say_so(tmp_path: Path) -> None:
 def test_no_pull_yet_goes_to_setup(tmp_path: Path) -> None:
     ui, _, _ = make_ol_ui(tmp_path, seeded=False)
     resp = ui.client.get("/outliers", follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup"
-    assert ui.post("/outliers/explain", follow_redirects=False).headers["location"] == "/setup"
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration"
+    assert ui.post("/outliers/explain", follow_redirects=False).headers["location"] == "/configuration"
 
 
 def test_titles_are_escaped(tmp_path: Path) -> None:
@@ -210,7 +210,7 @@ def test_nav_has_an_outliers_item_after_affiliate(tmp_path: Path) -> None:
 def test_the_button_is_disabled_without_a_key_and_points_to_setup(tmp_path: Path) -> None:
     ui, client, _ = make_ol_ui(tmp_path, key=False)
     card = section(page(ui), 'id="why"')
-    assert 'id="outliers-no-key"' in card and 'href="/setup#step-ai"' in card
+    assert 'id="outliers-no-key"' in card and 'href="/configuration#step-ai"' in card
     assert re.search(r'class="button primary" disabled>Explain with Muse Spark<', card)
     resp = explain(ui)
     assert resp.status_code == 303 and resp.headers["location"] == "/outliers#why"

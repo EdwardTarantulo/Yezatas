@@ -295,7 +295,7 @@
   <p class="saved">Saved: project <strong>{{ client.project_id }}</strong>, client <code>{{ client.client_id_short }}</code></p>
   {% endif %}
 
-  <form method="post" action="/setup/client" enctype="multipart/form-data" class="upload">
+  <form method="post" action="/configuration/client" enctype="multipart/form-data" class="upload">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="client_file">{% if client %}Replace it with another file{% else %}Upload the downloaded file{% endif %}
       <span class="hint">(JSON, up to {{ max_kb }} KB)</span></label>
@@ -322,7 +322,7 @@
       (Error 403: access_denied)? The account you picked is not on the Test users list. Add that exact
       email in step 4 (Audience, Test users, Save), click <strong>Cancel</strong> here, then sign in again.</p>
     <p class="hint">If you do not see the tab, look behind your other windows. This stops waiting after 5 minutes.</p>
-    {{ post_button('/setup/signin/cancel', 'Cancel', 'secondary') }}
+    {{ post_button('/configuration/signin/cancel', 'Cancel', 'secondary') }}
   {% elif signed_in %}
     {% if can_edit %}
     <p>You are signed in, and you allowed Yezatas to edit your videos when you first pushed a change. Yezatas
@@ -333,11 +333,11 @@
     {% else %}
     <p>You are signed in with read-only access. Yezatas saved a sign-in token on this computer.</p>
     {% endif %}
-    {{ post_button('/setup/signout', 'Sign out', 'secondary') }}
+    {{ post_button('/configuration/signout', 'Sign out', 'secondary') }}
   {% else %}
     <p>This opens a Google page in your browser. You choose the account and allow
       <strong>read-only</strong> access to your YouTube data. Yezatas never sees your password.</p>
-    {{ post_button('/setup/signin', 'Sign in with Google') }}
+    {{ post_button('/configuration/signin', 'Sign in with Google') }}
     <p class="hint">Use the same account you added as a test user in step 4.</p>
     <p>What Google shows next:</p>
     {{ gsignin() }}
@@ -354,13 +354,13 @@
     {% if not check.has_uploads %}
     <p class="fix">This channel has no uploads playlist yet, so there is nothing to pull.</p>
     {% endif %}
-    {{ post_button('/setup/check', 'Check again', 'secondary') }}
+    {{ post_button('/configuration/check', 'Check again', 'secondary') }}
   {% else %}
     {% if check and check.kind == 'api_disabled' %}
     <p><a class="button secondary" href="{{ api_url }}" target="_blank" rel="noopener noreferrer">Open the YouTube Data API v3 page</a></p>
     {% endif %}
     <p>One small request asks YouTube for your channel. It costs 1 quota unit.</p>
-    {{ post_button('/setup/check', 'Check the connection' if not check else 'Check again') }}
+    {{ post_button('/configuration/check', 'Check the connection' if not check else 'Check again') }}
   {% endif %}
 {% endcall %}
 
@@ -373,7 +373,7 @@
   {% elif not steps.pull.enabled or not estimate %}
     {% if signed_in and not check %}
     <p>Yezatas checks the connection again first (1 quota unit), then pulls.</p>
-    {{ post_button('/setup/pull', 'Check and pull', 'primary') }}
+    {{ post_button('/configuration/pull', 'Check and pull', 'primary') }}
     {% else %}
     <p>Check the connection first (step 7).</p>
     {% endif %}
@@ -392,7 +392,7 @@
     {% if not estimate.fits %}
     <p class="fix">Not enough quota left for this today. It resets at midnight Pacific time.</p>
     {% endif %}
-    {{ post_button('/setup/pull', 'Pull again' if latest_pull else 'Pull my catalog', 'primary', not estimate.fits) }}
+    {{ post_button('/configuration/pull', 'Pull again' if latest_pull else 'Pull my catalog', 'primary', not estimate.fits) }}
   {% endif %}
 {% endcall %}
 
@@ -408,7 +408,7 @@
   {% if primary_ai_source == 'environment' %}
   <p class="result" id="primary-ai-status">The choice comes from the <code>{{ primary_ai_env }}</code> environment variable. To change it, change the variable and restart Yezatas.</p>
   {% endif %}
-  <form method="post" action="/setup/primary-ai" class="choice-form" id="primary-ai-form">
+  <form method="post" action="/configuration/primary-ai" class="choice-form" id="primary-ai-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label class="choice" for="primary-ai-meta">
       <input id="primary-ai-meta" type="radio" name="primary_ai" value="meta"{% if primary_ai == 'meta' %} checked{% endif %}{% if primary_ai_source == 'environment' %} disabled{% endif %}>
@@ -428,13 +428,13 @@
   {% else %}
   <p id="model-key-status">{% if model_key == 'saved' %}A key is saved on this computer, in <code>{{ home }}</code>. It is not shown again.{% else %}No key is set.{% endif %}
     Create an API key in Meta's developer dashboard under API keys.</p>
-  <form method="post" action="/setup/model-key" class="upload" autocomplete="off">
+  <form method="post" action="/configuration/model-key" class="upload" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="model-key">{{ 'Replace the saved key' if model_key == 'saved' else 'Meta API key' }}</label>
     <input id="model-key" type="password" name="api_key" autocomplete="off" spellcheck="false" maxlength="500" required>
     <button type="submit" class="button primary">Save the key</button>
   </form>
-  {% if model_key == 'saved' %}{{ post_button('/setup/model-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
+  {% if model_key == 'saved' %}{{ post_button('/configuration/model-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
   {% endif %}
 
   <h3 class="run-h">Muse Glimmer on this computer</h3>
@@ -497,13 +497,13 @@
   <p id="translator-key-status">No translation key is set. Add a Baseten API key (or a Meta API key in the Primary AI card).</p>
   {% endif %}
   {% if translator_key != 'environment' %}
-  <form method="post" action="/setup/translator-key" class="upload" autocomplete="off">
+  <form method="post" action="/configuration/translator-key" class="upload" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="translator-key">{{ 'Replace the saved key' if translator_key == 'saved' else 'Baseten API key' }}</label>
     <input id="translator-key" type="password" name="api_key" autocomplete="off" spellcheck="false" maxlength="500" required>
     <button type="submit" class="button primary">Save the key</button>
   </form>
-  {% if translator_key == 'saved' %}{{ post_button('/setup/translator-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
+  {% if translator_key == 'saved' %}{{ post_button('/configuration/translator-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
   {% endif %}
 
   <h3 class="run-h">Modal</h3>
@@ -517,13 +517,13 @@
   <p id="modal-key-status">No Modal key is set.</p>
   {% endif %}
   {% if modal_key != 'environment' %}
-  <form method="post" action="/setup/modal-key" class="upload" autocomplete="off">
+  <form method="post" action="/configuration/modal-key" class="upload" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="modal-key">{{ 'Replace the saved key' if modal_key == 'saved' else 'Modal API key' }}</label>
     <input id="modal-key" type="password" name="api_key" autocomplete="off" spellcheck="false" maxlength="500" required>
     <button type="submit" class="button primary">Save the key</button>
   </form>
-  {% if modal_key == 'saved' %}{{ post_button('/setup/modal-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
+  {% if modal_key == 'saved' %}{{ post_button('/configuration/modal-key/delete', 'Remove the saved key', 'secondary') }}{% endif %}
   {% endif %}
 
   <h3 class="run-h">Checker</h3>

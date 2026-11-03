@@ -15,7 +15,7 @@
   <div class="flash error" role="alert" id="competitors-failed">{{ fetch_failed }}</div>
   <form class="inline" method="post" action="/competitors/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
   {% endif %}
-  {% if not signed_in %}<p class="hint" id="competitors-no-sign-in">Reading other channels needs the YouTube sign-in. <a href="/setup">Sign in in Configuration</a>.</p>{% endif %}
+  {% if not signed_in %}<p class="hint" id="competitors-no-sign-in">Reading other channels needs the YouTube sign-in. <a href="/configuration">Sign in in Configuration</a>.</p>{% endif %}
   {% if full %}<p class="hint" id="competitors-full">You follow {{ max_channels }} channels, the most Yezatas reads. Remove one to add another.</p>{% endif %}
   <form class="packaging-form" method="post" action="/competitors/add">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -72,10 +72,10 @@
   <div class="flash error" role="alert" id="competitors-explain-failed">{{ explain_failed }}</div>
   <form class="inline" method="post" action="/competitors/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
   {% endif %}
-  {% if not has_key %}<p class="hint" id="competitors-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Configuration</a>.</p>{% endif %}
+  {% if not has_key %}<p class="hint" id="competitors-no-key">There is no Meta API key yet. <a href="/configuration#step-ai">Add one in Configuration</a>.</p>{% endif %}
   <form class="packaging-form" method="post" action="/competitors/explain">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <p class="hint">The titles, channel names and code-made labels of up to 8 outliers and 8 typical videos go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>).{% endif %} Nothing is sent to YouTube.{% if not ai_local() %} One run costs about {{ estimate }}.{% endif %}</p>
+    <p class="hint">The titles, channel names and code-made labels of up to 8 outliers and 8 typical videos go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/configuration#ai-data">what Meta may do with it</a>).{% endif %} Nothing is sent to YouTube.{% if not ai_local() %} One run costs about {{ estimate }}.{% endif %}</p>
     <div class="actions"><button type="submit" class="button primary"{% if not has_key or not cards %} disabled{% endif %}>Explain with {{ ai_name() }}</button></div>
   </form>
   {% endif %}

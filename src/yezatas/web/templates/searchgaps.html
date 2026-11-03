@@ -88,8 +88,8 @@
   <div class="flash error" role="alert" id="searchgaps-rank-failed">{{ rank_failed }}</div>
   <form class="inline" method="post" action="/search-gaps/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary">Dismiss</button></form>
   {% endif %}
-  {% if not has_key %}<p class="hint" id="searchgaps-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Configuration</a>.</p>{% endif %}
-  <p class="hint">The search terms, their views, the video titles and the missing words of up to {{ max_sent }} gaps go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/setup#ai-data">what Meta may do with it</a>).{% endif %} Nothing is sent to YouTube.{% if not ai_local() %} One run costs about {{ estimate }}.{% endif %}</p>
+  {% if not has_key %}<p class="hint" id="searchgaps-no-key">There is no Meta API key yet. <a href="/configuration#step-ai">Add one in Configuration</a>.</p>{% endif %}
+  <p class="hint">The search terms, their views, the video titles and the missing words of up to {{ max_sent }} gaps go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/configuration#ai-data">what Meta may do with it</a>).{% endif %} Nothing is sent to YouTube.{% if not ai_local() %} One run costs about {{ estimate }}.{% endif %}</p>
   <form class="packaging-form" method="post" action="/search-gaps/rank">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="actions"><button type="submit" class="button primary"{% if not has_key or not gap_count %} disabled{% endif %}>Rank with {{ ai_name() }}</button></div>

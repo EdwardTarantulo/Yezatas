@@ -60,12 +60,12 @@
         <label class="check-label" for="ts-kind-speech"><input id="ts-kind-speech" type="radio" name="kind" value="speech" checked> Speech</label>
         <label class="check-label" for="ts-kind-sounds"><input id="ts-kind-sounds" type="radio" name="kind" value="sounds"> Music and sounds, no speech</label>
         {% if ts.local_no_key %}
-        <p class="fix speech-only" id="transcribe-local-no-key">Transcribing speech from a file needs Meta's API. Primary AI is Local and no Meta key is saved. <a href="/setup#step-ai">Add a key in Configuration</a>, or use the YouTube captions.</p>
+        <p class="fix speech-only" id="transcribe-local-no-key">Transcribing speech from a file needs Meta's API. Primary AI is Local and no Meta key is saved. <a href="/configuration#step-ai">Add a key in Configuration</a>, or use the YouTube captions.</p>
         {% elif not ts.has_key %}
-        <p class="hint speech-only" id="transcribe-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Configuration</a>.</p>
+        <p class="hint speech-only" id="transcribe-no-key">There is no Meta API key yet. <a href="/configuration#step-ai">Add one in Configuration</a>.</p>
         {% endif %}
         {% if not ts.sounds_ready %}
-        <p class="fix" id="sounds-not-installed">The sound tagger is not installed. See <a href="/setup#step-transcripts">Configuration &gt; Transcripts and sounds</a>.</p>
+        <p class="fix" id="sounds-not-installed">The sound tagger is not installed. See <a href="/configuration#step-transcripts">Configuration &gt; Transcripts and sounds</a>.</p>
         {% else %}
         <p class="hint sounds-only">Names the music and sounds second by second, like [Music] or [Applause]. It runs on this computer: free, and nothing is sent. The first run downloads the sound model (about 300 MB).</p>
         {% endif %}

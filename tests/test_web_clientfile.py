@@ -124,7 +124,7 @@ def test_upload_junk_and_oversize_are_rejected(tmp_path: Path, content: bytes) -
 
 def test_upload_without_a_file_asks_for_one(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
-    resp = ui.client.post("/setup/client", data={"csrf": ui.csrf()})
+    resp = ui.client.post("/configuration/client", data={"csrf": ui.csrf()})
     assert "Choose the JSON file" in resp.text
 
 

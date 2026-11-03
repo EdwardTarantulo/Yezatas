@@ -544,7 +544,7 @@ def test_no_get_ever_calls_youtube(tmp_path: Path) -> None:
     save(ui, V1, approve=True)
     save(ui, V2)
     for path in ("/", "/videos", f"/videos/{V1}", "/changes", "/changes/push", "/history",
-                 "/api/status", "/setup"):
+                 "/api/status", "/configuration"):
         assert ui.client.get(path).status_code == 200, path
     assert writer.calls == [] and writer.updates == []
     pushed(ui)

@@ -44,7 +44,8 @@
   </div>
   {% if change %}<p class="edit-draft-note" id="edit-draft-note"><strong>You are editing your draft.</strong> The boxes below show the draft, not the text on YouTube now; the score and What to fix are for the text on YouTube. Saving updates the draft. Nothing is sent to YouTube until you approve it on the Changes page and confirm the push.</p>{% else %}<p class="muted">Saving makes a draft. Nothing is sent to YouTube until you approve it on the Changes page and confirm the push.</p>{% endif %}
   {% if change and change.stale %}<p class="flash">YouTube's text changed since this draft was started. Review it on the Changes page.</p>{% endif %}
-  {% if change %}{{ issue_list(change.errors, change.warnings) }}{% endif %}
+  {# Out-of-date translations are said on the Translations row, with the button that fixes them. #}
+  {% if change %}{{ issue_list(change.errors, change.warnings|rejectattr('code', 'equalto', 'translations_out_of_date')|list) }}{% endif %}
   <form class="edit-form" method="post" action="/videos/{{ video.video_id|urlencode }}/draft">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="field">

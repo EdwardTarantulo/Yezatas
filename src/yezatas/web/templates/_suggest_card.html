@@ -17,7 +17,7 @@
   {% endif %}
   {% if sg.busy %}<p class="hint" id="suggest-busy">Another suggestion is running. Wait for it to finish.</p>{% endif %}
   {% if change %}<p class="hint" id="suggest-has-draft">This video already has a draft. <a href="/changes#d-{{ video.video_id|urlencode }}">Review it</a>, then push or discard it before asking for a new suggestion.</p>{% endif %}
-  {% if not sg.has_key %}<p class="hint" id="suggest-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Configuration</a>.</p>{% endif %}
+  {% if not sg.has_key %}<p class="hint" id="suggest-no-key">There is no Meta API key yet. <a href="/configuration#step-ai">Add one in Configuration</a>.</p>{% endif %}
   <form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/suggest">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button type="submit" class="button primary"{% if sg.busy or change %} disabled{% endif %}>Suggest improvements</button>

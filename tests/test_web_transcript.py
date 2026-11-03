@@ -189,7 +189,7 @@ def test_without_ffmpeg_an_existing_transcript_is_still_shown(tmp_path: Path, mo
 def test_a_missing_meta_key_is_a_hint_with_a_link_to_setup(tmp_path: Path) -> None:
     ui, _ = make_ts_ui(tmp_path)
     section = card(page(ui))
-    assert 'id="transcribe-no-key"' in section and 'href="/setup#step-ai"' in section
+    assert 'id="transcribe-no-key"' in section and 'href="/configuration#step-ai"' in section
     agent.save_api_key(ui.config, FAKE_KEY)
     section = card(page(ui))
     assert 'id="transcribe-no-key"' not in section and FAKE_KEY not in section
@@ -832,7 +832,7 @@ def test_the_full_path_is_never_in_any_page_or_status(tmp_path: Path) -> None:
     path = media(tmp_path)
     start(ui, path)
     assert fake.calls
-    seen = [page(ui), page(ui, V2), ui.client.get("/setup").text, ui.client.get("/changes").text,
+    seen = [page(ui), page(ui, V2), ui.client.get("/configuration").text, ui.client.get("/changes").text,
             ui.client.get("/agent").text, ui.client.get("/api/status").text,
             ui.client.get(f"/videos/{V1}/transcript.srt").text]
     for text in seen:
@@ -862,11 +862,11 @@ def test_nothing_in_the_transcript_flow_reaches_youtube(tmp_path: Path) -> None:
 # --- setup and the polling script ---------------------------------------------------------------
 def test_setup_says_whether_ffmpeg_was_found(tmp_path: Path, monkeypatch) -> None:
     ui, _ = make_ts_ui(tmp_path)
-    html = ui.client.get("/setup").text
+    html = ui.client.get("/configuration").text
     assert "ffmpeg was found on this computer." in html and "ffmpeg found" in html
     assert "need it to read the sound of a video file" in html
     monkeypatch.setattr(transcribe, "find_ffmpeg", lambda: None)
-    html = ui.client.get("/setup").text
+    html = ui.client.get("/configuration").text
     assert "ffmpeg was not found on this computer. Install it and restart Yezatas." in html
     assert "<script>" not in html and "style=" not in html
 

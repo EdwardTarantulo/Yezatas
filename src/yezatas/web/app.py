@@ -2181,7 +2181,7 @@ def create_app(
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
     def back_to_setup(step: str = "") -> RedirectResponse:
-        return RedirectResponse("/setup" + (f"#step-{step}" if step else ""), status_code=303)
+        return RedirectResponse("/configuration" + (f"#step-{step}" if step else ""), status_code=303)
 
     async def read_form(request: Request) -> Any:
         form = await request.form()
@@ -3268,6 +3268,12 @@ def create_app(
         })
 
     @app.get("/setup")
+    def old_setup(request: Request) -> Response:
+        """The Configuration page's old address: bookmarks and older links still land there."""
+        query = request.url.query
+        return RedirectResponse("/configuration" + (f"?{query}" if query else ""), status_code=307)
+
+    @app.get("/configuration")
     def setup(request: Request) -> Response:
         data = page_data()
         data["flash"] = state.pop_flash(request.state.session_id)
@@ -3348,7 +3354,7 @@ def create_app(
         return JSONResponse({"jobs": items})
 
     # --- actions (POST only, CSRF checked) ----------------------------------------------------
-    @app.post("/setup/client")
+    @app.post("/configuration/client")
     async def upload_client(request: Request) -> Response:
         sid = request.state.session_id
         try:
@@ -3394,7 +3400,7 @@ def create_app(
         state.add_flash(sid, "ok", text, "client")
         return back_to_setup("signin" if existing is not None else "client")
 
-    @app.post("/setup/signin")
+    @app.post("/configuration/signin")
     async def start_sign_in(request: Request) -> Response:
         await read_form(request)
         sid = request.state.session_id
@@ -3411,13 +3417,13 @@ def create_app(
                             "signin")
         return back_to_setup("signin")
 
-    @app.post("/setup/signin/cancel")
+    @app.post("/configuration/signin/cancel")
     async def cancel_sign_in(request: Request) -> Response:
         await read_form(request)
         state.signin_job.cancel("Sign-in cancelled.")
         return back_to_setup("signin")
 
-    @app.post("/setup/signout")
+    @app.post("/configuration/signout")
     async def sign_out(request: Request) -> Response:
         await read_form(request)
         removed = await run_in_threadpool(state.sign_out)
@@ -3426,7 +3432,7 @@ def create_app(
                         else "There was no saved sign-in.", "signin")
         return back_to_setup("signin")
 
-    @app.post("/setup/check")
+    @app.post("/configuration/check")
     async def check_connection(request: Request) -> Response:
         await read_form(request)
         sid = request.state.session_id
@@ -3436,7 +3442,7 @@ def create_app(
         await run_in_threadpool(state.run_check)
         return back_to_setup("check")
 
-    @app.post("/setup/pull")
+    @app.post("/configuration/pull")
     async def start_pull(request: Request) -> Response:
         form = await read_form(request)
         sid = request.state.session_id
@@ -4329,7 +4335,7 @@ def create_app(
         })
 
     # --- the Meta API key (optional, for the suggestions) --------------------------------------
-    @app.post("/setup/model-key")
+    @app.post("/configuration/model-key")
     async def save_model_key(request: Request) -> Response:
         form = await read_form(request)
         key = str(form.get("api_key") or "").strip()
@@ -4351,7 +4357,7 @@ def create_app(
                 flash(request, "ok", "Saved the key on this computer. It is not shown again.", "ai")
         return back_to_setup("ai")
 
-    @app.post("/setup/model-key/delete")
+    @app.post("/configuration/model-key/delete")
     async def delete_model_key(request: Request) -> Response:
         await read_form(request)
         removed = await run_in_threadpool(agent.delete_api_key, config)
@@ -4360,7 +4366,7 @@ def create_app(
         return back_to_setup("ai")
 
     # --- the Primary AI: Meta's Model API or Muse Glimmer on this computer ----------------------
-    @app.post("/setup/primary-ai")
+    @app.post("/configuration/primary-ai")
     async def save_primary_ai(request: Request) -> Response:
         form = await read_form(request)
         choice = str(form.get("primary_ai") or "")
@@ -5378,7 +5384,7 @@ def create_app(
         return see_other(f"/videos/{quote(video_id)}#thumbnail" if video_id else "/")
 
     # --- the translation key (optional, Baseten; the Meta key is the fallback) -------------------
-    @app.post("/setup/translator-key")
+    @app.post("/configuration/translator-key")
     async def save_translator_key(request: Request) -> Response:
         form = await read_form(request)
         key = str(form.get("api_key") or "").strip()
@@ -5401,7 +5407,7 @@ def create_app(
                       "translate")
         return back_to_setup("translate")
 
-    @app.post("/setup/translator-key/delete")
+    @app.post("/configuration/translator-key/delete")
     async def delete_translator_key(request: Request) -> Response:
         await read_form(request)
         removed = await run_in_threadpool(translate.delete_translator_key, config)
@@ -5410,7 +5416,7 @@ def create_app(
         return back_to_setup("translate")
 
     # --- the Modal key (optional): Spark Open on another host ------------------------------------
-    @app.post("/setup/modal-key")
+    @app.post("/configuration/modal-key")
     async def save_modal_key(request: Request) -> Response:
         form = await read_form(request)
         key = str(form.get("api_key") or "").strip()
@@ -5433,7 +5439,7 @@ def create_app(
                       "translate")
         return back_to_setup("translate")
 
-    @app.post("/setup/modal-key/delete")
+    @app.post("/configuration/modal-key/delete")
     async def delete_modal_key(request: Request) -> Response:
         await read_form(request)
         removed = await run_in_threadpool(translate.delete_modal_key, config)

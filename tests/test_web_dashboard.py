@@ -31,7 +31,7 @@ def test_pages_redirect_to_setup_before_any_pull(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
     for path in ("/", "/seo", "/videos", "/videos?sort=score", "/videos/vid000001"):
         resp = ui.client.get(path, follow_redirects=False)
-        assert resp.status_code == 303 and resp.headers["location"] == "/setup", path
+        assert resp.status_code == 303 and resp.headers["location"] == "/configuration", path
 
 
 def test_dashboard_renders_four_cards_and_the_heading(tmp_path: Path) -> None:
@@ -44,7 +44,7 @@ def test_dashboard_renders_four_cards_and_the_heading(tmp_path: Path) -> None:
                            ("card-problems", "Most common problems"), ("card-catalog", "Catalog")):
         assert f'id="{card_id}"' in html and f">{title}<" in html
     assert 'href="/videos?sort=fix"' in html and ">See all<" in html
-    assert 'href="/setup#step-pull"' in html and ">Pull again<" in html
+    assert 'href="/configuration#step-pull"' in html and ">Pull again<" in html
 
 
 def test_seo_card_shows_the_average_over_public_videos(tmp_path: Path) -> None:
@@ -122,7 +122,7 @@ def test_catalog_card_counts_pull_time_and_quota(tmp_path: Path) -> None:
 
 def test_setup_has_ai_data_anchor(tmp_path: Path) -> None:
     ui, _ = seeded_ui(tmp_path)
-    html = ui.client.get("/setup").text
+    html = ui.client.get("/configuration").text
     assert 'id="ai-data"' in html
     assert "on free credits Meta may use it to improve its products." in html
 
@@ -169,7 +169,7 @@ def test_shell_marks_the_active_nav_item(tmp_path: Path) -> None:
     assert active("/") == ["/"]
     assert active("/videos") == ["/videos"]
     assert active("/videos/vid000001") == ["/videos"]
-    assert active("/setup") == ["/setup"]
+    assert active("/configuration") == ["/configuration"]
     html = ui.client.get("/seo").text
     assert 'aria-current="page"' in html
     assert 'action="/videos" method="get"' in html and 'name="q"' in html
@@ -184,7 +184,7 @@ def test_search_box_keeps_the_current_query(tmp_path: Path) -> None:
 
 def test_pages_have_no_inline_scripts_or_styles(tmp_path: Path) -> None:
     ui, _ = seeded_ui(tmp_path)
-    for path in ("/", "/seo", "/videos", "/videos/vid000001", "/setup"):
+    for path in ("/", "/seo", "/videos", "/videos/vid000001", "/configuration"):
         html = ui.client.get(path).text
         assert " style=" not in html, path
         assert not re.search(r"<script(?![^>]*\bsrc=)", html), path
@@ -201,7 +201,7 @@ def test_formatting_helpers() -> None:
 
 def test_setup_page_uses_the_shell_and_keeps_its_hooks(tmp_path: Path) -> None:
     ui = make_ui(tmp_path)
-    html = ui.client.get("/setup").text
+    html = ui.client.get("/configuration").text
     assert 'class="topbar"' in html and 'class="sidebar"' in html
     assert 'id="step-project"' in html and 'name="csrf"' in html
     assert "data-slider" in html and "data-slide-next" in html and 'class="gpanel' in html
@@ -209,7 +209,7 @@ def test_setup_page_uses_the_shell_and_keeps_its_hooks(tmp_path: Path) -> None:
 
 def test_error_pages_have_no_shell(tmp_path: Path) -> None:
     ui = make_ui(tmp_path, signed_in_browser=False)
-    html = ui.client.get("/setup").text
+    html = ui.client.get("/configuration").text
     assert 'class="topbar"' not in html and 'class="sidebar"' not in html
 
 

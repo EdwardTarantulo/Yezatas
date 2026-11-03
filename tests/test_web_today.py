@@ -35,7 +35,7 @@ def test_home_is_today_with_its_cards(tmp_path: Path) -> None:
     for card_id in ("today-latest", "today-comments", "today-week", "today-fix"):
         assert f'id="{card_id}"' in html, card_id
     assert re.findall(r'class="nav-item active" href="([^"]+)"', html) == ["/"]
-    assert 'action="/setup/pull"' in html and 'name="back" value="/"' in html and ">Pull again<" in html
+    assert 'action="/configuration/pull"' in html and 'name="back" value="/"' in html and ">Pull again<" in html
     assert " style=" not in html and "<style" not in html
 
 
@@ -62,7 +62,7 @@ def test_sidebar_groups_daily_pages_first(tmp_path: Path) -> None:
     assert items == ["/", "/comments", "/videos", "/analytics",
                      "/seo", "/checks", "/bulk", "/copilot", "/translations", "/links", "/affiliate", "/replies",
                      "/outliers", "/search-gaps", "/competitors", "/strategy",
-                     "/changes", "/history", "/agent", "/setup"]
+                     "/changes", "/history", "/agent", "/configuration"]
     labels = re.findall(r'<p class="nav-label">([^<]+)</p>', html)
     assert labels == ["Daily", "Improve", "Research", "Review"]
 

@@ -112,14 +112,14 @@ def test_the_privacy_sentence_names_baseten_or_metas_api(tmp_path: Path) -> None
     translate.delete_translator_key(ui.config)
     agent.save_api_key(ui.config, "FAKE-META-KEY")
     section = card(ui.client.get(f"/videos/{V1}").text)
-    assert "through Meta's Model API to be translated. Meta's terms apply (<a href=\"/setup#ai-data\">what Meta may do with it</a>)." in section
+    assert "through Meta's Model API to be translated. Meta's terms apply (<a href=\"/configuration#ai-data\">what Meta may do with it</a>)." in section
     assert "FAKE-META-KEY" not in section
 
 
 def test_without_a_translator_the_button_is_disabled_and_setup_is_linked(tmp_path: Path) -> None:
     ui, _ = make_tr_ui(tmp_path, Tools(translator=None))
     section = card(ui.client.get(f"/videos/{V1}").text)
-    assert 'id="translate-no-key"' in section and 'href="/setup#step-translate"' in section
+    assert 'id="translate-no-key"' in section and 'href="/configuration#step-translate"' in section
     assert re.search(r'class="button primary" disabled>Translate<', section)
 
 
@@ -134,7 +134,7 @@ def test_without_the_checker_the_card_says_translations_will_be_unverified(tmp_p
     ui, _ = make_tr_ui(tmp_path, Tools(verifier=ScriptedVerifier(up=False)))
     section = card(ui.client.get(f"/videos/{V1}").text)
     assert 'id="translate-no-checker"' in section and 'marked "Unverified"' in section
-    assert 'href="/setup#step-translate"' in section
+    assert 'href="/configuration#step-translate"' in section
     assert re.search(r'class="button primary">Translate<', section)  # still possible
 
 
@@ -294,7 +294,7 @@ def test_translate_without_a_translator_flashes_and_starts_nothing(tmp_path: Pat
     nf(ui, f"/videos/{V1}/translate", data={"source_language": "en", "targets": ["es"]})
     html = ui.client.get(f"/videos/{V1}").text
     assert "There is no translation key yet." in html and "Nothing was sent." in html
-    assert 'href="/setup#step-translate"' in html
+    assert 'href="/configuration#step-translate"' in html
     assert ui.web.translate_job.snapshot().status == "idle"
 
 
@@ -672,8 +672,8 @@ def test_setup_shows_the_translation_step_without_a_key(tmp_path: Path) -> None:
     assert html.index('id="step-ai"') < html.index('id="step-translate"')
     section = html.split('id="step-translate"')[1].split("</section>")[0]
     assert "Third-party alternatives" in section and "No key" in section
-    assert 'action="/setup/translator-key"' in section and 'type="password"' in section
-    assert "/setup/translator-key/delete" not in section
+    assert 'action="/configuration/translator-key"' in section and 'type="password"' in section
+    assert "/configuration/translator-key/delete" not in section
     assert ui.config.verifier_model in section and "Not running" in section and "install Ollama" in section
     assert "only talks to it on this computer" in section
 
@@ -697,20 +697,20 @@ def test_setup_says_when_the_meta_key_is_the_fallback(tmp_path: Path) -> None:
     agent.save_api_key(ui.config, "FAKE-META-KEY")
     section = ui.setup_html().split('id="step-translate"')[1].split("</section>")[0]
     assert "Using the Meta key" in section and "your Meta API key" in section
-    assert 'type="password"' in section and "/setup/translator-key/delete" not in section
+    assert 'type="password"' in section and "/configuration/translator-key/delete" not in section
     assert "FAKE-META-KEY" not in section
 
 
 def test_saving_the_translation_key_writes_the_file_and_never_shows_it(tmp_path: Path) -> None:
     ui, _ = make_tr_ui(tmp_path)
-    resp = nf(ui, "/setup/translator-key", data={"api_key": f"  {FAKE_KEY}  "})
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup#step-translate"
+    resp = nf(ui, "/configuration/translator-key", data={"api_key": f"  {FAKE_KEY}  "})
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration#step-translate"
     assert ui.config.translator_key_path.read_text(encoding="utf-8") == FAKE_KEY
     assert translate.translator_key_source(ui.config) == "saved"
     setup = ui.setup_html()
     assert "Saved the key on this computer. It is not shown again." in setup and "Key saved" in setup
-    assert "/setup/translator-key/delete" in setup and "Replace the saved key" in setup
-    for path in ("/setup", "/", f"/videos/{V1}", "/changes", "/history", "/videos", "/api/status", "/agent"):
+    assert "/configuration/translator-key/delete" in setup and "Replace the saved key" in setup
+    for path in ("/configuration", "/", f"/videos/{V1}", "/changes", "/history", "/videos", "/api/status", "/agent"):
         body = ui.client.get(path).text
         assert FAKE_KEY not in body and FAKE_KEY[:12] not in body, path
     assert FAKE_KEY not in resp.text
@@ -720,7 +720,7 @@ def test_saving_the_translation_key_writes_the_file_and_never_shows_it(tmp_path:
 @pytest.mark.parametrize("bad", ["", "   ", "two words", "a\nb", "x" * 501])
 def test_bad_translation_keys_are_refused(tmp_path: Path, bad: str) -> None:
     ui, _ = make_tr_ui(tmp_path)
-    nf(ui, "/setup/translator-key", data={"api_key": bad})
+    nf(ui, "/configuration/translator-key", data={"api_key": bad})
     assert translate.translator_key_source(ui.config) == ""
     html = ui.setup_html()
     assert 'class="flash error"' in html and ("Paste your key first." in html or "one line" in html)
@@ -729,11 +729,11 @@ def test_bad_translation_keys_are_refused(tmp_path: Path, bad: str) -> None:
 def test_removing_the_saved_translation_key(tmp_path: Path) -> None:
     ui, _ = make_tr_ui(tmp_path)
     translate.save_translator_key(ui.config, FAKE_KEY)
-    resp = nf(ui, "/setup/translator-key/delete")
-    assert resp.status_code == 303 and resp.headers["location"] == "/setup#step-translate"
+    resp = nf(ui, "/configuration/translator-key/delete")
+    assert resp.status_code == 303 and resp.headers["location"] == "/configuration#step-translate"
     assert not ui.config.translator_key_path.exists()
     assert "The saved key was deleted." in ui.setup_html()
-    nf(ui, "/setup/translator-key/delete")
+    nf(ui, "/configuration/translator-key/delete")
     assert "There was no saved key." in ui.setup_html()
 
 
@@ -744,16 +744,16 @@ def test_a_translation_key_from_the_environment_hides_the_form(tmp_path: Path,
     html = ui.setup_html()
     section = html.split('id="step-translate"')[1].split("</section>")[0]
     assert "Key from the environment" in section and translate.TRANSLATOR_KEY_ENV in section
-    assert 'id="translator-key"' not in section and "/setup/translator-key" not in section
+    assert 'id="translator-key"' not in section and "/configuration/translator-key" not in section
     assert FAKE_KEY not in html
-    nf(ui, "/setup/translator-key", data={"api_key": "FAKE-OTHER-KEY"})
+    nf(ui, "/configuration/translator-key", data={"api_key": "FAKE-OTHER-KEY"})
     assert not ui.config.translator_key_path.exists()
     assert "so nothing was saved" in ui.setup_html()
 
 
 def test_the_setup_flash_links_to_the_translation_step(tmp_path: Path) -> None:
     ui, _ = make_tr_ui(tmp_path)
-    nf(ui, "/setup/translator-key", data={"api_key": ""})
+    nf(ui, "/configuration/translator-key", data={"api_key": ""})
     assert 'href="#step-translate"' in ui.setup_html()
 
 
@@ -781,8 +781,8 @@ def test_the_poll_script_knows_the_translate_job() -> None:
 
 
 POSTS = ["/videos/vidtr0001/translate", "/translate/done", "/videos/vidtr0001/translations/add",
-         "/videos/vidtr0001/translations/es/remove", "/setup/translator-key",
-         "/setup/translator-key/delete"]
+         "/videos/vidtr0001/translations/es/remove", "/configuration/translator-key",
+         "/configuration/translator-key/delete"]
 
 
 @pytest.mark.parametrize("path", POSTS)
@@ -811,7 +811,7 @@ def test_nothing_in_the_translation_flow_reaches_youtube(tmp_path: Path) -> None
 def test_new_markup_has_no_inline_script_or_style(tmp_path: Path) -> None:
     loc = {"fr": {"title": "F", "description": "F"}}
     ui = changes_after_adding(tmp_path, localizations=loc)
-    for path in ("/setup", "/changes", "/history", f"/videos/{V1}", f"/videos/{V2}"):
+    for path in ("/configuration", "/changes", "/history", f"/videos/{V1}", f"/videos/{V2}"):
         html = ui.client.get(path).text
         assert "style=" not in html and html.count("<script") == html.count("<script src="), path
         assert not re.search(r"\son\w+=", html), path

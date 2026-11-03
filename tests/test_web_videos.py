@@ -325,7 +325,7 @@ def test_what_to_fix_lists_the_failed_checks_with_points(tmp_path: Path) -> None
 
 def test_csp_allows_only_the_thumbnail_host_for_images(tmp_path: Path) -> None:
     ui = seeded(tmp_path)
-    for path in ("/", "/videos", "/videos/vid000001", "/setup"):
+    for path in ("/", "/videos", "/videos/vid000001", "/configuration"):
         csp = ui.client.get(path).headers["content-security-policy"]
         assert "img-src 'self' https://i.ytimg.com;" in csp
         assert "script-src 'self';" in csp and "style-src 'self';" in csp

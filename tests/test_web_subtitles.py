@@ -202,7 +202,7 @@ def test_a_chinese_transcript_blocks_both_chinese_targets(tmp_path: Path) -> Non
 def test_without_a_translator_the_button_is_disabled_and_setup_is_linked(tmp_path: Path) -> None:
     ui, _ = make_sb_ui(tmp_path, Tools(translator=None))
     section = block(page(ui))
-    assert 'id="subtitles-no-key"' in section and 'href="/setup#step-translate"' in section
+    assert 'id="subtitles-no-key"' in section and 'href="/configuration#step-translate"' in section
     assert re.search(r'class="button primary" disabled>Translate subtitles<', section)
 
 

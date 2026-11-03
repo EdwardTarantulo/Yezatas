@@ -387,7 +387,7 @@ def test_without_the_sound_tagger_the_card_says_so_and_the_post_is_refused(tmp_p
     part = block(page(ui), "source-file")
     assert 'id="sounds-not-installed"' in part
     assert "The sound tagger is not installed. See" in part
-    assert 'href="/setup#step-transcripts"' in part and "Configuration &gt; Transcripts and sounds" in part
+    assert 'href="/configuration#step-transcripts"' in part and "Configuration &gt; Transcripts and sounds" in part
     upload(ui)
     assert esc(soundtags.MISSING_MESSAGE) in page(ui)
     assert tagger.calls == [] and uploads_left(ui) == []
@@ -425,7 +425,7 @@ def test_in_local_mode_without_a_key_the_speech_option_shows_the_amber_note(tmp_
     assert 'class="fix speech-only" id="transcribe-local-no-key"' in part
     assert ("Transcribing speech from a file needs Meta's API. Primary AI is Local and no Meta key "
             "is saved.") in part
-    assert "or use the YouTube captions." in part and 'href="/setup#step-ai"' in part
+    assert "or use the YouTube captions." in part and 'href="/configuration#step-ai"' in part
     assert "Add a key in Configuration" in part
     assert 'id="transcribe-no-key"' not in part and 'id="ts-price"' not in part
 
