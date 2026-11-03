@@ -99,15 +99,15 @@
 <p class="cm-draft-label">Reply draft <span class="muted">&middot; {{ row.draft.model }}</span></p>
 <p class="cm-draft-text" id="draft-text-{{ row.draft.id }}">{{ row.draft.text }}</p>
 <div class="actions">
-<button type="button" class="button secondary" data-copy-target="draft-text-{{ row.draft.id }}" aria-label="Copy reply">Copy reply</button>
-<a class="button secondary" href="{{ row.youtube_url }}" target="_blank" rel="noopener noreferrer">{{ icon('external') }}Open on YouTube</a>
-<form class="inline" method="post" action="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ cv.next_path }}"><button type="submit" class="button secondary">Mark as used</button></form>
-<form class="inline" method="post" action="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ cv.next_path }}"><button type="submit" class="button secondary">Dismiss</button></form>
+<button type="button" class="button secondary" data-copy-target="draft-text-{{ row.draft.id }}" aria-label="Copy reply" title="Copy the text, to paste it into YouTube">Copy reply</button>
+<a class="button secondary" href="{{ row.youtube_url }}" target="_blank" rel="noopener noreferrer" title="Open this comment on YouTube in a new tab, where you can post your reply">{{ icon('external') }}Open on YouTube</a>
+<form class="inline" method="post" action="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/used"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ cv.next_path }}"><button type="submit" class="button secondary" title="Tell Yezatas you posted this on YouTube yourself (it cannot post for you). The draft is put away as done.">Mark as used</button></form>
+<form class="inline" method="post" action="/videos/{{ row.video_id|urlencode }}/comments/replies/{{ row.draft.id }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ cv.next_path }}"><button type="submit" class="button secondary" title="Throw this draft away without posting it. The comment itself stays on YouTube.">Dismiss</button></form>
 </div>
 </div>
 {% else %}
 <div class="actions">
-<a class="button secondary" href="{{ row.youtube_url }}" target="_blank" rel="noopener noreferrer">{{ icon('external') }}Open on YouTube</a>
+<a class="button secondary" href="{{ row.youtube_url }}" target="_blank" rel="noopener noreferrer" title="Open this comment on YouTube in a new tab, where you can post your reply">{{ icon('external') }}Open on YouTube</a>
 </div>
 {% endif %}
 {% if row.templates %}
