@@ -29,7 +29,7 @@ V1, V2 = "vid00000001", "vid00000002"
 MAXRES = f"https://i.ytimg.com/vi/{V1}/maxresdefault.jpg"
 DESCRIPTION = "How to repot a cactus without hurting its roots."
 KEEP_SENTENCE = "Yezatas does not upload thumbnails; download one and upload it in YouTube Studio."
-AI_NOTE = "AI-made image: check that the product still looks like the real one"
+AI_NOTE = "AI-made image: check that the product and the scene match your video"
 
 
 @pytest.fixture(autouse=True)

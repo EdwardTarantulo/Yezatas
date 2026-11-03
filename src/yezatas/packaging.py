@@ -60,8 +60,15 @@ LINE_MAX = 240  # characters of a critique point or an idea's instruction
 SUBJECT_MAX_WORDS = 3
 
 # Muse Image gets these fixed sentences from code; only the idea's instruction and text come from a model.
-GUARD_SENTENCE = ("Keep the product and any people exactly as they are; change only layout, text, "
-                  "lighting and background.")
+GUARD_SENTENCE = ("Keep the real product true to the reference: its shape, colours, brand and markings. "
+                  "Add no other products, logos or people.")
+DESIGN_SENTENCE = ("Make one large, sharp subject the viewer understands at a glance, even at phone size, "
+                   "with clean studio-quality lighting and strong contrast against a simple background. "
+                   "Fill the whole wide frame: no black bars, no blur from the reference, no collage, "
+                   "and do not copy the reference's framing.")
+TEXT_STYLE_SENTENCE = ("Set it once in a bold, modern sans-serif, very large and solid in one bright colour, "
+                       "on at most two lines, with no outline, bevel or heavy shadow, and keep the "
+                       "bottom-right corner clear. Write no other words.")
 KEEP_TEXT_SENTENCE = "Keep the current text as it is."
 
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -557,9 +564,11 @@ together, as a viewer sees them in a feed.
 Rules
 - Give 2 to {MAX_POINTS} short points (one sentence each). Say what works and what to improve.
 - Only use numbers that appear in the measurements. Never write any other number.
-- Give exactly 2 ideas for variant thumbnails. Each has an instruction for an image editor (what to \
-change: layout, text size, lighting, background) and an overlay_text of at most {OVERLAY_MAX_WORDS} \
-words. The two ideas must be clearly different from each other.
+- Give exactly 2 ideas for new thumbnails, not touch-ups of this one. Each has an instruction for an \
+image designer, one sentence that names the scene, the camera angle and the lighting, and shows the \
+video's problem or promise at a glance; and an overlay_text of two to four words where you can, at most \
+{OVERLAY_MAX_WORDS}, that adds to the title instead of repeating it. The two ideas must be different \
+scenes, not the same scene with another layout.
 - Use only words that are already in the title, the description or the current thumbnail text for \
 overlay_text. Do not invent claims, names or numbers.
 - Do not use < or >. Answer with the JSON only.
@@ -823,8 +832,11 @@ def text_matches(read: str, requested: str, allowed: set[str]) -> bool:
 
 def variant_prompt(instruction: str, overlay_text: str) -> str:
     """The Muse Image prompt: the idea, a fixed guard sentence, and the exact text in quotes."""
-    text = f'Write exactly this text on the picture: "{overlay_text}".' if overlay_text else KEEP_TEXT_SENTENCE
-    return f"Edit this YouTube thumbnail. {instruction} {GUARD_SENTENCE} {text} Keep it 16:9."
+    text = (f'Write exactly this text on the picture: "{overlay_text}". {TEXT_STYLE_SENTENCE}'
+            if overlay_text else KEEP_TEXT_SENTENCE)
+    return ("Design a new, professional YouTube thumbnail. The attached picture is only a reference for "
+            f"what the real product looks like. Concept: {instruction} {DESIGN_SENTENCE} {GUARD_SENTENCE} "
+            f"{text} Wide 16:9.")
 
 
 def make_variants(
@@ -840,7 +852,7 @@ def make_variants(
 ) -> VariantsResult:
     """Make one variant per idea of a stored review (at most 2) and store each.
 
-    Muse Image edits the stored thumbnail; code fits the picture to 1280x720 and saves it as a JPEG
+    Muse Image designs a new picture from the idea, with the stored thumbnail as its reference; code fits the picture to 1280x720 and saves it as a JPEG
     under a generated name; the vision model reads its text back (`text_ok` says whether it is the
     text that was asked for; a mismatch makes the variant "flagged"); SAM measures the subject again.
     One failed variant does not stop the other; a refused key (`ModelError` kind "auth") is raised.
