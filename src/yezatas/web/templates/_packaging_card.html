@@ -87,6 +87,7 @@
   <p class="waiting"><span class="spinner" aria-hidden="true"></span>
     <span id="variants-msg" role="status" aria-live="polite">{{ vj.message or 'Starting…' }}</span></p>
   <p class="hint">Each picture takes a minute or so. You can leave this page. The pictures show here.</p>
+  <div class="actions" id="variants-actions" data-keep-place><button type="button" class="button primary" disabled>Making thumbnail options</button></div>
   {% else %}
   {% if vj.failed %}
   <div class="flash error" role="alert" id="variants-failed">{{ vj.failed }}</div>
@@ -103,7 +104,7 @@
   <form class="packaging-form" method="post" action="/videos/{{ video.video_id|urlencode }}/packaging/variants">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <p class="hint">{{ pk.maker }} edits the thumbnail picture once for each idea (about $0.01 a picture), then {{ pk.vision }} reads the text back and {{ pk.segmenter }} measures the subject again. The pictures stay on this computer until you download one.</p>
-    <div class="actions"><button type="submit" class="button primary"{% if vj.busy or not pk.has_tools %} disabled{% endif %}>{{ 'Generate 2 more thumbnail options' if pv.variants else 'Generate 2 thumbnail options' }}</button></div>
+    <div class="actions" id="variants-actions" data-keep-place><button type="submit" class="button primary"{% if vj.busy or not pk.has_tools %} disabled{% endif %}>{{ 'Generate 2 more thumbnail options' if pv.variants else 'Generate 2 thumbnail options' }}</button></div>
   </form>
   {% endif %}
   {% endif %}

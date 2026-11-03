@@ -176,13 +176,24 @@
 
 // A button press or a finished job reloads the page (often with a #card anchor). Remember where the reader was so
 // the page comes back at the same place instead of jumping to the card's top.
-function keepScroll() {
-  try { window.sessionStorage.setItem("yz-scroll:" + window.location.pathname, JSON.stringify([window.scrollY, Date.now()])); } catch (e) { /* storage off */ }
+function keepScroll(form) {
+  // A [data-keep-place] element stays at the same height on screen, even when text above it comes or goes.
+  var mark = form && form.querySelector ? form.querySelector("[data-keep-place]") : null;
+  if (!mark) {
+    Array.prototype.some.call(document.querySelectorAll("[data-keep-place]"), function (el) {
+      var r = el.getBoundingClientRect();
+      if (r.height && r.top >= 0 && r.top < window.innerHeight) { mark = el; return true; }
+      return false;
+    });
+  }
+  var place = [window.scrollY, Date.now()];
+  if (mark && mark.id) place.push(mark.id, mark.getBoundingClientRect().top);
+  try { window.sessionStorage.setItem("yz-scroll:" + window.location.pathname, JSON.stringify(place)); } catch (e) { /* storage off */ }
 }
 document.addEventListener("submit", function (e) {
   var form = e.target;
   if ((form.getAttribute("method") || "").toLowerCase() !== "post" || form.target) return;
-  keepScroll();
+  keepScroll(form);
   // Ask the server to come back without the #anchor (see stay_in_place in app.py).
   var url = new URL(form.action, window.location.href);
   url.searchParams.set("stay", "1");
@@ -233,7 +244,9 @@ document.addEventListener("submit", function (e) {
     var card = go && document.getElementById(go);
     var fold = card && card.closest("details[data-keep]");
     if (fold) fold.open = true;
-    window.scrollTo({ top: back[0], behavior: "instant" });
+    var mark = back[2] && document.getElementById(back[2]);
+    var top = mark ? mark.getBoundingClientRect().top + window.scrollY - back[3] : back[0];
+    window.scrollTo({ top: top, behavior: "instant" });
     document.documentElement.classList.remove("yz-restoring");
   } else {
     openTarget();
