@@ -228,19 +228,13 @@ document.addEventListener("submit", function (e) {
     history.replaceState(null, "", window.location.pathname + (q ? "?" + q : "") + "#" + encodeURIComponent(go));
   }
   if (back && Date.now() - back[1] < 120000) {
-    // Back from a reload this page caused: come back at the same place, then glide to the card only if it is
-    // out of view.
+    // Back from a reload this page caused: come back at exactly the same place (the result appears where
+    // the button was), and keep the row open.
+    var card = go && document.getElementById(go);
+    var fold = card && card.closest("details[data-keep]");
+    if (fold) fold.open = true;
     window.scrollTo({ top: back[0], behavior: "instant" });
     document.documentElement.classList.remove("yz-restoring");
-    var card = go && document.getElementById(go);
-    if (card) {
-      var fold = card.closest("details[data-keep]");
-      if (fold) fold.open = true;
-      var box = card.getBoundingClientRect();
-      if (box.top > window.innerHeight || box.bottom < 0) {
-        setTimeout(function () { card.scrollIntoView({ behavior: "smooth", block: "start" }); }, 150);
-      }
-    }
   } else {
     openTarget();
   }
