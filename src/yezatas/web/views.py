@@ -1021,6 +1021,9 @@ class TranslateView:
     addable_count: int
     in_draft: tuple[DraftTranslation, ...]
     stale_names: tuple[str, ...] = ()  # target languages whose translation is out of date
+    stale_codes: tuple[str, ...] = ()
+    failed_names: tuple[str, ...] = ()  # target languages whose last translation failed its check
+    failed_codes: tuple[str, ...] = ()
     summary: str = ""  # "2 translated · 1 out of date · 3 on YouTube · 18 not translated"
 
 
@@ -1125,6 +1128,9 @@ def build_translate_view(video: Video, row: DraftRow | None,
         results=tuple(results), addable_count=sum(1 for r in results if r.addable),
         in_draft=tuple(listed),
         stale_names=tuple(t.name for t in targets if t.state == "stale"),
+        stale_codes=tuple(t.code for t in targets if t.state == "stale"),
+        failed_names=tuple(t.name for t in targets if t.state == "failed"),
+        failed_codes=tuple(t.code for t in targets if t.state == "failed"),
         summary=" · ".join(f"{n} {label}" for n, label in counted),
     )
 

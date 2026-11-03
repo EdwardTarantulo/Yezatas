@@ -17,6 +17,14 @@
   <div class="flash error" role="alert">{{ tr.failed }}</div>
   <form class="inline" method="post" action="/translate/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
   {% endif %}
+  {% if tv.failed_names %}
+  <div class="flash error tr-flash" id="tr-failed" role="alert"><span><strong>{{ tv.failed_names|join(', ') }} failed {{ 'its' if tv.failed_names|length == 1 else 'their' }} check.</strong> {{ 'It was' if tv.failed_names|length == 1 else 'They were' }} not added to the draft; the problems are listed under Results. Try again, or leave {{ 'it' if tv.failed_names|length == 1 else 'them' }} out.</span>
+    {% if tv.language_known and not tr.busy and tr.has_translator %}<form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/translate"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="source_language" value="{{ tv.language_code }}">{% for c in tv.failed_codes %}<input type="hidden" name="targets" value="{{ c }}">{% endfor %}<button type="submit" class="button secondary">Try again</button></form>{% endif %}</div>
+  {% endif %}
+  {% if tv.stale_names or tr_draft_stale %}
+  <div class="flash warn tr-flash" id="tr-out-of-date" role="note"><span>{% if tv.stale_names %}<strong>{{ tv.stale_names|length }} translation{{ '' if tv.stale_names|length == 1 else 's' }} out of date.</strong> {{ 'It was' if tv.stale_names|length == 1 else 'They were' }} made from an older title or description, so pushing now would send the old text.{% else %}{{ tr_draft_stale }}{% endif %}</span>
+    {% if tv.stale_codes and tv.language_known and not tr.busy and tr.has_translator %}<form class="inline" method="post" action="/videos/{{ video.video_id|urlencode }}/translate"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="source_language" value="{{ tv.language_code }}">{% for c in tv.stale_codes %}<input type="hidden" name="targets" value="{{ c }}">{% endfor %}<button type="submit" class="button primary">Translate {{ tv.stale_codes|length }} again</button></form>{% else %}<a class="button secondary" href="#tr-targets">Choose languages</a>{% endif %}</div>
+  {% endif %}
   {% if tr.busy %}<p class="hint" id="translate-busy">Another translation is running. Wait for it to finish.</p>{% endif %}
   {% if not tr.has_translator %}<p class="hint" id="translate-no-key">There is no translation key yet. <a href="/setup#step-translate">Add one in Configuration</a>.</p>{% endif %}
   {% if not tr.verifier_ready %}<p class="hint" id="translate-no-checker">The checker ({{ tr.verifier_model }}) is not running on this computer, so translations will be marked "Unverified". To check them, start Ollama with that model: <a href="/setup#step-translate">see Configuration</a>.</p>{% endif %}

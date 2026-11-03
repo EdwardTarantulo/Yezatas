@@ -259,3 +259,117 @@ document.documentElement.classList.remove("yz-restoring");
   if (!active || !window.matchMedia("(max-width: 899px)").matches) return;
   bar.scrollLeft = Math.max(0, active.offsetLeft - (bar.clientWidth - active.offsetWidth) / 2);
 })();
+
+// Jobs on every page: the top bar shows what is running (its menu links back to the video), and a job that
+// finishes while you are elsewhere in Yezatas shows a card with a link to its result, plus a system notification
+// when this tab is in the background and notifications are allowed.
+(function () {
+  "use strict";
+  var box = document.getElementById("jobs");
+  var toasts = document.getElementById("job-toasts");
+  if (!box || !toasts || !window.fetch) return;
+  var chip = box.querySelector(".jobs-chip");
+  var chipText = box.querySelector(".jobs-chip-text");
+  var menu = document.getElementById("jobs-menu");
+  var KEY = "yz-jobs-seen";  // the jobs this tab saw running, so each finish is announced once (this tab only)
+  var seen = {};
+  try { seen = JSON.parse(window.sessionStorage.getItem(KEY) || "{}") || {}; } catch (e) { seen = {}; }
+  function save() { try { window.sessionStorage.setItem(KEY, JSON.stringify(seen)); } catch (e) { /* storage off */ } }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text) n.textContent = text;
+    return n;
+  }
+  function ago(s) { return s < 60 ? "just now" : Math.round(s / 60) + " min ago"; }
+  function row(j) {
+    var running = j.status === "running";
+    var a = el("a", "jobs-row" + (running ? " now" : ""));
+    a.href = j.href;
+    a.appendChild(running ? el("span", "spinner") : el("span", "jobs-dot " + (j.status === "done" ? "ok" : "bad")));
+    var t = el("span", "jobs-row-text");
+    t.appendChild(el("strong", "", running && j.message ? j.message : j.label));
+    t.appendChild(el("span", "muted", (j.title || j.label) + (running ? " · started " + ago(j.seconds) : "")));
+    a.appendChild(t);
+    a.appendChild(el("span", "jobs-open", "Open"));
+    return a;
+  }
+  function toast(j) {
+    var ok = j.status === "done";
+    var card = el("div", "job-toast " + (ok ? "ok" : "bad"));
+    card.setAttribute("role", ok ? "status" : "alert");
+    card.appendChild(el("span", "jobs-dot " + (ok ? "ok" : "bad")));
+    var t = el("span", "jobs-row-text");
+    t.appendChild(el("strong", "", j.label));
+    t.appendChild(el("span", "muted", j.title || j.message || ""));
+    card.appendChild(t);
+    var open = el("a", "button " + (ok ? "primary" : "secondary"), j.video_id ? "Open video" : "Open");
+    open.href = j.href;
+    card.appendChild(open);
+    var x = el("button", "job-toast-x", "×");
+    x.type = "button";
+    x.setAttribute("aria-label", "Close");
+    x.addEventListener("click", function () { card.remove(); });
+    card.appendChild(x);
+    toasts.appendChild(card);
+    setTimeout(function () { card.classList.add("in"); }, 20);
+    setTimeout(function () { card.classList.remove("in"); setTimeout(function () { card.remove(); }, 300); }, 12000);
+    if (document.hidden && window.Notification && Notification.permission === "granted") {
+      try {
+        var n = new Notification(j.label, { body: j.title || j.message || "", tag: "yz-" + j.job });
+        n.onclick = function () { window.focus(); window.location.href = j.href; };
+      } catch (e) { /* notifications refused here */ }
+    }
+  }
+
+  var timer = 0;
+  function poll() {
+    fetch("/api/activity", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("status " + r.status)); })
+      .then(function (data) {
+        var jobs = data.jobs || [];
+        var running = jobs.filter(function (j) { return j.status === "running"; });
+        var here = window.location.pathname;
+        jobs.forEach(function (j) {
+          var id = j.job + ":" + j.video_id;
+          if (j.status === "running") { seen[id] = 1; return; }
+          if (!seen[id]) return;
+          delete seen[id];
+          // The job's own page reloads itself and shows the result there; anywhere else, announce it.
+          if (j.href.split("#")[0] !== here || document.hidden) toast(j);
+        });
+        save();
+        box.hidden = jobs.length === 0;
+        box.classList.toggle("running", running.length > 0);
+        chipText.textContent = running.length
+          ? (running.length === 1 ? running[0].label : running.length + " jobs running")
+          : (jobs.length === 1 ? "1 finished" : jobs.length + " finished");
+        menu.textContent = "";
+        if (running.length) menu.appendChild(el("p", "jobs-h", "Running now"));
+        running.forEach(function (j) { menu.appendChild(row(j)); });
+        var finished = jobs.filter(function (j) { return j.status !== "running"; });
+        if (finished.length) menu.appendChild(el("p", "jobs-h", "Finished"));
+        finished.forEach(function (j) { menu.appendChild(row(j)); });
+        clearTimeout(timer);
+        timer = setTimeout(poll, running.length ? 2000 : 10000);
+      })
+      .catch(function () { clearTimeout(timer); timer = setTimeout(poll, 10000); });
+  }
+  chip.addEventListener("click", function () {
+    var open = menu.hidden;
+    menu.hidden = !open;
+    chip.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) toasts.textContent = "";  // the menu lists the same finish; close its card
+  });
+  document.addEventListener("click", function (e) {
+    if (!box.contains(e.target)) { menu.hidden = true; chip.setAttribute("aria-expanded", "false"); }
+  });
+  // Starting a job is a click: the moment a page may ask, once, to show notifications.
+  document.addEventListener("submit", function () {
+    if (window.Notification && Notification.permission === "default") {
+      try { Notification.requestPermission(); } catch (e) { /* older browsers */ }
+    }
+  });
+  poll();
+})();

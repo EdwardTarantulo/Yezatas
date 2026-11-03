@@ -796,6 +796,27 @@ def _job_json(snap: JobSnapshot) -> dict[str, Any]:
     return {"status": snap.status, "message": snap.message, "error_kind": snap.error_kind}
 
 
+# The jobs the top bar follows on every page: (name, job attribute, video attribute, while running, when done,
+# when failed, the video page row it links to). Channel-wide jobs have no video and link to their own page.
+ACTIVITY: tuple[tuple[str, str, str, str, str, str, str], ...] = (
+    ("pull", "pull_job", "", "Pulling your videos", "Videos pulled", "Pulling stopped", "/"),
+    ("push", "push_job", "", "Pushing to YouTube", "Pushed to YouTube", "Push stopped", "/changes"),
+    ("suggest", "suggest_job", "", "Writing suggestions", "Suggestions ready", "Suggestions stopped", "#tool-suggest"),
+    ("translate", "translate_job", "_translate_video", "Translating", "Translations ready", "Translation stopped", "#tool-translations"),
+    ("subtitles", "subtitles_job", "_subtitles_video", "Translating subtitles", "Subtitles ready", "Subtitles stopped", "#tool-subtitles"),
+    ("transcribe", "transcribe_job", "_transcribe_video", "Transcribing", "Transcript ready", "Transcribing stopped", "#tool-transcript"),
+    ("chapters", "chapters_job", "_chapters_video", "Making chapters", "Chapters ready", "Chapters stopped", "#tool-transcript"),
+    ("packaging", "packaging_job", "_packaging_video", "Checking the thumbnail", "Thumbnail check ready", "Thumbnail check stopped", "#tool-packaging"),
+    ("variants", "variants_job", "_variants_video", "Making thumbnail options", "Thumbnail options ready", "Thumbnail options stopped", "#tool-packaging"),
+    ("adcheck", "adcheck_job", "_adcheck_video", "Checking for advertisers", "Advertiser check ready", "Advertiser check stopped", "#tool-adcheck"),
+    ("category", "category_job", "_category_video", "Checking the category", "Category check ready", "Category check stopped", "#detail-category"),
+    ("pinned", "pinned_job", "_pinned_video", "Writing a pinned comment", "Pinned comment ready", "Pinned comment stopped", "#detail-pinned"),
+    ("shorts", "shorts_job", "_shorts_video", "Finding Shorts", "Shorts ideas ready", "Shorts finder stopped", "#tool-shorts"),
+    ("comments", "comments_job", "_comments_video", "Reading comments", "Comments read", "Reading comments stopped", "#tool-comments"),
+    ("assist", "assist_job", "_assist_video", "Sorting comments", "Comments sorted", "Sorting stopped", "#tool-comments"),
+)
+
+
 class WebState:
     """Everything the routes share: config, injected collaborators, jobs and the last check."""
 
@@ -1159,6 +1180,28 @@ class WebState:
                     else "info" if only.status == "no_change" else "error")
             self.add_flash(sid, kind, only.message or only.label)
         return SuggestBatch(tuple(items), stopped)
+
+    def activity(self) -> list[dict[str, Any]]:
+        """The jobs that ran since Yezatas started, for the top bar: what each does, its state and where it is."""
+        now = time.monotonic()
+        out: list[dict[str, Any]] = []
+        for name, job_attr, video_attr, running, done, failed, anchor in ACTIVITY:
+            snap: JobSnapshot = getattr(self, job_attr).snapshot()
+            if snap.status == "idle":
+                continue
+            with self._lock:
+                video_id = getattr(self, video_attr) if video_attr else ""
+                if name == "suggest" and len(self._suggest_ids) == 1 and not self._suggest_batch:
+                    video_id = self._suggest_ids[0]
+            if anchor.startswith("#"):
+                href = f"/videos/{quote(video_id)}{anchor}" if video_id else "/changes"
+            else:
+                href = anchor
+            label = running if snap.running else done if snap.status == "done" else failed
+            out.append({"job": name, "status": snap.status, "label": label, "message": snap.message,
+                        "video_id": video_id, "href": href,
+                        "seconds": int(now - snap.started_at) if snap.started_at else 0})
+        return out
 
     def suggest_state(self) -> tuple[JobSnapshot, tuple[str, ...], bool]:
         """(job snapshot, video ids, is it a batch). A finished job the creator dismissed is idle."""
@@ -2716,6 +2759,9 @@ def create_app(
                 pinned_record, next((c for c in entry.card.checks if c.check_id == "pinned_comment"), None),
                 _local_time, all_comments),
             "change": card,
+            # the draft changes the title or description but keeps translations made from the old text
+            "tr_draft_stale": next((i.message for i in (card.warnings if card else ())
+                                    if i.code == "translations_out_of_date"), ""),
             "form": {"title": text[0], "description": text[1], "tags": ", ".join(text[2])},
             "tag_count": len(text[2]), "tag_chars": tags_char_count(text[2]), "tags_limit": TAGS_CHAR_LIMIT,
             # Enough rows for every tag (about 70 characters a row); CSS grows the box as you type.
@@ -3284,6 +3330,22 @@ def create_app(
             "thumb": _job_json(state.thumb_job.snapshot()),
             "check": None if check is None else {"ok": check.ok, "kind": check.kind},
         })
+
+    @app.get("/api/activity")
+    def api_activity() -> JSONResponse:
+        """What the top bar shows on every page: the running and finished jobs, with the video's title."""
+        items = state.activity()
+        ids = {i["video_id"] for i in items if i["video_id"]}
+        titles: dict[str, str] = {}
+        if ids and config.catalog_db.exists():
+            with Store(config.catalog_db) as store:
+                for vid in ids:
+                    v = store.get_video(vid)
+                    if v is not None:
+                        titles[vid] = v.title
+        for i in items:
+            i["title"] = titles.get(i["video_id"], "")
+        return JSONResponse({"jobs": items})
 
     # --- actions (POST only, CSRF checked) ----------------------------------------------------
     @app.post("/setup/client")

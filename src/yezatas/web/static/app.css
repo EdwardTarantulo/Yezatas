@@ -19,6 +19,7 @@
   --radius: 10px;
   --primary-text: #ffffff;
   --shadow: 0 1px 2px rgba(17, 24, 39, 0.05);
+  --shadow-pop: 0 14px 36px rgba(17, 24, 39, 0.16);
   --good: #2ba640;
   --good-bg: #e6f4ea;
   --good-text: #1e7a30;
@@ -75,6 +76,7 @@
   --radius: 10px;
   --primary-text: #0f0f0f;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 14px 36px rgba(0, 0, 0, 0.5);
   --good: #4cc764;
   --good-bg: #15301d;
   --good-text: #81d99a;
@@ -1185,3 +1187,34 @@ a.vhead-thumb:hover img { opacity: .88; }
   ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .2s; }
 }
 html.yz-restoring body { visibility: hidden; }
+
+/* Translations: what is wrong, said at the top of the card with the button that fixes it. */
+.flash.warn { background: var(--warn-bg); color: var(--warn); }
+.tr-flash { display: flex; align-items: center; gap: 12px; border-left: 4px solid currentColor; }
+.tr-flash > span { flex: 1; }
+.tr-flash form, .tr-flash > .button { flex: none; margin: 0; }
+
+/* Jobs in the top bar, on every page, and the card when one finishes. */
+.jobs { position: relative; }
+.jobs-chip { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px 0 12px; border: 0; border-radius: 17px; background: var(--hover); color: var(--muted); font: inherit; font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; cursor: pointer; }
+.jobs-chip .spinner { display: none; }
+.jobs.running .jobs-chip { background: var(--info-bg); color: var(--info-text); }
+.jobs.running .jobs-chip .spinner { display: inline-block; }
+.jobs-chip[aria-expanded="true"] { box-shadow: inset 0 0 0 2px currentColor; }
+.jobs-menu { position: absolute; top: 44px; right: 0; z-index: 50; width: 400px; max-width: calc(100vw - 32px); padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-pop); }
+.jobs-h { margin: 0; padding: 8px 10px 4px; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); }
+.jobs-row { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 8px; color: var(--text); text-decoration: none; }
+.jobs-row:hover, .jobs-row.now { background: var(--hover); }
+.jobs-row-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.jobs-row-text > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobs-open { color: var(--link); font-weight: 600; font-size: var(--fs-sm); }
+.jobs-dot { width: 10px; height: 10px; flex: none; margin: 0 4px; border-radius: 50%; }
+.jobs-dot.ok { background: var(--good-text); }
+.jobs-dot.bad { background: var(--bad); }
+.job-toasts { position: fixed; top: 72px; right: 24px; z-index: 40; display: flex; flex-direction: column; gap: 10px; }
+.job-toast { display: flex; align-items: center; gap: 14px; width: 460px; max-width: calc(100vw - 32px); padding: 14px 12px 14px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--good-text); border-radius: 12px; box-shadow: var(--shadow-pop); opacity: 0; transform: translateY(-8px); transition: opacity .25s ease, transform .25s ease; }
+.job-toast.bad { border-left-color: var(--bad); }
+.job-toast.in { opacity: 1; transform: none; }
+.job-toast .button { flex: none; }
+.job-toast-x { flex: none; border: 0; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; padding: 4px 6px; }
+@media (max-width: 599px) { .jobs-chip-text { display: none; } .jobs-chip { padding: 0 10px; } }

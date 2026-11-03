@@ -18,7 +18,7 @@
     {% include "_subtitles_card.html" %}
   </details>
   <details class="tool" id="tool-translations" data-keep>
-    <summary><span class="tool-icon">{{ icon('translations') }}</span><span class="tool-text"><span class="tool-name">Translations</span><span class="tool-what">Languages: {{ fv('translations') }} &middot; title and description, each one checked</span></span>{% for f in facts if f.key == 'translations' and f.tone == 'warn' %}<span class="pill warn">Fix</span>{% endfor %}{% if tr.running %}<span class="tool-state">Running</span>{% endif %}<span class="row-act">Translate</span></summary>
+    <summary><span class="tool-icon">{{ icon('translations') }}</span><span class="tool-text"><span class="tool-name">Translations</span><span class="tool-what">Languages: {{ fv('translations') }} &middot; title and description, each one checked</span></span>{% set tr_bad = (1 if tr.failed else 0) + tv.failed_names|length %}{% if tr_bad %}<span class="pill problem" id="tr-pill-failed">{{ tv.failed_names|length or 1 }} failed</span>{% endif %}{% if tv.stale_names %}<span class="pill warn" id="tr-pill-stale">{{ tv.stale_names|length }} out of date</span>{% elif tr_draft_stale %}<span class="pill warn" id="tr-pill-stale">Out of date</span>{% endif %}{% if not tr_bad and not tv.stale_names and not tr_draft_stale %}{% for f in facts if f.key == 'translations' and f.tone == 'warn' %}<span class="pill warn">Fix</span>{% endfor %}{% endif %}{% if tr.running %}<span class="tool-state">Running</span>{% endif %}<span class="row-act">Translate</span></summary>
     {% include "_translate_card.html" %}
   </details>
   <details class="tool" id="detail-category" data-keep>

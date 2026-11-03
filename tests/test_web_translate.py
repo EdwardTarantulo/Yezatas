@@ -875,3 +875,42 @@ def test_the_score_does_not_count_translations_made_from_older_text(tmp_path: Pa
     html = ui.client.get(f"/videos/{V1}").text
     assert ("The video has 0 translations. 2 more were made from an older title or description and do "
             "not count.") in html
+
+
+def row_summary(html: str) -> str:
+    start = html.index('id="tool-translations"')
+    return html[start:html.index("</summary>", start)]
+
+
+def test_the_row_says_when_a_language_failed_and_offers_to_try_it_again(tmp_path: Path) -> None:
+    ui, _ = make_tr_ui(tmp_path, Tools(ScriptedTranslator({"es": TranslateError("network", "No connection.")})))
+    run_translate(ui, targets=["es", "de"])
+    html = ui.client.get(f"/videos/{V1}").text
+    assert 'id="tr-pill-failed">1 failed</span>' in row_summary(html)
+    box = html[html.index('id="tr-failed"'):]
+    box = box[:box.index("</div>")]
+    assert "Spanish failed its check." in box
+    assert 'name="targets" value="es"' in box and 'name="targets" value="de"' not in box
+    assert ">Try again</button>" in box
+
+
+def test_the_row_says_when_translations_are_out_of_date_and_offers_them_again(tmp_path: Path) -> None:
+    ui, _ = make_tr_ui(tmp_path)
+    run_translate(ui, targets=["es", "de"])
+    nf(ui, f"/videos/{V1}/draft", data={"title": "A new title", "description": DESCRIPTION, "tags": "cactus"})
+    html = ui.client.get(f"/videos/{V1}").text
+    assert 'id="tr-pill-stale">2 out of date</span>' in row_summary(html)
+    assert ">Fix</span>" not in row_summary(html)
+    box = html[html.index('id="tr-out-of-date"'):]
+    box = box[:box.index("</div>")]
+    assert "2 translations out of date." in box and ">Translate 2 again</button>" in box
+    assert 'name="targets" value="es"' in box and 'name="targets" value="de"' in box
+
+
+def test_activity_lists_a_finished_translation_with_its_video(tmp_path: Path) -> None:
+    ui, _ = make_tr_ui(tmp_path)
+    run_translate(ui, targets=["es"])
+    jobs = ui.client.get("/api/activity").json()["jobs"]
+    tr = next(j for j in jobs if j["job"] == "translate")
+    assert tr["status"] == "done" and tr["label"] == "Translations ready"
+    assert tr["video_id"] == V1 and tr["href"] == f"/videos/{V1}#tool-translations" and tr["title"]

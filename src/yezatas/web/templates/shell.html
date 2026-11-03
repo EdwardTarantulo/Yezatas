@@ -11,6 +11,12 @@
     <button type="submit" class="search-btn" aria-label="Search">{{ icon('search') }}</button>
   </form>
   <div class="top-actions">
+    {# Filled by app.js from /api/activity: the running job and the ones that finished, on every page. #}
+    <div class="jobs" id="jobs" hidden>
+      <button type="button" class="jobs-chip" aria-expanded="false" aria-controls="jobs-menu"><span class="spinner" aria-hidden="true"></span><span class="jobs-chip-text"></span></button>
+      <div class="jobs-menu" id="jobs-menu" hidden></div>
+    </div>
+    <div class="job-toasts" id="job-toasts" aria-live="polite"></div>
     <button type="button" class="top-link" data-theme-toggle aria-pressed="false" aria-label="Dark theme" title="Dark theme" hidden>{{ icon('theme') }}</button>
     <a class="top-link" href="/setup" aria-label="Configuration" title="Configuration">{{ icon('setup') }}</a>
   </div>
