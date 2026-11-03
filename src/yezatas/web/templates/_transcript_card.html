@@ -6,7 +6,7 @@
     <h2 id="h-transcript">Transcript and chapters</h2>
     {% if change %}<a class="button secondary" href="/changes#d-{{ video.video_id|urlencode }}">Review changes</a>{% endif %}
   </div>
-  <p class="muted">Point Yezatas at the video file on this computer. ffmpeg takes the sound out of it, {{ tt.model }} on Meta's Model API turns the speech into text (only the sound is sent, never the picture), and every time in the transcript is a place in the real audio. Chapters are chosen from the transcript and only become part of the draft. Nothing goes to YouTube until you approve and push it.</p>
+  <p class="muted">A transcript can come from three places. <strong>Captions already on YouTube</strong> are read with your sign-in; no AI is involved. For <strong>a video file</strong> you pick here, Yezatas keeps a temporary copy on this computer while it works and deletes it afterwards. For speech, ffmpeg takes the sound out and {{ tt.asr_model }} on Meta's Model API turns it into text (only the sound is sent, never the picture). For music and sounds, a small model on this computer names what it hears and nothing leaves the computer. Every time in the transcript is a place in the real captions or audio. Chapters are chosen from the transcript and only become part of the draft. Nothing goes to YouTube until you approve and push it.</p>
 
   {% if tj.running %}
   <p class="waiting"><span class="spinner" aria-hidden="true"></span>
@@ -22,42 +22,80 @@
   <form class="inline" method="post" action="/transcribe/done"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="video_id" value="{{ video.video_id }}"><button type="submit" class="button secondary">Dismiss</button></form>
   {% endif %}
   {% if tj.busy %}<p class="hint" id="transcribe-busy">Another video is being transcribed. Wait for it to finish.</p>{% endif %}
-  {% if not ts.ffmpeg %}
-  <p class="hint" id="transcribe-no-ffmpeg"><strong>ffmpeg was not found on this computer.</strong> Yezatas needs it to read the sound of a video file. Install ffmpeg (it is free), make sure the command <code>ffmpeg</code> works in a terminal, then restart Yezatas.</p>
-  {% else %}
-  {% if not ts.has_key %}<p class="hint" id="transcribe-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Setup</a>.</p>{% endif %}
-  <form class="transcribe-form" method="post" action="/videos/{{ video.video_id|urlencode }}/transcribe">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <div class="field">
-      <label for="ts-path">Path of the video file on this computer</label>
-      <input id="ts-path" type="text" name="path" required maxlength="1000" autocomplete="off" spellcheck="false">
-      <p class="hint">Yezatas reads the file from this computer. Copy it from your file manager (on Windows: select the file, then Copy as path). Only the file name is kept and shown. Allowed: mp4, mov, mkv, webm, avi, m4v, mp3, wav, m4a, flac, aac.</p>
-    </div>
-    <div class="field">
-      <label for="ts-language">Language spoken in the video</label>
-      <select id="ts-language" name="language"{% if not tt.language_known %} required{% endif %}>
-        {% if not tt.language_known %}<option value="" selected>Choose the spoken language</option>{% endif %}
-        {% for o in tt.languages %}<option value="{{ o.code }}"{% if o.selected %} selected{% endif %}>{{ o.name }}</option>{% endfor %}
-      </select>
-      {% if tt.language_set and not tt.language_known %}<p class="hint" id="ts-language-hint">The language of this video ({{ tt.video_language_label }}) is not one transcription supports. Lithuanian and some other languages are not available. If the video is spoken in one of these, choose it.</p>
-      {% elif not tt.language_set %}<p class="hint" id="ts-language-hint">This video has no language set, and Yezatas does not guess it. Choose the spoken language.</p>{% endif %}
-    </div>
-    <div class="field">
-      <label for="ts-keywords">Names to recognise (optional)</label>
-      <input id="ts-keywords" type="text" name="keywords" maxlength="1000" autocomplete="off" spellcheck="false">
-      <p class="hint">Separate them with commas: product names, people or places that are easy to mishear. At most 20, each up to 40 characters.</p>
-    </div>
-    <p class="hint" id="ts-price">Price: about {{ tt.price }} per hour of audio.</p>
-    <div class="actions"><button type="submit" class="button primary">{{ 'Transcribe again' if tt.record else 'Transcribe' }}</button></div>
-  </form>
-  {% endif %}
+
+  {# Each source is its own form with its own button, so the page needs no script. #}
+  <h3 class="run-h">Where the words come from</h3>
+
+  <div class="source-option" id="source-captions">
+    <h4>Captions already on YouTube</h4>
+    <p class="hint">Read the captions on YouTube (250 quota units). Yezatas picks the track you uploaded in this video's language, or YouTube's automatic one if there is none. They are read with your sign-in, so there is nothing to pay and no AI is used.</p>
+    {% if not ts.has_write or tj.failed_kind == 'captions_scope' %}
+    <p id="captions-no-write">Reading captions needs the YouTube permission that pushing uses. Nothing is changed on YouTube.</p>
+    <form method="post" action="/changes/allow-edits">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="actions"><button type="submit" class="button primary">Allow Yezatas to edit your videos</button></div>
+    </form>
+    {% else %}
+    <form method="post" action="/videos/{{ video.video_id|urlencode }}/transcribe/captions">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="actions"><button type="submit" class="button primary" id="use-captions"{% if tj.busy %} disabled{% endif %}>Use these captions</button></div>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="source-option" id="source-file">
+    <h4>A video file on this computer</h4>
+    {% if not ts.ffmpeg %}
+    <p class="hint" id="transcribe-no-ffmpeg"><strong>ffmpeg was not found on this computer.</strong> Yezatas needs it to read the sound of a video file. Install ffmpeg (it is free), make sure the command <code>ffmpeg</code> works in a terminal, then restart Yezatas.</p>
+    {% else %}
+    <form class="transcribe-form" method="post" enctype="multipart/form-data" action="/videos/{{ video.video_id|urlencode }}/transcribe">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="field">
+        <label for="ts-file">Video or audio file</label>
+        <input id="ts-file" type="file" name="file" accept="video/*,audio/*" required>
+        <p class="hint">Your browser hands the file to Yezatas on this computer; it does not go anywhere else. Yezatas keeps a temporary copy while the job runs and deletes it when the job ends, and only the file name is kept. Up to 8 GB. Allowed: mp4, mov, mkv, webm, avi, m4v, mp3, wav, m4a, flac, aac.</p>
+      </div>
+      <fieldset class="field sound-kind">
+        <legend>What is in the sound</legend>
+        <label class="check-label" for="ts-kind-speech"><input id="ts-kind-speech" type="radio" name="kind" value="speech" checked> Speech</label>
+        <label class="check-label" for="ts-kind-sounds"><input id="ts-kind-sounds" type="radio" name="kind" value="sounds"> Music and sounds, no speech</label>
+        {% if ts.local_no_key %}
+        <p class="fix speech-only" id="transcribe-local-no-key">Transcribing speech from a file needs Meta's API. Primary AI is Local and no Meta key is saved. <a href="/setup#step-ai">Add a key in Configuration</a>, or use the YouTube captions.</p>
+        {% elif not ts.has_key %}
+        <p class="hint speech-only" id="transcribe-no-key">There is no Meta API key yet. <a href="/setup#step-ai">Add one in Configuration</a>.</p>
+        {% endif %}
+        {% if not ts.sounds_ready %}
+        <p class="fix" id="sounds-not-installed">The sound tagger is not installed. See <a href="/setup#step-transcripts">Configuration &gt; Transcripts and sounds</a>.</p>
+        {% else %}
+        <p class="hint sounds-only">Names the music and sounds second by second, like [Music] or [Applause]. It runs on this computer: free, and nothing is sent. The first run downloads the sound model (about 300 MB).</p>
+        {% endif %}
+      </fieldset>
+      <div class="field speech-only">
+        <label for="ts-language">Language spoken in the video</label>
+        <select id="ts-language" name="language">
+          {% if not tt.language_known %}<option value="" selected>Choose the spoken language</option>{% endif %}
+          {% for o in tt.languages %}<option value="{{ o.code }}"{% if o.selected %} selected{% endif %}>{{ o.name }}</option>{% endfor %}
+        </select>
+        {% if tt.language_set and not tt.language_known %}<p class="hint" id="ts-language-hint">The language of this video ({{ tt.video_language_label }}) is not one transcription supports. Lithuanian and some other languages are not available. If the video is spoken in one of these, choose it.</p>
+        {% elif not tt.language_set %}<p class="hint" id="ts-language-hint">This video has no language set, and Yezatas does not guess it. Choose the spoken language.</p>{% endif %}
+      </div>
+      <div class="field speech-only">
+        <label for="ts-keywords">Names to recognise (optional)</label>
+        <input id="ts-keywords" type="text" name="keywords" maxlength="1000" autocomplete="off" spellcheck="false">
+        <p class="hint">Separate them with commas: product names, people or places that are easy to mishear. At most 20, each up to 40 characters.</p>
+      </div>
+      {% if not ts.local_no_key %}<p class="hint speech-only" id="ts-price">Price: about {{ tt.price }} per hour of audio.</p>{% endif %}
+      <div class="actions"><button type="submit" class="button primary"{% if tj.busy %} disabled{% endif %}>{{ 'Transcribe again' if tt.record else 'Transcribe' }}</button></div>
+    </form>
+    {% endif %}
+  </div>
   {% endif %}
 
   {% if tt.record %}
   {% set r = tt.record %}
   <div class="tx" id="transcript-info">
     <h3 class="run-h">Latest transcript</h3>
-    <p class="muted">From <strong>{{ r.source_name }}</strong> &middot; {{ tt.spoken }} &middot; {{ tt.model }} &middot; {{ tt.length }} of audio &middot; {{ tt.when }} &middot; cost about {{ tt.cost }}</p>
+    <p class="muted">From <strong>{{ r.source_name }}</strong> &middot; {{ tt.spoken }} &middot; {{ tt.model }} &middot; {{ tt.length }} of audio &middot; {{ tt.when }} &middot; {% if tt.free %}no cost{% else %}cost about {{ tt.cost }}{% endif %}</p>
     {% if r.problems %}
     <ul class="issues" id="transcript-problems">
       {% for p in r.problems %}<li class="issue warning">{{ p }}</li>{% endfor %}

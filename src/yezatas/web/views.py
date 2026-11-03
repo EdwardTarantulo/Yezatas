@@ -37,6 +37,8 @@ from .. import bulkask as bulkask_mod
 from .. import customchecks as customchecks_mod
 from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
+from ..captions import MODEL_NAME as CAPTIONS_MODEL, language_name as caption_language_name
+from ..soundtags import MODEL_NAME as SOUNDS_MODEL
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
 from ..strategy import StrategyReport
@@ -1136,8 +1138,10 @@ class TranscriptView:
     language_set: bool  # the video has a language at all
     languages: tuple[SourceOption, ...]
     price: str  # "$0.18"
-    model: str
+    asr_model: str  # the speech model, whatever made the latest transcript
+    model: str  # what made the latest transcript (the speech model when there is none)
     record: TranscriptRecord | None
+    free: bool  # the latest transcript came from YouTube's captions or the sound tagger: no cost
     spoken: str  # the language the transcript was made in, by name
     when: str
     length: str
@@ -1155,6 +1159,8 @@ def chapters_blocker(video: Video, row: DraftRow | None, record: TranscriptRecor
     """Why chapters cannot be made now, in a sentence, or "" when they can."""
     if record is None:
         return "Transcribe the video first."
+    if record.model == SOUNDS_MODEL:
+        return "This transcript has sound labels, not speech, so there is nothing to make chapters from."
     seconds = parse_duration(video.duration)
     if seconds is None:
         seconds = record.duration_ms // 1000
@@ -1175,6 +1181,15 @@ def chapters_blocker(video: Video, row: DraftRow | None, record: TranscriptRecor
     return ""
 
 
+def _spoken(record: TranscriptRecord | None) -> str:
+    """The language of a transcript by name; a sound-only transcript has none."""
+    if record is None:
+        return ""
+    if not record.language:
+        return "Sounds, no speech"
+    return ASR_LANGUAGES.get(record.language) or caption_language_name(record.language)
+
+
 def build_transcript_view(video: Video, row: DraftRow | None, record: TranscriptRecord | None,
                           when: str = "") -> TranscriptView:
     """The language choice, the latest transcript as `m:ss text` lines and the chapters check."""
@@ -1190,9 +1205,10 @@ def build_transcript_view(video: Video, row: DraftRow | None, record: Transcript
     return TranscriptView(
         video_language_label=lang_name(video.default_audio_language or video.default_language),
         language_known=bool(selected), language_set=bool(code), languages=languages,
-        price=f"${ASR_PRICE_PER_HOUR:.2f}", model=record.model if record is not None else ASR_MODEL,
-        record=record,
-        spoken=ASR_LANGUAGES.get(record.language, record.language) if record is not None else "",
+        price=f"${ASR_PRICE_PER_HOUR:.2f}", asr_model=ASR_MODEL,
+        model=record.model if record is not None else ASR_MODEL,
+        record=record, free=record is not None and record.model in (CAPTIONS_MODEL, SOUNDS_MODEL),
+        spoken=_spoken(record),
         when=when, length=clock(record.duration_ms) if record is not None else "",
         cost=(format_cost(record.duration_ms / 3_600_000 * ASR_PRICE_PER_HOUR)
               if record is not None else ""),

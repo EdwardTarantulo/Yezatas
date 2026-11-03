@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import secrets
+import shutil
 import threading
 import time
 import webbrowser
@@ -48,6 +49,8 @@ from .. import outliers as outliers_mod
 from .. import packaging as packaging_mod
 from .. import thumbswap as thumbswap_mod
 from .. import transcribe as transcribe_mod
+from .. import captions as captions_mod
+from .. import soundtags as soundtags_mod
 from .. import primaryai, translate
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import PRIMARY_AI_CHOICES, Config, ensure_dirs
@@ -67,9 +70,10 @@ from .pinned_view import build_pinned_view
 from .nav_counts import build_nav_counts
 from ..store import AdCheck, CategoryCheck, OutlierReport, PinnedComment, ShortsFind, Store, ThumbnailVariant
 from ..subtitles import to_srt
-from ..youtube import (CommentReader, GoogleCommentReader, GoogleYouTubeReader,
-                       GoogleYouTubeWriter, YouTubeReader, YouTubeWriter,
+from ..youtube import (CaptionReader, CommentReader, GoogleCaptionReader, GoogleCommentReader,
+                       GoogleYouTubeReader, GoogleYouTubeWriter, YouTubeReader, YouTubeWriter,
                        api_error_info)
+from . import upload as upload_mod
 from .clientfile import (MAX_CLIENT_FILE_BYTES, ClientFileError, ClientInfo,
                          parse_client_file, read_saved_client, save_client_file)
 from .guidance import NeedsSignIn, map_api_error, map_sign_in_error
@@ -209,6 +213,10 @@ CHANNEL_COMMENTS_PATH = "/comments"
 NO_PACKAGING_KEY = "There is no Meta API key. Add one in Configuration. Nothing was sent."
 MAX_ID_DIGITS = 12  # a variant id in a URL; longer is never a real one
 MAX_PATH_CHARS = 1000
+UPLOADS_DIR = "tmp/uploads"  # under the Yezatas home: the video files the browser handed over
+LOCAL_NO_KEY_MESSAGE = (
+    "Transcribing speech from a file needs Meta's API. Primary AI is Local and no Meta key is "
+    "saved. Add a key in Configuration, or use the YouTube captions.")
 MAX_KEYWORDS = 20
 MAX_KEYWORD_CHARS = 40
 FIX_NEXT_COUNTS = (1, 3, 5, 10)
@@ -223,6 +231,9 @@ SuggestFn = Callable[[Store, str, Report], "agent.SuggestResult"]
 TranslateTools = Callable[[Config], "tuple[translate.Translator | None, translate.Verifier]"]
 # (store, video id, media path, language, report); `keywords=` is added only when the creator typed some.
 TranscribeFn = Callable[..., "transcribe_mod.TranscribeResult"]
+# (video id, media path, report) -> sound captions (an unstored record); free, runs on this computer
+SoundTagsFn = Callable[[str, str, Report], "soundtags_mod.SoundTagResult"]
+CaptionReaderFactory = Callable[[Any], CaptionReader]
 ChaptersFn = Callable[[Store, str, Report], "chapters_mod.ChaptersResult"]
 # (store, question, chat id, the time of the views, report) -> the id of the new copilot turn
 CopilotFn = Callable[[Store, str, int, datetime, Report], int]
@@ -377,6 +388,8 @@ def map_variants_error(exc: BaseException) -> tuple[str, str]:
 
 
 def map_transcribe_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, captions_mod.CaptionsError):  # its sentences are plain English already
+        return f"captions_{exc.kind}", str(exc)
     if isinstance(exc, transcribe_mod.TranscribeError):
         return exc.kind, str(exc)
     if type(exc) is ValueError:  # transcribe_video's own plain sentences
@@ -668,10 +681,19 @@ def make_default_transcribe(config: Config) -> TranscribeFn:
         key = agent.load_api_key(config)
         if not key:
             raise transcribe_mod.TranscribeError(
-                "auth", "No Meta API key is set. Add one in Setup. Nothing was sent.")
+                "auth", "No Meta API key is set. Add one in Configuration. Nothing was sent.")
         client = transcribe_mod.MetaAsrClient(key)
         return transcribe_mod.transcribe_video(store, client, video_id, media_path, language,
                                                keywords=keywords, report=report)
+
+    return run
+
+
+def make_default_soundtags(config: Config) -> SoundTagsFn:
+    """The real sound tagger: PANNs on this computer. Nothing is sent anywhere."""
+
+    def run(video_id: str, media_path: str, report: Report) -> "soundtags_mod.SoundTagResult":
+        return soundtags_mod.tag_video(video_id, media_path, report=report)
 
     return run
 
@@ -686,6 +708,28 @@ def make_default_chapters(config: Config) -> ChaptersFn:
         return chapters_mod.suggest_chapters(store, client, video_id, report=report)
 
     return run
+
+
+def remove_folder(folder: Path | None) -> None:
+    """Delete a folder of uploaded files (a no-op for None); never raises."""
+    if folder is not None:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+class _ChargedCaptionReader:
+    """A caption reader that writes each call into the quota log before it makes the call."""
+
+    def __init__(self, reader: CaptionReader, guard: QuotaGuard) -> None:
+        self._reader = reader
+        self._guard = guard
+
+    def caption_tracks(self, video_id: str) -> dict[str, Any]:
+        self._guard.charge("captions.list", note="read captions")
+        return self._reader.caption_tracks(video_id)
+
+    def caption_srt(self, caption_id: str) -> bytes | str:
+        self._guard.charge("captions.download", note="read captions")
+        return self._reader.caption_srt(caption_id)
 
 
 def hide_path(exc: BaseException, media: Path) -> BaseException:
@@ -787,6 +831,8 @@ class WebState:
         channel_reader: ChannelReaderFactory | None = None,
         category_fn: CategoryFn | None = None,
         pinned_fn: PinnedFn | None = None,
+        caption_reader: CaptionReaderFactory | None = None,
+        soundtags_fn: SoundTagsFn | None = None,
     ) -> None:
         self.config = config
         self._sign_in = sign_in
@@ -798,6 +844,8 @@ class WebState:
         self._suggest = suggest
         self._translate_tools = translate_tools
         self._transcribe = transcribe_fn or make_default_transcribe(config)
+        self._caption_reader_factory = caption_reader  # None: the real reader
+        self._soundtags = soundtags_fn or make_default_soundtags(config)
         self._chapters = chapters_fn or make_default_chapters(config)
         self._copilot = copilot_fn or make_default_copilot(config)
         self._adcheck = adcheck_fn or make_default_adcheck(config)
@@ -1236,14 +1284,49 @@ class WebState:
 
     # --- transcripts and chapters -------------------------------------------------------------
     def start_transcribe(self, video_id: str, media: Path, language: str,
-                         keywords: Sequence[str]) -> bool:
-        """Transcribe the video file at `media` (kept in memory only), in the one transcribe job."""
+                         keywords: Sequence[str], cleanup: Path | None = None) -> bool:
+        """Transcribe the video file at `media` (kept in memory only), in the one transcribe job.
+        `cleanup` is a folder to delete when the job ends, whatever way it ends."""
         words = tuple(keywords)
 
         def work(report: Report) -> "transcribe_mod.TranscribeResult":
-            return self._run_transcribe(video_id, media, language, words, report)
+            try:
+                return self._run_transcribe(video_id, media, language, words, report)
+            finally:
+                remove_folder(cleanup)
 
+        return self._start_source_job(video_id, work, cleanup)
+
+    def start_sound_tags(self, video_id: str, media: Path, cleanup: Path | None = None) -> bool:
+        """Tag the music and sounds of the file at `media` (on this computer, free), in the one
+        transcribe job. The transcript is stored like a speech one."""
+        def work(report: Report) -> "soundtags_mod.SoundTagResult":
+            try:
+                result = self._soundtags(video_id, str(media), report)
+                with Store(self.config.catalog_db) as store:
+                    store.add_transcript(result.record)
+                return result
+            except Exception as exc:  # noqa: BLE001 - pages show the file name, never its folder
+                hidden = hide_path(exc, media)
+                if hidden is exc:
+                    raise
+                raise hidden from None
+            finally:
+                remove_folder(cleanup)
+
+        return self._start_source_job(video_id, work, cleanup)
+
+    def start_captions(self, video_id: str, video_language: str, creds: Any) -> bool:
+        """Read the captions that are already on YouTube, in the one transcribe job."""
+        def work(report: Report) -> "captions_mod.CaptionsResult":
+            return self._run_captions(video_id, video_language, creds, report)
+
+        return self._start_source_job(video_id, work, None)
+
+    def _start_source_job(self, video_id: str, work: Callable[[Report], Any],
+                          cleanup: Path | None) -> bool:
         if not self.transcribe_job.start(work):
+            remove_folder(cleanup)  # the job never ran, so it will not clean up
             return False
         with self._lock:
             self._transcribe_video = video_id
@@ -1263,6 +1346,24 @@ class WebState:
                 if hidden is exc:
                     raise
                 raise hidden from None
+
+    def _run_captions(self, video_id: str, video_language: str, creds: Any,
+                      report: Report) -> "captions_mod.CaptionsResult":
+        report("Reading the captions on YouTube")
+        factory = self._caption_reader_factory
+        reader = GoogleCaptionReader(creds) if factory is None else factory(creds)
+        needed = captions_mod.LIST_QUOTA + captions_mod.DOWNLOAD_QUOTA
+        with Store(self.config.catalog_db) as store:
+            guard = QuotaGuard(store, self.config.daily_quota_budget)
+            if guard.remaining() < needed:
+                raise captions_mod.CaptionsError(
+                    "quota", f"Reading captions needs {needed} units of the daily YouTube quota "
+                             f"budget, and {max(0, guard.remaining())} are left today. Try again "
+                             "tomorrow.")
+            result = captions_mod.fetch_captions(
+                _ChargedCaptionReader(reader, guard), video_id, video_language)
+            store.add_transcript(result.record)
+        return result
 
     def transcribe_state(self) -> tuple[JobSnapshot, str]:
         """(job snapshot, the video id it works on). A finished job the creator dismissed is idle."""
@@ -1975,6 +2076,8 @@ def create_app(
     channel_reader: ChannelReaderFactory | None = None,
     category: CategoryFn | None = None,
     pinned: PinnedFn | None = None,
+    caption_reader: CaptionReaderFactory | None = None,
+    soundtags: SoundTagsFn | None = None,
 ) -> FastAPI:
     """Build the app. `app.state.start_url` is the one-time link that signs the browser in."""
     ensure_dirs(config)
@@ -1993,7 +2096,8 @@ def create_app(
                      competitor_reader=competitor_reader, competitor_explain=competitor_explain,
                      analytics_sign_in=analytics_sign_in, analytics_credentials_loader=analytics_credentials_loader,
                      analytics_reader=analytics_reader, gap_rank=gap_rank, channel_reader=channel_reader,
-                     category_fn=category, pinned_fn=pinned)
+                     category_fn=category, pinned_fn=pinned, caption_reader=caption_reader,
+                     soundtags_fn=soundtags)
     sessions = Sessions(token, port, load_session_key(config.credentials_dir / "session.key"))
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     # A missing value is a bug: fail loudly instead of rendering "" (an empty link, say).
@@ -2222,16 +2326,27 @@ def create_app(
             "done": None,
         }
 
+    def transcript_done_sentence(result: Any) -> str:
+        """What a finished transcript job says: its result and what it cost, in a sentence."""
+        if isinstance(result, transcribe_mod.TranscribeResult):
+            return f"{result.message} The cost was about {format_cost(result.cost)}."
+        if isinstance(result, captions_mod.CaptionsResult):
+            return (f"{result.message} They were read with your sign-in: no cost, and it used "
+                    f"{result.quota_units} units of your daily YouTube quota.")
+        if isinstance(result, soundtags_mod.SoundTagResult):
+            return f"{result.message} This ran on this computer: no cost, and nothing was sent."
+        return ""
+
     def transcript_panel(video_id: str) -> dict[str, Any]:
         """What the transcribe and chapters jobs are doing, for one video page."""
         snap, job_video = state.transcribe_state()
         transcribing = job_panel(snap, job_video, video_id)
-        if snap.status == "done" and job_video == video_id and isinstance(
-                snap.result, transcribe_mod.TranscribeResult):
-            transcribing["done"] = {
-                "tone": "ok", "chapters": [], "drafted": False,
-                "text": f"{snap.result.message} The cost was about {format_cost(snap.result.cost)}.",
-            }
+        transcribing["failed_kind"] = snap.error_kind if transcribing["failed"] else ""
+        if snap.status == "done" and job_video == video_id:
+            sentence = transcript_done_sentence(snap.result)
+            if sentence:
+                transcribing["done"] = {"tone": "ok", "chapters": [], "drafted": False,
+                                        "text": sentence}
         snap, job_video = state.chapters_state()
         making = job_panel(snap, job_video, video_id)
         if snap.status == "done" and job_video == video_id and isinstance(
@@ -2242,8 +2357,12 @@ def create_app(
                 "text": result.message, "drafted": result.status == "drafted",
                 "chapters": chapters_mod.chapter_lines(result.chapters),
             }
+        has_key = bool(agent.key_source(config))
+        local = primaryai.is_local(config)
         return {"ffmpeg": transcribe_mod.find_ffmpeg() is not None,
-                "has_key": bool(agent.key_source(config)),
+                "has_key": has_key, "local_no_key": local and not has_key,
+                "has_write": state.write_credentials() is not None,
+                "sounds_ready": soundtags_mod.available(),
                 "transcribe": transcribing, "chapters": making}
 
     def subtitles_panel(video_id: str, tr: dict[str, Any]) -> dict[str, Any]:
@@ -4283,37 +4402,95 @@ def create_app(
         return see_other(f"/videos/{quote(video_id)}#translations")
 
     # --- transcripts, chapters and subtitles --------------------------------------------------
+    def video_language_of(video_id: str) -> tuple[bool, str]:
+        """(the video exists, its audio or default language code or "")."""
+        with Store(config.catalog_db) as store:
+            video = store.get_video(video_id)
+        if video is None:
+            return False, ""
+        return True, video.default_audio_language or video.default_language or ""
+
+    @app.post("/videos/{video_id}/transcribe/captions")
+    async def read_video_captions(request: Request, video_id: str) -> Response:
+        """Use the captions already on YouTube: one background job, 250 quota units."""
+        await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#transcript")
+        found, language = await run_in_threadpool(video_language_of, video_id)
+        if not found:
+            return video_not_found(request)
+        creds = await run_in_threadpool(state.write_credentials)
+        if creds is None:
+            flash(request, "error", "Reading captions needs the YouTube permission that pushing "
+                  "uses. Nothing is changed on YouTube.")
+        elif not state.start_captions(video_id, language, creds):
+            flash(request, "error", "A transcription is already running. Wait for it to finish.")
+        return back
+
     @app.post("/videos/{video_id}/transcribe")
     async def transcribe_video_file(request: Request, video_id: str) -> Response:
-        form = await read_form(request)
+        """A video or audio file the browser uploads: speech goes to Muse Voice Transcribe, music
+        and sounds are tagged on this computer. The file is a temporary copy, deleted when the
+        job ends."""
         back = see_other(f"/videos/{quote(video_id)}#transcript")
-
-        def exists() -> bool:
-            with Store(config.catalog_db) as store:
-                return store.get_video(video_id) is not None
-
-        if not await run_in_threadpool(exists):
+        found, _ = await run_in_threadpool(video_language_of, video_id)
+        if not found:
             return video_not_found(request)
-        raw_path = str(form.get("path") or "")
-        language = str(form.get("language") or "")
-        words, problem = parse_keywords(str(form.get("keywords") or ""))
-        media: Path | None = None
-        if len(raw_path) > MAX_PATH_CHARS:
-            problem = "That path is too long to be a file path. Nothing was sent."
-        elif not problem:
-            try:
-                media = await run_in_threadpool(transcribe_mod.check_media_path, raw_path)
-            except transcribe_mod.TranscribeError as exc:
-                problem = f"{exc} Nothing was sent."
-        if problem:
-            flash(request, "error", problem)
-        elif language not in transcribe_mod.ASR_LANGUAGES:
-            flash(request, "error", "Choose the language that is spoken in the video. Lithuanian "
-                  "and some other languages are not supported. Nothing was sent.")
-        elif await run_in_threadpool(transcribe_mod.find_ffmpeg) is None:
-            flash(request, "error", transcribe_mod.NO_FFMPEG_MESSAGE)
-        elif media is not None and not state.start_transcribe(video_id, media, language, words):
-            flash(request, "error", "A transcription is already running. Wait for it to finish.")
+        if not request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
+            await read_form(request)  # the CSRF check; there is no file to take
+            flash(request, "error", "Choose a video or audio file on this computer. "
+                  "Nothing was sent.")
+            return back
+
+        def accept(fields: Any) -> None:
+            """Runs when the file starts: nothing is written until the post is allowed."""
+            verify_csrf(request, str(fields.get(CSRF_FIELD) or ""))
+            kind = str(fields.get("kind") or "speech")
+            if kind not in ("speech", "sounds"):
+                raise upload_mod.UploadError("Choose whether the sound is speech or music and "
+                                             "sounds. Nothing was sent.")
+            if kind == "sounds" and not soundtags_mod.available():
+                raise upload_mod.UploadError(soundtags_mod.MISSING_MESSAGE)
+            if kind == "speech" and primaryai.is_local(config) and not agent.key_source(config):
+                raise upload_mod.UploadError(LOCAL_NO_KEY_MESSAGE)
+            if transcribe_mod.find_ffmpeg() is None:
+                raise upload_mod.UploadError(transcribe_mod.NO_FFMPEG_MESSAGE)
+            if state.transcribe_job.snapshot().running:
+                raise upload_mod.UploadError("A transcription is already running. Wait for it "
+                                             "to finish.")
+
+        try:
+            received = await upload_mod.receive_media(
+                request, config.home / UPLOADS_DIR, suffixes=transcribe_mod.VIDEO_SUFFIXES,
+                accept=accept)
+        except upload_mod.UploadError as exc:
+            flash(request, "error", str(exc))
+            return back
+        started = False
+        try:
+            fields = received.fields
+            sounds = str(fields.get("kind") or "speech") == "sounds"
+            words, problem = ([], "") if sounds else parse_keywords(str(fields.get("keywords") or ""))
+            language = str(fields.get("language") or "")
+            if problem:
+                flash(request, "error", problem)
+            elif not sounds and language not in transcribe_mod.ASR_LANGUAGES:
+                flash(request, "error", "Choose the language that is spoken in the video. "
+                      "Lithuanian and some other languages are not supported. Nothing was sent.")
+            else:
+                media = await run_in_threadpool(transcribe_mod.check_media_path, str(received.path))
+                if sounds:
+                    started = state.start_sound_tags(video_id, media, received.folder)
+                else:
+                    started = state.start_transcribe(video_id, media, language, words,
+                                                     received.folder)
+                if not started:
+                    flash(request, "error", "A transcription is already running. Wait for it "
+                          "to finish.")
+        except transcribe_mod.TranscribeError as exc:
+            flash(request, "error", f"{exc} Nothing was sent.")
+        finally:
+            if not started:
+                received.discard()
         return back
 
     @app.post("/transcribe/done")

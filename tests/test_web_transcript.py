@@ -1,6 +1,7 @@
 """Transcripts and chapters in the web UI: the video page card, the transcribe and chapters jobs,
 the SRT download and the Setup line. Transcribing and the model are fakes; nothing touches the
-network or ffmpeg."""
+network or ffmpeg. The video file is uploaded by the browser; the other sources (YouTube captions,
+sound tags) are in test_web_transcript_sources.py."""
 
 from __future__ import annotations
 
@@ -43,7 +44,8 @@ class FakeTranscribe:
     def __call__(self, store: Store, video_id: str, path: str, language: str, report: Any,
                  keywords: tuple[str, ...] = ()) -> TranscribeResult:
         self.calls.append({"video_id": video_id, "path": path, "language": language,
-                           "keywords": tuple(keywords)})
+                           "keywords": tuple(keywords), "existed": Path(path).is_file(),
+                           "content": Path(path).read_bytes() if Path(path).is_file() else b""})
         report("Reading the audio")
         if self.gate is not None:
             assert self.gate.wait(10), "the test never opened the gate"
@@ -116,12 +118,22 @@ def page(ui: Any, video_id: str = V1) -> str:
 
 
 def start(ui: Any, path: Path | str, video_id: str = V1, language: str = "en", wait: bool = True,
-          **extra: str) -> Any:
+          name: str | None = None, content: bytes | None = None, **extra: str) -> Any:
+    """Upload the file at `path` (or `content`, named `name`) the way the browser's form does."""
+    path = Path(path)
+    body = content if content is not None else path.read_bytes()
     resp = nf(ui, f"/videos/{video_id}/transcribe",
-              data={"path": str(path), "language": language, **extra})
+              data={"language": language, **extra},
+              files={"file": (name or path.name, body, "video/mp4")})
     if wait:
         ui.web.transcribe_job.wait()
     return resp
+
+
+def uploads_left(ui: Any) -> list[Path]:
+    """The uploaded copies still on disk (there should be none once a job has ended)."""
+    root = ui.config.home / "tmp" / "uploads"
+    return sorted(root.iterdir()) if root.is_dir() else []
 
 
 def store_of(ui: Any) -> Store:
@@ -135,7 +147,11 @@ def test_the_card_has_the_form_the_price_and_sits_after_translations(tmp_path: P
     section = card(html)
     assert '<h2 id="h-transcript">Transcript and chapters</h2>' in section
     assert f'action="/videos/{V1}/transcribe"' in section
-    assert 'name="path"' in section and 'name="language"' in section and 'name="keywords"' in section
+    assert 'enctype="multipart/form-data"' in section
+    assert '<input id="ts-file" type="file" name="file" accept="video/*,audio/*" required>' in section
+    assert 'name="path"' not in section
+    assert 'name="language"' in section and 'name="keywords"' in section
+    assert 'name="kind" value="speech" checked' in section and 'name="kind" value="sounds"' in section
     assert "Price: about $0.18 per hour of audio." in section
     assert '<option value="en" selected>English</option>' in section
     assert '<select id="ts-language" name="language">' in section
@@ -149,14 +165,16 @@ def test_the_card_is_clear_that_only_sound_is_sent(tmp_path: Path) -> None:
     section = card(page(ui))
     assert "only the sound is sent" in section
     assert "Nothing goes to YouTube until you approve and push it." in section
+    assert "Captions already on YouTube" in section and "nothing leaves the computer" in section
 
 
-def test_without_ffmpeg_the_card_explains_and_has_no_form(tmp_path: Path, monkeypatch) -> None:
+def test_without_ffmpeg_the_card_explains_and_has_no_file_form(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(transcribe, "find_ffmpeg", lambda: None)
     ui, _ = make_ts_ui(tmp_path)
     section = card(page(ui))
     assert 'id="transcribe-no-ffmpeg"' in section and "ffmpeg was not found" in section
-    assert "<form" not in section and 'name="path"' not in section
+    assert 'name="file"' not in section and 'name="language"' not in section
+    assert 'id="source-captions"' in section  # reading YouTube's captions needs no ffmpeg
 
 
 def test_without_ffmpeg_an_existing_transcript_is_still_shown(tmp_path: Path, monkeypatch) -> None:
@@ -165,7 +183,7 @@ def test_without_ffmpeg_an_existing_transcript_is_still_shown(tmp_path: Path, mo
     seed_transcript(ui.config, V1)
     section = card(page(ui))
     assert 'id="transcribe-no-ffmpeg"' in section and 'id="transcript-text"' in section
-    assert 'name="path"' not in section and 'id="download-srt"' in section
+    assert 'name="file"' not in section and 'id="download-srt"' in section
 
 
 def test_a_missing_meta_key_is_a_hint_with_a_link_to_setup(tmp_path: Path) -> None:
@@ -194,7 +212,7 @@ def test_an_unsupported_video_language_is_said_and_never_guessed(tmp_path: Path)
     section = card(page(ui))
     assert 'id="ts-language-hint"' in section and "Lithuanian" in section
     assert "is not one transcription supports" in section
-    assert '<select id="ts-language" name="language" required>' in section
+    assert '<select id="ts-language" name="language">' in section
     assert '<option value="" selected>Choose the spoken language</option>' in section
     assert " selected>English</option>" not in section
 
@@ -291,10 +309,15 @@ def test_a_video_without_a_draft_but_with_a_transcript_offers_chapters(tmp_path:
 def test_transcribing_runs_the_job_and_stores_the_transcript(tmp_path: Path) -> None:
     ui, fake = make_ts_ui(tmp_path)
     path = media(tmp_path)
-    resp = start(ui, f'  "{path}"  ', language="de", keywords="Opuntia, Echeveria ,, opuntia")
+    resp = start(ui, path, language="de", keywords="Opuntia, Echeveria ,, opuntia")
     assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#transcript"
-    assert fake.calls == [{"video_id": V1, "path": str(path), "language": "de",
-                           "keywords": ("Opuntia", "Echeveria")}]
+    assert len(fake.calls) == 1
+    call = fake.calls[0]
+    assert call["video_id"] == V1 and call["language"] == "de"
+    assert call["keywords"] == ("Opuntia", "Echeveria")
+    assert Path(call["path"]).name == "My Clip.mp4" and call["existed"]
+    assert call["content"] == b"not really a video"
+    assert uploads_left(ui) == []
     with store_of(ui) as store:
         record = store.latest_transcript(V1)
     assert record is not None and record.source_name == "My Clip.mp4" and record.language == "de"
@@ -311,7 +334,8 @@ def test_without_keywords_the_function_is_called_with_exactly_five_arguments(tmp
     ui, _ = make_ts_ui(tmp_path, fake=five)
     path = media(tmp_path)
     start(ui, path)
-    assert seen == [(V1, str(path), "en")]
+    assert len(seen) == 1 and seen[0][0] == V1 and seen[0][2] == "en"
+    assert Path(seen[0][1]).name == "My Clip.mp4"
 
 
 def test_the_finished_job_shows_its_result_until_dismissed(tmp_path: Path) -> None:
@@ -349,10 +373,10 @@ def test_a_running_job_shows_progress_and_polls(tmp_path: Path) -> None:
         html = page(ui)
         section = card(html)
         assert 'id="transcribe-msg"' in section and "Reading the audio" in section
-        assert 'class="spinner"' in section and 'name="path"' not in section
+        assert 'class="spinner"' in section and 'name="file"' not in section
         assert 'data-poll="1"' in html
         busy = card(page(ui, V2))
-        assert 'id="transcribe-busy"' in busy and 'name="path"' in busy
+        assert 'id="transcribe-busy"' in busy and 'name="file"' in busy
         again = start(ui, media(tmp_path), video_id=V2, wait=False)
         assert again.status_code == 303
         assert "A transcription is already running" in page(ui, V2)
@@ -363,7 +387,7 @@ def test_a_running_job_shows_progress_and_polls(tmp_path: Path) -> None:
 
 
 def test_a_failed_job_shows_its_sentence_with_a_dismiss_button(tmp_path: Path) -> None:
-    error = TranscribeError("auth", "The transcription API key was refused. Check it in Setup.")
+    error = TranscribeError("auth", transcribe.AUTH_MESSAGE)
     ui, _ = make_ts_ui(tmp_path, fake=FakeTranscribe(error=error))
     start(ui, media(tmp_path))
     snap = ui.web.transcribe_job.snapshot()
@@ -371,7 +395,8 @@ def test_a_failed_job_shows_its_sentence_with_a_dismiss_button(tmp_path: Path) -
     html = page(ui)
     section = card(html)
     assert 'id="transcribe-failed"' in section and "The transcription API key was refused." in section
-    assert 'action="/transcribe/done"' in section and 'name="path"' in section
+    assert "Check it in Configuration." in section
+    assert 'action="/transcribe/done"' in section and 'name="file"' in section
     nf(ui, "/transcribe/done", data={"video_id": V1})
     assert 'id="transcribe-failed"' not in card(page(ui))
 
@@ -402,40 +427,157 @@ def test_the_folder_of_the_file_is_taken_out_of_an_error_sentence(tmp_path: Path
     start(ui, path)
     html = page(ui)
     message = ui.web.transcribe_job.snapshot().message
-    assert "My Clip.mp4" in message and str(path.parent) not in message
-    assert str(path.parent) not in html and "private-folder-xyz" not in html
+    assert "My Clip.mp4" in message and "uploads" not in message and "upload-" not in message
+    assert "uploads" not in html and "private-folder-xyz" not in html
 
 
 # --- refusals before any job --------------------------------------------------------------------
-def test_a_missing_file_is_a_flash_not_a_job_and_the_path_is_not_echoed(tmp_path: Path) -> None:
+def test_a_wrong_file_type_is_refused_and_nothing_is_kept(tmp_path: Path) -> None:
     ui, fake = make_ts_ui(tmp_path)
-    ghost = tmp_path / "private-folder-xyz" / "ghost.mp4"
-    resp = start(ui, ghost)
+    resp = start(ui, media(tmp_path, "notes.txt"))
     assert resp.status_code == 303
     html = page(ui)
-    assert "There is no file at that path (looked for ghost.mp4)." in html
-    assert "Nothing was sent." in html
+    assert "notes.txt is not a video or audio file" in html and "Nothing was sent." in html
     assert "private-folder-xyz" not in html
     assert fake.calls == [] and ui.web.transcribe_job.snapshot().status == "idle"
+    assert uploads_left(ui) == []
 
 
-def test_a_wrong_file_type_and_a_folder_are_refused(tmp_path: Path) -> None:
+def test_a_post_without_a_file_is_a_flash_not_a_job(tmp_path: Path) -> None:
     ui, fake = make_ts_ui(tmp_path)
-    notes = media(tmp_path, "notes.txt")
-    start(ui, notes)
-    assert "notes.txt is not a video or audio file" in page(ui)
-    start(ui, notes.parent)
-    assert "That path is a folder, not a video file." in page(ui)
-    start(ui, "   ")
-    assert "Type the path of the video file" in page(ui)
-    assert fake.calls == [] and ui.web.transcribe_job.snapshot().status == "idle"
-    assert "private-folder-xyz" not in page(ui)
+    nf(ui, f"/videos/{V1}/transcribe", data={"language": "en"}, files={"other": ("a.txt", b"x")})
+    assert "Send exactly one file." in page(ui)
+    nf(ui, f"/videos/{V1}/transcribe", data={"language": "en"})  # not even a multipart post
+    assert "Choose a video or audio file" in page(ui)
+    nf(ui, f"/videos/{V1}/transcribe", data={"language": "en"}, files={"file": ("", b"")})
+    assert "Choose a video or audio file" in page(ui)
+    assert fake.calls == [] and uploads_left(ui) == []
 
 
-def test_a_very_long_path_is_refused(tmp_path: Path) -> None:
+@pytest.mark.parametrize("raw, expect", [
+    ("My Clip.MP4", "My Clip.mp4"), ("C:\\Users\\someone\\Videos\\a.mov", "a.mov"),
+    ("../../etc/passwd.mp4", "passwd.mp4"), ("we<ir>d:na|me?.mkv", "we_ir_d_na_me_.mkv"),
+    ("CON.mp4", "_CON.mp4"), ("   ..hidden.webm  ", "hidden.webm"), (".mp4", "video.mp4"),
+])
+def test_the_uploaded_name_is_cleaned_before_it_is_used(tmp_path: Path, raw: str, expect: str) -> None:
     ui, fake = make_ts_ui(tmp_path)
-    start(ui, "a" * 1500 + ".mp4")
-    assert "too long to be a file path" in page(ui) and fake.calls == []
+    start(ui, media(tmp_path), name=raw)
+    assert len(fake.calls) == 1
+    path = Path(fake.calls[0]["path"])
+    assert path.name == expect
+    assert path.parent.parent == ui.config.home / "tmp" / "uploads"
+
+
+def test_a_very_long_name_is_cut(tmp_path: Path) -> None:
+    ui, fake = make_ts_ui(tmp_path)
+    start(ui, media(tmp_path), name="x" * 400 + ".mp4")
+    assert len(Path(fake.calls[0]["path"]).name) <= 90
+
+
+def test_a_file_over_the_limit_is_refused_while_it_arrives(tmp_path: Path, monkeypatch) -> None:
+    from yezatas.web import upload
+
+    monkeypatch.setattr(upload, "MAX_UPLOAD_BYTES", 1000)
+    ui, fake = make_ts_ui(tmp_path)
+    start(ui, media(tmp_path), content=b"x" * 5000)
+    html = page(ui)
+    assert "is bigger than" in html and "Nothing was sent." in html
+    assert fake.calls == [] and uploads_left(ui) == []
+    assert ui.web.transcribe_job.snapshot().status == "idle"
+
+
+def test_the_limit_is_8_gb(tmp_path: Path) -> None:
+    from yezatas.web import upload
+
+    assert upload.MAX_UPLOAD_BYTES == 8 * 1024 ** 3
+    assert upload.human_size(upload.MAX_UPLOAD_BYTES) == "8 GB"
+
+
+def test_a_declared_size_over_the_limit_is_refused_before_reading(tmp_path: Path, monkeypatch) -> None:
+    from yezatas.web import upload
+
+    monkeypatch.setattr(upload, "MAX_UPLOAD_BYTES", 1000)
+    ui, fake = make_ts_ui(tmp_path)
+    start(ui, media(tmp_path), content=b"x" * (3 * 1024 * 1024))  # over the limit and its slack
+    assert "is bigger than" in page(ui)
+    assert fake.calls == [] and uploads_left(ui) == []
+
+
+def test_the_file_is_streamed_to_disk_in_chunks(tmp_path: Path) -> None:
+    ui, fake = make_ts_ui(tmp_path)
+    big = bytes(range(256)) * 20_000  # about 5 MB: several chunks
+    start(ui, media(tmp_path), content=big)
+    assert fake.calls[0]["content"] == big
+
+
+def test_the_copy_is_deleted_when_the_job_fails(tmp_path: Path) -> None:
+    ui, fake = make_ts_ui(tmp_path, fake=FakeTranscribe(error=TranscribeError("api", "Stopped.")))
+    start(ui, media(tmp_path))
+    assert fake.calls[0]["existed"] is True
+    assert ui.web.transcribe_job.snapshot().status == "failed"
+    assert uploads_left(ui) == []
+
+
+def test_the_copy_is_deleted_when_the_job_dies_unexpectedly(tmp_path: Path) -> None:
+    ui, fake = make_ts_ui(tmp_path, fake=FakeTranscribe(error=KeyError("x")))
+    start(ui, media(tmp_path))
+    assert ui.web.transcribe_job.snapshot().status == "failed" and uploads_left(ui) == []
+
+
+def test_the_copy_exists_while_the_job_runs_and_goes_when_it_ends(tmp_path: Path) -> None:
+    gate = threading.Event()
+    ui, fake = make_ts_ui(tmp_path, fake=FakeTranscribe(gate=gate))
+    try:
+        start(ui, media(tmp_path), wait=False)
+        for _ in range(200):
+            if fake.calls:
+                break
+            threading.Event().wait(0.01)
+        assert len(uploads_left(ui)) == 1
+    finally:
+        gate.set()
+        ui.web.transcribe_job.wait()
+    assert uploads_left(ui) == []
+
+
+def test_a_refused_second_start_deletes_its_copy(tmp_path: Path) -> None:
+    gate = threading.Event()
+    ui, fake = make_ts_ui(tmp_path, fake=FakeTranscribe(gate=gate))
+    try:
+        start(ui, media(tmp_path), wait=False)
+        for _ in range(200):
+            if fake.calls:
+                break
+            threading.Event().wait(0.01)
+        start(ui, media(tmp_path), video_id=V2, wait=False)
+        assert len(uploads_left(ui)) == 1  # only the first job's copy
+    finally:
+        gate.set()
+        ui.web.transcribe_job.wait()
+    assert uploads_left(ui) == []
+
+
+def test_a_bad_language_after_the_upload_deletes_the_copy(tmp_path: Path) -> None:
+    ui, fake = make_ts_ui(tmp_path)
+    start(ui, media(tmp_path), language="lt")
+    assert fake.calls == [] and uploads_left(ui) == []
+
+
+def test_old_folders_from_a_crash_are_swept_on_the_next_upload(tmp_path: Path) -> None:
+    import os
+    import time
+
+    ui, fake = make_ts_ui(tmp_path)
+    root = ui.config.home / "tmp" / "uploads"
+    old = root / "upload-old"
+    old.mkdir(parents=True)
+    (old / "left.mp4").write_bytes(b"x")
+    long_ago = time.time() - 3 * 24 * 3600
+    os.utime(old, (long_ago, long_ago))
+    recent = root / "upload-recent"
+    recent.mkdir()
+    start(ui, media(tmp_path))
+    assert not old.exists() and recent.exists()
 
 
 def test_an_unsupported_or_missing_language_is_refused(tmp_path: Path) -> None:
@@ -480,7 +622,7 @@ def test_the_default_transcribe_without_a_key_stops_before_sending_anything(tmp_
     start(ui, media(tmp_path))
     snap = ui.web.transcribe_job.snapshot()
     assert snap.status == "failed" and snap.error_kind == "auth"
-    assert snap.message == "No Meta API key is set. Add one in Setup. Nothing was sent."
+    assert snap.message == "No Meta API key is set. Add one in Configuration. Nothing was sent."
 
 
 def test_the_default_transcribe_gives_the_key_only_to_the_client(tmp_path: Path, monkeypatch) -> None:
@@ -653,7 +795,8 @@ def test_the_srt_needs_a_signed_in_browser(tmp_path: Path) -> None:
 
 
 # --- safety -------------------------------------------------------------------------------------
-POSTS = [f"/videos/{V1}/transcribe", "/transcribe/done", f"/videos/{V1}/chapters", "/chapters/done"]
+POSTS = [f"/videos/{V1}/transcribe", f"/videos/{V1}/transcribe/captions", "/transcribe/done",
+         f"/videos/{V1}/chapters", "/chapters/done"]
 
 
 @pytest.mark.parametrize("path", POSTS)
@@ -661,12 +804,27 @@ def test_every_new_post_needs_the_csrf_token(tmp_path: Path, path: str) -> None:
     fn = chapters_with([reply(GOOD)])
     ui, fake = make_ts_ui(tmp_path, chapters_fn=fn)
     seed_transcript(ui.config, V1)
-    data = {"path": str(media(tmp_path)), "language": "en", "video_id": V1}
+    data = {"language": "en", "video_id": V1}
     assert ui.client.post(path, data={}).status_code == 403
     assert ui.client.post(path, data={"csrf": "wrong", **data}).status_code == 403
     assert fake.calls == [] and fn.client.calls == []
     assert ui.web.transcribe_job.snapshot().status == "idle"
     assert ui.web.chapters_job.snapshot().status == "idle"
+
+
+def test_a_multipart_post_needs_the_csrf_token_before_a_byte_is_kept(tmp_path: Path) -> None:
+    ui, fake = make_ts_ui(tmp_path)
+    for data in ({}, {"csrf": "wrong"}):
+        resp = ui.client.post(f"/videos/{V1}/transcribe", data=data, follow_redirects=False,
+                              files={"file": ("clip.mp4", b"video bytes", "video/mp4")})
+        assert resp.status_code == 403
+    # a token sent after the file does not count: the fields must come first
+    resp = ui.client.post(f"/videos/{V1}/transcribe", follow_redirects=False,
+                          files=[("file", ("clip.mp4", b"video bytes", "video/mp4")),
+                                 ("csrf", (None, ui.csrf()))])
+    assert resp.status_code == 403
+    assert fake.calls == [] and uploads_left(ui) == []
+    assert ui.web.transcribe_job.snapshot().status == "idle"
 
 
 def test_the_full_path_is_never_in_any_page_or_status(tmp_path: Path) -> None:
@@ -679,7 +837,7 @@ def test_the_full_path_is_never_in_any_page_or_status(tmp_path: Path) -> None:
             ui.client.get(f"/videos/{V1}/transcript.srt").text]
     for text in seen:
         assert str(path) not in text and str(path.parent) not in text
-        assert "private-folder-xyz" not in text
+        assert "private-folder-xyz" not in text and str(ui.config.home / "tmp") not in text
     assert "My Clip.mp4" in seen[0]
     with store_of(ui) as store:
         record = store.latest_transcript(V1)

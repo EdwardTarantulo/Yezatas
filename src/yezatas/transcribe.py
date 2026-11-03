@@ -49,7 +49,7 @@ QUIET_SPAN = 3  # frames averaged when looking for the quietest moment (150 ms)
 QUIET_PULL_DB = 0.5  # dB per second away from the target length that a quieter moment must win by
 SILENT_DB = -120.0  # what a frame of digital silence ("-inf") counts as
 NO_FFMPEG_MESSAGE = "ffmpeg was not found. Install ffmpeg and restart Yezatas."
-AUTH_MESSAGE = "The transcription API key was refused. Check it in Setup."
+AUTH_MESSAGE = "The transcription API key was refused. Check it in Configuration."
 
 
 class TranscribeError(RuntimeError):
