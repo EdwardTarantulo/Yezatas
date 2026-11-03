@@ -49,7 +49,8 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | Area | Pages | What it does |
 |---|---|---|
 | **Setup** | Setup | An 8-step guided connection to YouTube, a connection check with specific fixes, and a read-only catalog pull with its quota cost shown first. |
-| **Audit** | Dashboard, Content, Video | A 27-check SEO scorecard per video with a one-line fix for each, **Fix next** ranked by views × missing points, and a searchable, sortable content table. |
+| **Daily** | Today, Comments, Videos, Analytics | Today: the channel's last 7 days, what needs an answer and the videos to fix next. A sidebar that counts what is waiting (questions, drafts, videos under 50, translations out of date, broken links). The channel's and each video's last 28 days from YouTube Analytics (read-only), with traffic sources and countries. |
+| **Audit** | SEO overview, Videos, Video | A 27-check SEO scorecard per video with a one-line fix for each, **Fix next** ranked by views × missing points, and a searchable table that sorts by any column. The video page shows what to fix first, quick-info tiles that open the place where each thing is changed, and a Details section: the category checked by Muse Spark, and whether a comment from the channel is there to pin (with a suggestion to post). |
 | **Edit safely** | Changes, History | Drafts shown as diffs, approved one by one, pushed with a quota preview; a backup before every update, restore one video or undo a whole push. |
 | **Suggest** | Video, Copilot | A suggestion agent with read-only tools and a fact guard, and a channel copilot with the whole catalog in one context. Edits are only ever proposals. |
 | **Translate** | Translate, Subtitles, Translations | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. A glossary of the creator's terms (kept as they are or with a fixed translation), checked by code, and a list of every translation made from older text. |
@@ -69,7 +70,7 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 | Model | Where it runs | What Yezatas uses it for |
 |---|---|---|
 | Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule, and a bulk change described in words into fixed steps. The strategy report: what works, the gaps and next video ideas, from tables made by code (every ref and number is checked by code). Explaining why other channels' outliers did well, and ranking the search gaps worth fixing. |
-| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles, and the Shorts finder (Muse Spark 1.3 as the fallback for both). At build time it also wrote the glossary, the Translations page, the Shorts finder, Competitors and Search gaps (see the log). |
+| Muse Spark Open | Baseten | Translating titles, descriptions and subtitles, and the Shorts finder (Muse Spark 1.3 as the fallback for both). At build time it wrote much of Yezatas from briefs by Claude Code as orchestrator, which reviewed and tested every change before the developer approved it: the glossary, the Translations page, the Shorts finder, Competitors, Search gaps, the Comments page, the Today and Analytics pages, the redesigned video page with its Category and Pinned comment checks, and the sidebar counts (see the log). |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
@@ -89,6 +90,8 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
   setup screen walks you through it)
 - A [Meta Model API](https://dev.meta.ai/) key for the AI features
 - [ffmpeg](https://ffmpeg.org/) on your PATH, for transcripts
+- **Optional:** the YouTube Analytics API enabled in the same Cloud project, for Today, Analytics and each video's
+  numbers (read-only; the app asks for this access when you click **Connect Analytics**)
 - **Optional:** a [Baseten](https://www.baseten.co/) key for Muse Spark Open translations, and
   [Ollama](https://ollama.com/) with Muse Glimmer for the independent translation check
 
@@ -119,6 +122,9 @@ BASETEN_API_KEY=...           # optional: translations on Muse Spark Open
 YEZATAS_HOME=...              # where the catalog and tokens live (default: your local app-data folder)
 YEZATAS_DAILY_QUOTA=10000     # the YouTube API units Yezatas may spend per day
 YEZATAS_MODEL=muse-spark-1.3  # standard models only; contributor models are refused
+YEZATAS_TRANSLATOR_MODEL=meta-models/muse-spark-open-1026   # the translator on Baseten
+YEZATAS_TRANSLATOR_URL=https://inference.baseten.co/v1
+YEZATAS_VERIFIER_MODEL=muse-glimmer:30b                     # the independent translation check
 YEZATAS_VERIFIER_URL=http://127.0.0.1:11434   # Ollama, for the Muse Glimmer check
 ```
 
@@ -137,6 +143,7 @@ python -m yezatas quota    # today's YouTube API quota use
 ```
 src/yezatas/
   auth.py, youtube.py        # OAuth on the creator's own Cloud project, thin YouTube API wrappers
+  modelclient.py             # Meta's Model API client (the key is never logged)
   catalog.py, store.py       # the catalog pull and the local SQLite store (snapshots, drafts, backups)
   quota.py                   # the daily quota ledger and cost previews
   seo.py                     # the SEO scorecard
@@ -148,13 +155,16 @@ src/yezatas/
   transcribe.py, chapters.py, subtitles.py   # transcripts, chapters, SRT
   shorts.py                  # the Shorts finder (Muse Spark Open)
   packaging.py, outliers.py  # the packaging check, own-channel outliers
+  thumbswap.py               # set a variant as the thumbnail after a confirmation, the old one kept to put back
+  channelstats.py, videostats.py   # the channel's and each video's last 28 days from YouTube Analytics (read-only)
   strategy.py                # the strategy report (Muse Spark 1.3)
   competitors.py, searchgaps.py   # other channels' outliers, real search terms missing from titles
   glossary.py                # the translation glossary, checked by code
   links.py, adcheck.py       # link inventory and dead-link check, advertiser-friendly check
+  categorycheck.py, pinnedcomment.py   # the category check and the pinned comment suggestion (Muse Spark)
   comments.py, replytemplates.py   # comments assistant (drafts only) and reply templates
   affiliate.py, customchecks.py    # affiliate tagging as drafts, custom checks by asking
-  web/                       # the local FastAPI app: pages, jobs, security
+  web/                       # the local FastAPI app: pages, jobs, security, sidebar counts
 tests/                       # pytest; every YouTube and model call is faked
 docs/SETUP_GOOGLE.md         # the Google Cloud setup guide
 ```
