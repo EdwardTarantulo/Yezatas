@@ -124,6 +124,34 @@ class GoogleCommentReader:
         )
 
 
+class CaptionReader(Protocol):
+    """The caption reads `captions.py` needs; both return what the API returned."""
+
+    def caption_tracks(self, video_id: str) -> dict[str, Any]: ...
+
+    def caption_srt(self, caption_id: str) -> bytes | str: ...
+
+
+class GoogleCaptionReader:
+    """CaptionReader backed by google-api-python-client. Thin on purpose; not unit-tested.
+
+    Listing costs 50 quota units, downloading 200. Both need the youtube.force-ssl scope, and
+    a download only works for the signed-in channel's own videos.
+    """
+
+    def __init__(self, credentials: Any) -> None:
+        from googleapiclient.discovery import build
+
+        self._service = build("youtube", "v3", credentials=credentials, cache_discovery=False)
+
+    def caption_tracks(self, video_id: str) -> dict[str, Any]:
+        return self._service.captions().list(part="snippet", videoId=video_id).execute()
+
+    def caption_srt(self, caption_id: str) -> bytes | str:
+        # captions.download is a media method: the client library exposes it as download_media.
+        return self._service.captions().download_media(id=caption_id, tfmt="srt").execute()
+
+
 class YouTubeWriter(Protocol):
     """What a push needs: read a batch of videos, and update one video's snippet."""
 
