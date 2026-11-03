@@ -547,7 +547,7 @@ a.chip:hover { background: var(--line); }
 .tool-name { font-weight: 600; }
 .tool-what { color: var(--muted); }
 .tool-state { flex: none; padding: 0 8px; border-radius: 10px; background: var(--info-bg); color: var(--info-text); font-size: var(--fs-xs); font-weight: 600; line-height: 20px; }
-.tool > .card { border: 0; margin: 0; padding-top: 0; background: none; }
+.tool > .card { border: 0; margin: 0; padding-top: 18px; background: none; }
 .tool > .card > h2, .tool > .card > .card-title-row > h2 { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .tool > .card > .card-title-row { justify-content: flex-end; }
 .vdetails { margin: 24px 0 16px; }
