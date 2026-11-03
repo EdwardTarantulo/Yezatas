@@ -78,10 +78,21 @@ def _is_stop(exc: BaseException) -> bool:
     return info.status in (401, 403) or any(r in _STOP_REASONS for r in info.reasons)
 
 
+TITLE_TEST_REASON = "UPDATE_TITLE_NOT_ALLOWED_DURING_TEST_AND_COMPARE"
+TITLE_TEST_MESSAGE = (
+    "YouTube does not allow title changes while a title test (Test & Compare) is running on this "
+    "video. Nothing changed on YouTube and your draft is kept. Stop the test in YouTube Studio or "
+    "wait for it to finish, pull your videos again, then push. Trying again before that uses more "
+    "quota and fails the same way."
+)
+
+
 def _error_message(action: str, exc: BaseException) -> str:
     if isinstance(exc, QuotaExceeded):
         return "Not enough YouTube quota left today to continue."
     info = api_error_info(exc)
+    if TITLE_TEST_REASON in info.reasons:
+        return TITLE_TEST_MESSAGE
     if info.status is None and not info.reasons and not info.message:
         return f"{action} failed ({type(exc).__name__})."
     detail = ", ".join(

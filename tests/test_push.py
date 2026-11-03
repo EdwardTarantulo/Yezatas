@@ -229,6 +229,18 @@ def test_blocking_error_stops_and_marks_the_rest_not_attempted(env, status: int,
     assert len(store.list_pushes()) == 2
 
 
+def test_a_running_title_test_gets_a_plain_message_and_keeps_the_draft(env) -> None:
+    store, writer = env
+    approved = {v: approved_draft(store, v) for v in (V1, V2)}
+    writer.update_errors[V1] = make_http_error(
+        400, "UPDATE_TITLE_NOT_ALLOWED_DURING_TEST_AND_COMPARE", "Precondition check failed.")
+    result = push_drafts(writer, store, make_guard(store), approved, now=NOW)
+    assert [(i.video_id, i.status) for i in result.items] == [(V1, "failed"), (V2, "pushed")]
+    message = result.items[0].message
+    assert "Test & Compare" in message and "Precondition" not in message
+    assert store.get_draft(V1) is not None
+
+
 def test_failed_live_read_marks_failed_and_pushes_nothing(env) -> None:
     store, writer = env
     approved = {v: approved_draft(store, v) for v in (V1, V2)}
