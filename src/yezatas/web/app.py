@@ -2265,6 +2265,18 @@ def create_app(
     def see_other(url: str) -> RedirectResponse:
         return RedirectResponse(url, status_code=303)
 
+    @app.middleware("http")
+    async def stay_in_place(request: Request, call_next):  # type: ignore[no-untyped-def]
+        """A form the page's script marked ?stay=1 comes back without the #card anchor (which makes the browser jump
+        before the script can restore the reader's place); the card goes in ?go= so the script can still show it."""
+        response = await call_next(request)
+        location = response.headers.get("location", "")
+        if (request.method == "POST" and request.query_params.get("stay") == "1"
+                and response.status_code == 303 and "#" in location):
+            base, frag = location.split("#", 1)
+            response.headers["location"] = f"{base}{'&' if '?' in base else '?'}go={quote(frag)}"
+        return response
+
     def flash(request: Request, kind: str, text: str, step: str = "") -> None:
         state.add_flash(request.state.session_id, kind, text, step)
 

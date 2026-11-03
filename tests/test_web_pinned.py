@@ -186,3 +186,11 @@ def test_no_comment_from_the_channel_shows_none(tmp_path: Path) -> None:
     ui = make_pin_ui(tmp_path)
     add_comments(ui, own=False)
     assert 'id="pinned-found"' not in card(ui)
+
+
+def test_a_marked_form_comes_back_without_the_anchor(tmp_path: Path) -> None:
+    ui = make_pin_ui(tmp_path)
+    plain = ui.post(f"/videos/{V1}/pinned/mark", follow_redirects=False)
+    assert plain.headers["location"] == f"/videos/{V1}#pinned-comment"
+    stay = ui.post(f"/videos/{V1}/pinned/mark?stay=1", follow_redirects=False)
+    assert stay.status_code == 303 and stay.headers["location"] == f"/videos/{V1}?go=pinned-comment"

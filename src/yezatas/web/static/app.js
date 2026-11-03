@@ -160,6 +160,8 @@
           setTimeout(poll, 1500);
         } else {
           keepScroll();
+          // Reload without the #anchor, so the browser does not jump to it before the page restores its place.
+          history.replaceState(null, "", window.location.pathname + window.location.search);
           window.location.reload();
         }
       })
@@ -179,7 +181,12 @@ function keepScroll() {
 }
 document.addEventListener("submit", function (e) {
   var form = e.target;
-  if ((form.getAttribute("method") || "").toLowerCase() === "post" && !form.target) keepScroll();
+  if ((form.getAttribute("method") || "").toLowerCase() !== "post" || form.target) return;
+  keepScroll();
+  // Ask the server to come back without the #anchor (see stay_in_place in app.py).
+  var url = new URL(form.action, window.location.href);
+  url.searchParams.set("stay", "1");
+  form.action = url.toString();
 });
 
 // Video page: the tools and the checklist are folded <details data-keep>. The page reloads when a job
@@ -201,7 +208,7 @@ document.addEventListener("submit", function (e) {
     var target = id && document.getElementById(id);
     if (!target) return;
     var fold = target.closest("details[data-keep]");
-    if (fold) { fold.open = true; target.scrollIntoView(); }
+    if (fold) { fold.open = true; target.scrollIntoView({ behavior: "smooth", block: "start" }); }
   }
   folds.forEach(function (d) {
     if (saved.indexOf(d.id) >= 0 || d.querySelector(".waiting, .flash.error")) d.open = true;
@@ -212,11 +219,27 @@ document.addEventListener("submit", function (e) {
     back = JSON.parse(window.sessionStorage.getItem("yz-scroll:" + window.location.pathname) || "null");
     window.sessionStorage.removeItem("yz-scroll:" + window.location.pathname);
   } catch (e) { back = null; }
+  var params = new URLSearchParams(window.location.search);
+  var go = params.get("go");
+  if (go) {
+    // Put the card back in the address bar as #anchor, without scrolling to it.
+    params.delete("go");
+    var q = params.toString();
+    history.replaceState(null, "", window.location.pathname + (q ? "?" + q : "") + "#" + encodeURIComponent(go));
+  }
   if (back && Date.now() - back[1] < 120000) {
-    // Back from a reload this page caused: stay put (again after load, which may apply the anchor late).
-    var stay = function () { window.scrollTo(0, back[0]); };
-    stay();
-    window.addEventListener("load", stay);
+    // Back from a reload this page caused: come back at the same place, then glide to the card only if it is
+    // out of view.
+    window.scrollTo({ top: back[0], behavior: "instant" });
+    var card = go && document.getElementById(go);
+    if (card) {
+      var fold = card.closest("details[data-keep]");
+      if (fold) fold.open = true;
+      var box = card.getBoundingClientRect();
+      if (box.top > window.innerHeight || box.bottom < 0) {
+        setTimeout(function () { card.scrollIntoView({ behavior: "smooth", block: "start" }); }, 150);
+      }
+    }
   } else {
     openTarget();
   }
