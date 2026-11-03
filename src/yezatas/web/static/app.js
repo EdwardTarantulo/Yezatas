@@ -106,6 +106,7 @@
     try { tried = Number(window.sessionStorage.getItem(autoKey) || 0); } catch (e) { tried = 0; }
     if (!tried || Date.now() - tried > 12 * 3600 * 1000) {
       try { window.sessionStorage.setItem(autoKey, String(Date.now())); } catch (e) { /* storage off */ }
+      keepScroll();
       autoForm.submit();
     }
   }
@@ -158,6 +159,7 @@
           });
           setTimeout(poll, 1500);
         } else {
+          keepScroll();
           window.location.reload();
         }
       })
@@ -169,6 +171,16 @@
 
   setTimeout(poll, 1000);
 })();
+
+// A button press or a finished job reloads the page (often with a #card anchor). Remember where the reader was so
+// the page comes back at the same place instead of jumping to the card's top.
+function keepScroll() {
+  try { window.sessionStorage.setItem("yz-scroll:" + window.location.pathname, JSON.stringify([window.scrollY, Date.now()])); } catch (e) { /* storage off */ }
+}
+document.addEventListener("submit", function (e) {
+  var form = e.target;
+  if ((form.getAttribute("method") || "").toLowerCase() === "post" && !form.target) keepScroll();
+});
 
 // Video page: the tools and the checklist are folded <details data-keep>. The page reloads when a job
 // finishes, so remember which ones the creator opened (per page, this tab only). Also open the one a link points
@@ -195,7 +207,19 @@
     if (saved.indexOf(d.id) >= 0 || d.querySelector(".waiting, .flash.error")) d.open = true;
     d.addEventListener("toggle", remember);
   });
-  openTarget();
+  var back = null;
+  try {
+    back = JSON.parse(window.sessionStorage.getItem("yz-scroll:" + window.location.pathname) || "null");
+    window.sessionStorage.removeItem("yz-scroll:" + window.location.pathname);
+  } catch (e) { back = null; }
+  if (back && Date.now() - back[1] < 120000) {
+    // Back from a reload this page caused: stay put (again after load, which may apply the anchor late).
+    var stay = function () { window.scrollTo(0, back[0]); };
+    stay();
+    window.addEventListener("load", stay);
+  } else {
+    openTarget();
+  }
   window.addEventListener("hashchange", openTarget);
 })();
 
