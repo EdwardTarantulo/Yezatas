@@ -48,18 +48,18 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 
 | Area | Pages | What it does |
 |---|---|---|
-| **Setup** | Setup | An 8-step guided connection to YouTube, a connection check with specific fixes, and a read-only catalog pull with its quota cost shown first. |
+| **Configuration** | Configuration | A guided connection to YouTube, a connection check with specific fixes, and a read-only catalog pull with its quota cost shown first. The **Primary AI** choice: Muse Spark through Meta's Model API, or Muse Glimmer on this computer through Ollama (no key, nothing leaves the machine). |
 | **Daily** | Today, Comments, Videos, Analytics | Today: the channel's last 7 days, what needs an answer and the videos to fix next. A sidebar that counts what is waiting (questions, drafts, videos under 50, translations out of date, broken links). The channel's and each video's last 28 days from YouTube Analytics (read-only), with traffic sources and countries. |
 | **Audit** | SEO overview, Videos, Video | A 27-check SEO scorecard per video with a one-line fix for each, **Fix next** ranked by views × missing points, and a searchable table that sorts by any column. The video page shows what to fix first, quick-info tiles that open the place where each thing is changed, and a Details section: the category checked by Muse Spark, and whether a comment from the channel is there to pin (with a suggestion to post). |
 | **Edit safely** | Changes, History | Drafts shown as diffs, approved one by one, pushed with a quota preview; a backup before every update, restore one video or undo a whole push. |
 | **Suggest** | Video, Copilot | A suggestion agent with read-only tools and a fact guard, and a channel copilot with the whole catalog in one context. Edits are only ever proposals. |
 | **Translate** | Translate, Subtitles, Translations | Titles, descriptions and subtitles translated by one Meta model and checked blind by another; every link, time and number must survive. A glossary of the creator's terms (kept as they are or with a fixed translation), checked by code, and a list of every translation made from older text. |
-| **Transcribe** | Transcript, Shorts finder | Transcripts of the creator's own video file, chapter starts chosen by segment number (code sets the times), SRT downloads, and moments that could stand alone as a Short (picked by segment number; times and quotes from the transcript). |
+| **Transcribe** | Transcript, Shorts finder | Transcripts from the captions already on YouTube (free to read, times taken from YouTube's file) or from the creator's own video file picked in the browser; music and sound captions such as [Music] or [Applause] for videos without speech (PANNs, on this computer, with times from the real audio); chapter starts chosen by segment number (code sets the times), SRT downloads, and moments that could stand alone as a Short (picked by segment number; times and quotes from the transcript). |
 | **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download, preview in a feed or set as the thumbnail after a confirmation (the old one is saved in History). |
 | **Insights** | Outliers, Strategy, Competitors, Search gaps | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos; the same outlier rule on up to 5 other public channels; and the real YouTube search terms whose words are missing from the titles. |
 | **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first, or described in plain words. |
 | **Ad safety** | Video | An advertiser-friendly check of the title, description, tags and transcript; every quote is checked by code. Advice only. |
-| **Community** | Video, Comments, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy, or to post after you check the exact text and confirm (the API cannot pin a comment, so a pinned draft is pinned in Studio), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
+| **Community** | Video, Comments, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy, or to post to YouTube after you check the exact text and confirm (each post is listed in History) (the API cannot pin a comment, so a pinned draft is pinned in Studio), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
 
 ---
 
@@ -71,7 +71,7 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 |---|---|---|
 | Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule, and a bulk change described in words into fixed steps. The strategy report: what works, the gaps and next video ideas, from tables made by code (every ref and number is checked by code). Explaining why other channels' outliers did well, and ranking the search gaps worth fixing. |
 | Muse Spark Open | Baseten | Translating titles, descriptions and subtitles, and the Shorts finder (Muse Spark 1.3 as the fallback for both). At build time it wrote much of Yezatas from briefs by Claude Code as orchestrator, which reviewed and tested every change before the developer approved it: the glossary, the Translations page, the Shorts finder, Competitors, Search gaps, the Comments page, the Today and Analytics pages, the redesigned video page with its Category and Pinned comment checks, and the sidebar counts (see the log). |
-| Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. |
+| Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. With Primary AI set to Local, it also runs every text feature above in place of Muse Spark, with no key and nothing leaving the computer. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
 | SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
@@ -88,10 +88,13 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 - [Python](https://www.python.org/) 3.10 or newer
 - A Google account with a YouTube channel, and a free [Google Cloud](https://console.cloud.google.com/) project (the
   setup screen walks you through it)
-- A [Meta Model API](https://dev.meta.ai/) key for the AI features
+- A [Meta Model API](https://dev.meta.ai/) key for the AI features, or [Ollama](https://ollama.com/) with Muse Glimmer to run the
+  text features locally (transcripts from a video file, SAM 3.1 and Muse Image still need the Meta key)
 - [ffmpeg](https://ffmpeg.org/) on your PATH, for transcripts
 - **Optional:** the YouTube Analytics API enabled in the same Cloud project, for Today, Analytics and each video's
   numbers (read-only; the app asks for this access when you click **Connect Analytics**)
+- **Optional:** [PANNs](https://github.com/qiuqiangkong/audioset_tagging_cnn) (`pip install panns-inference`) for music and sound
+  captions; the Configuration page has install help for Windows, macOS and Ubuntu
 - **Optional:** a [Baseten](https://www.baseten.co/) key for Muse Spark Open translations, and
   [Ollama](https://ollama.com/) with Muse Glimmer for the independent translation check
 
@@ -106,7 +109,8 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
    python -m yezatas ui
    ```
    - It listens on 127.0.0.1 only and opens a one-time sign-in link in your browser.
-3. Follow the **Setup** page: 8 steps, about 10 minutes, free. It ends with a read-only pull of your catalog.
+3. Follow the **Configuration** page: about 10 minutes, free. It ends with a read-only pull of your catalog, and
+   lets you pick the Primary AI (Meta's API or local Muse Glimmer).
 
 The written version of the Google setup, with troubleshooting, is [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md).
 
@@ -117,7 +121,8 @@ The written version of the Google setup, with troubleshooting, is [docs/SETUP_GO
 Everything works with the defaults; these environment variables change them.
 
 ```bash
-MODEL_API_KEY=...             # Meta Model API key (or save it on the Setup page)
+MODEL_API_KEY=...             # Meta Model API key (or save it on the Configuration page)
+YEZATAS_PRIMARY_AI=meta       # meta (Muse Spark) or local (Muse Glimmer through Ollama)
 BASETEN_API_KEY=...           # optional: translations on Muse Spark Open
 YEZATAS_HOME=...              # where the catalog and tokens live (default: your local app-data folder)
 YEZATAS_DAILY_QUOTA=10000     # the YouTube API units Yezatas may spend per day
@@ -518,6 +523,21 @@ as it lands; the git history is the detailed record.
   place where each is changed, marked "Fix" while their check costs points; Analytics reads itself on opening
   when its numbers are older than 12 hours (read-only); and Category and Pinned comment moved into a new Details
   section above Tools, which shows the channel's own newest comment when one was fetched.
+
+- **2026-11-03**: **Run it fully local.** Setup became the **Configuration** page with a **Primary AI** choice:
+  Muse Spark through Meta's Model API, or Muse Glimmer through Ollama on the creator's computer, with no key and
+  nothing leaving the machine. One module decides the text model's address and key for every feature, so the
+  Meta key is never sent to Ollama. Transcripts from a video file, SAM 3.1 and Muse Image still use Meta's API
+  and say so.
+- **2026-11-03**: **Transcripts without a video file, and captions for videos without speech.** The Transcript
+  tool first offers the captions already on YouTube (parsed strictly: a malformed time is an error, never a
+  guess), then a file picked in the browser (deleted when the job ends), with **Speech** or **Music and sounds**.
+  Music and sounds uses PANNs on the creator's computer: every one-second window of the real audio gets its
+  strongest label, so each [Music] or [Applause] time is a point in the audio. Chapters are not made from sound
+  labels.
+- **2026-11-03**: **Post replies to YouTube.** A reply draft can be posted after a page shows the exact, editable
+  text and the comment it answers; only **Post to YouTube** sends it. A lock refuses posting twice, the post is
+  listed in History with a link, and every reply button explains on hover what it does.
 
 ---
 
