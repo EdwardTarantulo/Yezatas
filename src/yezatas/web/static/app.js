@@ -238,7 +238,9 @@
 // the page comes back at the same place instead of jumping to the card's top.
 function keepScroll(form) {
   // A [data-keep-place] element stays at the same height on screen, even when text above it comes or goes.
-  var mark = form && form.querySelector ? form.querySelector("[data-keep-place]") : null;
+  // A form that goes away with the reload names one that stays in data-keep-mark.
+  var named = form && form.getAttribute ? form.getAttribute("data-keep-mark") : null;
+  var mark = named ? document.getElementById(named) : form && form.querySelector ? form.querySelector("[data-keep-place]") : null;
   if (!mark) {
     Array.prototype.some.call(document.querySelectorAll("[data-keep-place]"), function (el) {
       var r = el.getBoundingClientRect();
@@ -313,7 +315,13 @@ document.addEventListener("submit", function (e) {
     // Put the card back in the address bar as #anchor, without scrolling to it.
     params.delete("go");
     var q = params.toString();
-    history.replaceState(null, "", window.location.pathname + (q ? "?" + q : "") + "#" + encodeURIComponent(go));
+    var withAnchor = window.location.pathname + (q ? "?" + q : "") + "#" + encodeURIComponent(go);
+    // While the page is still loading, the browser jumps to a new #anchor, so when the place is being restored wait.
+    if (back && document.readyState !== "complete") {
+      window.addEventListener("load", function () { history.replaceState(null, "", withAnchor); });
+    } else {
+      history.replaceState(null, "", withAnchor);
+    }
   }
   if (back && Date.now() - back[1] < 120000) {
     // Back from a reload this page caused: come back at exactly the same place (the result appears where

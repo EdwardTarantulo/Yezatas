@@ -21,7 +21,7 @@ from yezatas import agent, edits, packaging
 from yezatas.agent import ModelError, ModelReply
 from yezatas.modelclient import AUTH_MESSAGE
 from yezatas.packaging import Box, PackagingError, PackagingTools
-from yezatas.store import Store
+from yezatas.store import Store, ThumbnailVariant
 from yezatas.web import views
 from yezatas.web.app import NO_PACKAGING_KEY
 
@@ -186,6 +186,15 @@ def seed_variants(ui: Any, tools: Tools, review_id: int) -> None:
         result = packaging.make_variants(store, tools.maker, tools.vision, tools.segmenter, review_id,
                                          images_dir=ui.web.images_dir)
     assert result.variants, result.message
+
+
+def store_failed_variant(ui: Any, review_id: int) -> int:
+    record = ThumbnailVariant(id=0, review_id=review_id, video_id=V1, instruction="Zoom in", overlay_text="",
+                              image_file="", text_read="", text_ok=None, measurements={}, status="failed",
+                              error="The picture could not be made.", model="image-test", cost_usd=None,
+                              created_at="")
+    with Store(ui.config.catalog_db) as store:
+        return store.add_thumbnail_variant(record)
 
 
 def stored_variants(ui: Any) -> list[Any]:
@@ -422,6 +431,71 @@ def test_making_variants_stores_them_and_the_card_shows_each_one(tmp_path: Path)
     assert 'href="/videos/%s/packaging?variant=1">Preview in a feed<' % V1 in first
     assert "Text matches" in second and "cactus guide" in second
     assert "Generate 2 more thumbnail options" in section
+
+
+def test_removing_a_variant_deletes_it_and_its_picture_and_leaves_the_others(tmp_path: Path) -> None:
+    ui, tools, _ = make_pk_ui(tmp_path)
+    run_check(ui)
+    run_variants(ui)
+    first, second = stored_variants(ui)
+    picture_file = packaging.stored_image_path(ui.web.images_dir, V1, first.image_file)
+    assert picture_file.is_file()
+    assert f'action="/videos/{V1}/packaging/variants/{first.id}/remove"' in card(page(ui))
+
+    resp = nf(ui, f"/videos/{V1}/packaging/variants/{first.id}/remove")
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}#thumbnail"
+    assert [v.id for v in stored_variants(ui)] == [second.id]
+    assert not picture_file.exists()
+    assert packaging.stored_image_path(ui.web.images_dir, V1, second.image_file).is_file()
+    html = page(ui)
+    assert f'id="variant-{first.id}"' not in html and f'id="variant-{second.id}"' in html
+    assert "Variant idea removed. Nothing changed on YouTube." in html
+    assert ui.client.get(f"/videos/{V1}/packaging/variants/{first.id}.jpg").status_code == 404
+
+
+def test_removing_keeps_the_readers_place(tmp_path: Path) -> None:
+    ui, tools, _ = make_pk_ui(tmp_path)
+    run_check(ui)
+    run_variants(ui)
+    first, _second = stored_variants(ui)
+    assert 'data-keep-mark="packaging-variants"' in card(page(ui))
+    resp = nf(ui, f"/videos/{V1}/packaging/variants/{first.id}/remove?stay=1")
+    assert resp.status_code == 303 and resp.headers["location"] == f"/videos/{V1}?go=thumbnail"
+
+
+def test_a_failed_variant_can_be_removed(tmp_path: Path) -> None:
+    ui, tools, _ = make_pk_ui(tmp_path)
+    run_check(ui)
+    with Store(ui.config.catalog_db) as store:
+        review = store.latest_packaging_review(V1)
+    assert review is not None
+    variant = store_failed_variant(ui, review.id)
+    assert f"/packaging/variants/{variant}/remove" in card(page(ui))
+    nf(ui, f"/videos/{V1}/packaging/variants/{variant}/remove")
+    assert stored_variants(ui) == []
+
+
+def test_removing_refuses_another_videos_variant_and_a_bad_id(tmp_path: Path) -> None:
+    ui, tools, _ = make_pk_ui(tmp_path)
+    run_check(ui)
+    run_variants(ui)
+    first, second = stored_variants(ui)
+    assert nf(ui, f"/videos/{V2}/packaging/variants/{first.id}/remove").status_code == 303
+    assert nf(ui, f"/videos/{V1}/packaging/variants/abc/remove").status_code == 303
+    assert nf(ui, f"/videos/{V1}/packaging/variants/999/remove").status_code == 303
+    assert len(stored_variants(ui)) == 2
+    assert "There is no such variant idea." in page(ui)
+
+
+def test_removing_needs_the_csrf_token(tmp_path: Path) -> None:
+    ui, tools, _ = make_pk_ui(tmp_path)
+    run_check(ui)
+    run_variants(ui)
+    first, _second = stored_variants(ui)
+    resp = ui.client.post(f"/videos/{V1}/packaging/variants/{first.id}/remove", data={"csrf": "wrong"},
+                          follow_redirects=False)
+    assert resp.status_code == 403
+    assert len(stored_variants(ui)) == 2
 
 
 def test_a_variant_whose_text_differs_is_flagged_with_what_was_read(tmp_path: Path) -> None:
@@ -752,9 +826,11 @@ def test_there_is_no_upload_button_or_form_on_either_page(tmp_path: Path) -> Non
     video_page = page(ui)
     section = card(video_page)
     actions = set(re.findall(r'<form[^>]*action="([^"]*)"', section))
-    assert actions == {f"/videos/{V1}/packaging", "/packaging/done",
-                       f"/videos/{V1}/packaging/variants"} | ({"/packaging/variants/done"}
-                                                              & actions)
+    removes = {a for a in actions if re.fullmatch(rf"/videos/{V1}/packaging/variants/\d+/remove", a)}
+    assert len(removes) == len(stored_variants(ui))
+    assert actions - removes == {f"/videos/{V1}/packaging", "/packaging/done",
+                                 f"/videos/{V1}/packaging/variants"} | ({"/packaging/variants/done"}
+                                                                        & actions)
     assert 'type="file"' not in section
     preview = ui.client.get(f"/videos/{V1}/packaging?variant=1").text
     assert set(re.findall(r'<form[^>]*action="([^"]*)"', preview)) == {"/videos"}  # only the search box
