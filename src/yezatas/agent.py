@@ -300,13 +300,13 @@ def _search_words(text: str) -> set[str]:
 
 
 class _Toolbox:
-    """The tools of one run. Remembers the links its tools returned: the fact guard allows them."""
+    """The tools of one run. Remembers the links and numbers its tools returned: the fact guard allows them."""
 
     def __init__(self, store: Store, video: Video) -> None:
         self._store = store
         self._video = video
         self.allowed_urls: set[str] = set()
-        self.allowed_numbers: set[str] = set()  # numbers in the transcript the model read
+        self.allowed_numbers: set[str] = set()  # numbers in the real text a tool returned
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "get_current_metadata": self._metadata,
             "get_scorecard": self._scorecard,
@@ -407,6 +407,7 @@ class _Toolbox:
         for _, v in ranked[:limit]:
             url = f"https://www.youtube.com/watch?v={v.video_id}"
             self.allowed_urls.add(url)
+            self.allowed_numbers |= numbers_in(v.title)
             videos.append({"video_id": v.video_id, "title": v.title, "url": url,
                            "views": v.view_count})
         return {"videos": videos}
@@ -434,6 +435,7 @@ class _Toolbox:
                         key=lambda kv: (-kv[1], kv[0]))[:10]
         for line, _ in common:
             self.allowed_urls.update(extract_urls(line))
+            self.allowed_numbers |= numbers_in(line)
         return {
             "video_count": len(public),
             "top_tags": [{"tag": tag_names[k], "count": n} for k, n in top_tags],

@@ -259,6 +259,43 @@ def test_related_video_url_is_allowed_once_a_tool_returned_it(store: Store) -> N
     assert result.status == "rejected"
 
 
+def test_number_in_a_related_video_title_is_allowed_once_a_tool_returned_it(store: Store) -> None:
+    pull = store.begin_pull("UC_fake", NOW)
+    store.upsert_video(replace(store.get_video(V2), title="Cactus soil 3.1 mix review"), pull, NOW)
+    watch = f"Watch next: Cactus soil 3.1 mix review {RELATED_URL}"
+    linked = suggestion(description=f"Intro.\nShop: {SHOP}\n{watch}\n")
+    client = FakeModelClient([
+        tool_reply(("find_related_videos", '{"query": "cactus soil"}')),
+        answer("Done."), answer(linked)])
+    result = suggest_for_video(store, client, V1, now=NOW)
+    assert result.status == "drafted"
+    assert "3.1" in store.get_draft(V1).description
+    store.delete_draft(V1)
+
+    # a number no tool returned is still refused, even next to the real title
+    invented = suggestion(description=f"Intro.\nShop: {SHOP}\n{watch}\nIt lasts 40 years.\n")
+    client = FakeModelClient([
+        tool_reply(("find_related_videos", '{"query": "cactus soil"}')),
+        answer("Done."), answer(invented), answer(invented)])
+    result = suggest_for_video(store, client, V1, now=NOW)
+    assert result.status == "rejected" and "40" in result.message
+
+    # without asking the tool, the title's number is an invention too
+    result = suggest_for_video(store, FakeModelClient(basic_script(answer(linked), answer(linked))),
+                               V1, now=NOW)
+    assert result.status == "rejected" and "3.1" in result.message
+
+
+def test_number_in_a_common_closing_line_is_allowed(store: Store) -> None:
+    pull = store.begin_pull("UC_fake", NOW)
+    closing = "Join 500 members: https://club.invalid/join"
+    for vid in (V2, V4):
+        store.upsert_video(replace(store.get_video(vid), description=f"About.\n{closing}\n"), pull, NOW)
+    text = suggestion(description=f"Intro.\nShop: {SHOP}\n{closing}\n")
+    client = FakeModelClient([tool_reply(("get_channel_profile", "{}")), answer("Done."), answer(text)])
+    assert suggest_for_video(store, client, V1, now=NOW).status == "drafted"
+
+
 def test_common_closing_line_urls_are_allowed(store: Store) -> None:
     pull = store.begin_pull("UC_fake", NOW)
     closing = "Join the club: https://club.invalid/join"
