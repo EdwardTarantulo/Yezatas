@@ -556,6 +556,9 @@ as it lands; the git history is the detailed record.
   drafts; those still need approval and a push on Changes. A session is capped at $2 of model use and lives in
   memory only. Titles, descriptions and tags only: chapters, translations and thumbnails stay on their own pages.
   Built by Claude Code's builder and reviewed by the orchestrator; tested with a scripted model over the real tools.
+- **2026-11-04**: **YouTube API limits.** A button on Bulk edit opens a table of what YouTube's API can do, can do in part and
+  cannot do, what each means and where to do it instead, so nobody has to ask the agent first. Every row was checked
+  against Google's documentation and YouTube Help. Built and tested by Claude Code.
 
 ---
 

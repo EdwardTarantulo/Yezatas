@@ -147,6 +147,22 @@
     });
   });
 
+  // Pop-ups: a button with data-dialog-open opens the native dialog it names. The browser traps focus,
+  // closes on Escape and puts focus back on the button. A click outside the dialog closes it too.
+  document.querySelectorAll("[data-dialog-open]").forEach(function (button) {
+    var dialog = document.getElementById(button.getAttribute("data-dialog-open"));
+    if (!dialog || !dialog.showModal) return;
+    button.hidden = false;
+    button.addEventListener("click", function () { dialog.showModal(); dialog.scrollTop = 0; });
+    dialog.querySelectorAll("[data-dialog-close]").forEach(function (close) {
+      close.addEventListener("click", function () { dialog.close(); });
+    });
+    dialog.addEventListener("click", function (e) {
+      var box = dialog.getBoundingClientRect();
+      if (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) dialog.close();
+    });
+  });
+
   if (document.body.dataset.poll !== "1") return;
 
   var csrf = document.body.dataset.csrf || "";

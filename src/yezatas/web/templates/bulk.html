@@ -5,6 +5,7 @@
 {% set a = agent %}
 <h1 class="page-title">Bulk edit</h1>
 <p class="intro">Change many videos at once. Say what you want in plain words and {{ ai_name() }} looks through your channel, stages the changes and shows you every one; or do it yourself below with Find &amp; replace or a Footer block, which use no model. Only drafts are made, and only for the videos you tick. Nothing reaches YouTube until you approve and push on the Changes page. After you push these drafts, History can undo that whole push in one step.</p>
+{% include "_api_limits.html" %}
 
 {% if error %}<div class="flash error" role="alert" id="bulk-error">{{ error }}</div>{% endif %}
 {% if a.failed %}<div class="flash error" role="alert" id="agent-failed">{{ a.failed }}</div>{% endif %}

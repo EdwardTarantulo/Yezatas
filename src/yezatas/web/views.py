@@ -3212,3 +3212,99 @@ def build_strategy_view(report: StrategyReport | None, videos: Sequence[Video],
                    for i in report.ideas),
         notes=tuple(report.notes), model=report.model, tokens=tokens, cost=cost,
         when=when(report.created_at), stale=stale)
+
+
+@dataclass(frozen=True)
+class ApiLimitRow:
+    name: str
+    meaning: str
+    where: str
+    href: str = ""  # a page of Yezatas itself, when that is where to do it
+
+
+@dataclass(frozen=True)
+class ApiLimitGroup:
+    status: str  # can, part or none: the id of the group
+    label: str
+    pill: str  # the status colour, from the .pill classes
+    rows: tuple[ApiLimitRow, ...]
+
+
+@dataclass(frozen=True)
+class ApiLimits:
+    groups: tuple[ApiLimitGroup, ...]
+    quota_units: str
+    quota_note: str
+    quota_costs: tuple[tuple[str, str], ...]
+    checked: str
+    sources: tuple[tuple[str, str], ...]
+
+
+# The "YouTube API limits" pop-up on the Bulk edit page. Every line was checked against the pages in
+# `sources`, and against this repo for what Yezatas itself does. Change a row only after reading the source.
+# The title test refusal is not in Google's error tables: it is the reason YouTube returned to a push (push.py).
+API_LIMITS = ApiLimits(
+    groups=(
+        ApiLimitGroup("can", "Can do", "done", (
+            ApiLimitRow("Titles, descriptions and tags",
+                        "Yezatas can read and change them. You approve every push.",
+                        "Here or on a video's page, then Changes", "/changes"),
+            ApiLimitRow("Translated titles and descriptions",
+                        "Yezatas can read them, and add or change them.",
+                        "Translations", "/translations"),
+            ApiLimitRow("Replacing a thumbnail",
+                        "Yezatas can upload a new thumbnail after you confirm. Your YouTube account must be verified.",
+                        "A video's page, under Thumbnail", "/videos"),
+            ApiLimitRow("Reading and answering comments",
+                        "Yezatas can read comments, and post a reply or a new comment after you confirm.",
+                        "Comments", "/comments"),
+            ApiLimitRow("Captions",
+                        "The API can read and upload caption tracks. Yezatas only reads them, and only on your own videos.",
+                        "A video's page, under Chapters", "/videos"),
+            ApiLimitRow("Views, watch time and traffic sources",
+                        "Yezatas reads these from YouTube Analytics.",
+                        "Analytics", "/analytics"),
+        )),
+        ApiLimitGroup("part", "Can do in part", "warn", (
+            ApiLimitRow("Custom or automatic thumbnail",
+                        "YouTube tells the uploader if a video has a custom thumbnail. "
+                        "No field says a video has no thumbnail. Yezatas does not read this yet.",
+                        "YouTube Studio: Content"),
+            ApiLimitRow("Ad revenue per video",
+                        "YouTube Analytics can report it, but only for channels in the YouTube Partner Program, "
+                        "and only with an extra permission. Yezatas does not ask for that permission.",
+                        "YouTube Studio: Analytics"),
+            ApiLimitRow("Impressions and click-through rate",
+                        "YouTube offers these only as bulk report files, not as live answers. "
+                        "Yezatas does not read those files.",
+                        "YouTube Studio: Analytics, then Reach"),
+        )),
+        ApiLimitGroup("none", "Not available", "problem", (
+            ApiLimitRow("Ads on or off for a video",
+                        "The API has no field for this, so Yezatas cannot list which videos have ads turned on.",
+                        "YouTube Studio: Content, then Monetization"),
+            ApiLimitRow("End screens and cards",
+                        "The API cannot read or add them. Analytics only counts clicks on cards.",
+                        "YouTube Studio: Content, the video, then Editor"),
+            ApiLimitRow("Pinning a comment",
+                        "The API cannot pin a comment, and it does not say which one is pinned. "
+                        "Yezatas can post the comment for you.",
+                        "Under the video on YouTube: More, then Pin"),
+            ApiLimitRow("Title and thumbnail tests",
+                        "The API cannot start a test or see one. YouTube refuses a new title while a test runs: "
+                        "the push fails and your draft is kept.",
+                        "YouTube Studio: Analytics, Reach, then Manage test"),
+        )),
+    ),
+    quota_units="10,000",
+    quota_note="The default daily limit for YouTube's API. It resets at midnight Pacific Time, and Yezatas stops before "
+               "going over. At 50 units each, that is about 200 video changes a day.",
+    quota_costs=(("Reading a video", "1"), ("Changing a video", "50"), ("Replacing a thumbnail", "50"),
+                 ("Reading a video's captions", "250")),
+    checked="Checked on November 4, 2026. Google can change this. Sources:",
+    sources=(("YouTube Data API", "https://developers.google.com/youtube/v3/docs/videos"),
+             ("quota costs", "https://developers.google.com/youtube/v3/determine_quota_cost"),
+             ("Analytics API", "https://developers.google.com/youtube/analytics/channel_reports"),
+             ("Reporting API", "https://developers.google.com/youtube/reporting/v1/reports/channel_reports"),
+             ("YouTube Help", "https://support.google.com/youtube/answer/13861714")),
+)

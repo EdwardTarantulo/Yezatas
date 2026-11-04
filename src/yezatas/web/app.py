@@ -88,7 +88,7 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (BULK_EXAMPLES, STARTER_QUESTIONS, build_agent_session, build_posted_rows, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
+from .views import (API_LIMITS, BULK_EXAMPLES, STARTER_QUESTIONS, build_agent_session, build_posted_rows, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
                     affiliate_apply_message, build_adcheck_view, build_shorts_view, build_affiliate_preview,
                     build_agent_review, build_bulk_preview, build_channel_comments_view, build_checks_view, build_comments_view, build_copilot_turns, build_glossary_rows, build_links_view, build_listing,
                     build_outlier_view, build_outdated_view, build_packaging_view, build_preview, build_strategy_view, build_subtitles_view,
@@ -3862,7 +3862,7 @@ def create_app(
 
     def bulk_data(form: Any, error: str, preview: Any) -> dict[str, Any]:
         return {"active": "bulk", "form": form, "error": error, "preview": preview,
-                "hidden": form.pairs(), "max_bulk": bulk.MAX_BULK, "agent": agent_data(),
+                "hidden": form.pairs(), "max_bulk": bulk.MAX_BULK, "agent": agent_data(), "api_limits": API_LIMITS,
                 "poll": state.bulk_agent_job.snapshot().running}
 
     @app.get("/bulk")
