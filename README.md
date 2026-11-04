@@ -12,6 +12,9 @@
     <img src="https://img.shields.io/badge/runs-locally-2ea44f.svg" alt="Runs locally">
     <img src="https://img.shields.io/badge/built_for-Meta_Global_AI_Developer_Hackathon-0866FF.svg" alt="Built for the Meta Global AI Developer Hackathon">
   </p>
+  <p align="center">
+    <a href="https://youtu.be/j1qkAivRL_M"><strong>Watch the 3-minute demo</strong></a>
+  </p>
 </p>
 
 ---
