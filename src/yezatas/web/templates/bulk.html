@@ -1,49 +1,136 @@
 {% extends "shell.html" %}
+{% from "_macros.html" import thumb, diff_view %}
 {% block title %}Bulk edit - Yezatas{% endblock %}
 {% block content %}
+{% set a = agent %}
 <h1 class="page-title">Bulk edit</h1>
-<p class="intro">Change many videos at once: swap a link or fix a typo everywhere, or put a block at the end of every description. No model is used, and only drafts are made. Nothing reaches YouTube until you approve and push on the Changes page. After you push these drafts, History can undo that whole push in one step.</p>
+<p class="intro">Change many videos at once. Say what you want in plain words and {{ ai_name() }} looks through your channel, stages the changes and shows you every one; or do it yourself below with Find &amp; replace or a Footer block, which use no model. Only drafts are made, and only for the videos you tick. Nothing reaches YouTube until you approve and push on the Changes page. After you push these drafts, History can undo that whole push in one step.</p>
 
 {% if error %}<div class="flash error" role="alert" id="bulk-error">{{ error }}</div>{% endif %}
+{% if a.failed %}<div class="flash error" role="alert" id="agent-failed">{{ a.failed }}</div>{% endif %}
 
-<section class="card" id="bulk-ask" aria-labelledby="h-bulk-ask">
-  <h2 id="h-bulk-ask">Describe the change</h2>
-  {% if not has_key %}<p class="hint" id="bulk-ask-no-key">There is no Meta API key. Add one in Configuration. Nothing was sent.</p>{% endif %}
-  <form class="edit-form" method="post" action="/bulk/ask" id="bulk-ask-form">
+{% if a.session is none %}
+<section class="card ag-start" id="agent" aria-labelledby="h-agent">
+  <h2 id="h-agent">Tell it what to change</h2>
+  {% if not a.has_key %}<p class="hint" id="agent-no-key">There is no Meta API key. Add one in Configuration. Nothing was sent.</p>{% endif %}
+  <form class="edit-form" method="post" action="/bulk/agent" id="agent-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="field">
-      <label for="ba-request">Your change</label>
-      <textarea id="ba-request" name="request" rows="3" maxlength="{{ request_max }}" data-count-limit="{{ request_max }}" data-count-unit="characters" data-count-for="ba-count" placeholder="For example: swap https://discord.gg/oldcode for https://discord.gg/newcode on videos from 2024">{{ ask_request }}</textarea>
-      <p class="hint counter" id="ba-count" aria-live="off">Up to {{ request_max }} characters.</p>
+      <label for="ag-request">What should change?</label>
+      <textarea id="ag-request" name="request" rows="5" maxlength="{{ a.request_max }}" data-count-limit="{{ a.request_max }}" data-count-unit="characters" data-count-for="ag-count" placeholder="For example: shorten every title over 60 characters, or swap https://discord.gg/oldcode for https://discord.gg/newcode on videos from 2024, or add a Watch next link to the most related video in every smartwatch video"{% if not a.has_key %} disabled{% endif %}></textarea>
+      <p class="hint counter" id="ag-count" aria-live="off">Up to {{ a.request_max }} characters.</p>
     </div>
-    <p class="hint">{{ ai_name() }} only picks steps from a fixed list. Any new text must be in your words; code makes the changes, and only as drafts.</p>
-    <p class="hint">Your words, and the links and repeated lines from your descriptions, go to {% if ai_local() %}{{ model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ model }}). Meta's terms apply (<a href="/configuration#ai-data">what Meta may do with it</a>).{% endif %} Nothing is sent to YouTube.</p>
-    <div class="actions"><button type="submit" class="button primary"{% if not has_key %} disabled{% endif %}>Plan it with {{ ai_name() }}</button></div>
+    <div class="ag-chips" role="group" aria-label="Examples">
+      <span class="chip-label">Try</span>
+      {% for example in a.examples %}<button type="button" class="chip ag-chip" data-fill-target="ag-request" data-fill-text="{{ example }}"{% if not a.has_key %} disabled{% endif %}>{{ example }}</button>{% endfor %}
+    </div>
+    <ul class="ag-facts hint">
+      <li>It can read your titles, descriptions, tags and transcripts, and it may write new text.</li>
+      <li>A fact guard refuses new numbers and links that are not in your words or your videos.</li>
+      <li>Only drafts are made, and only for the videos you tick. Nothing is sent to YouTube.</li>
+      <li>Your words, and what it reads from your videos, go to {% if ai_local() %}{{ a.model }} on this computer. Nothing leaves it.{% else %}Meta's Model API ({{ a.model }}). Meta's terms apply (<a href="/configuration#ai-data">what Meta may do with it</a>).{% endif %}</li>
+    </ul>
+    <div class="actions"><button type="submit" class="button primary" id="agent-start"{% if not a.has_key %} disabled{% endif %}>Start with {{ ai_name() }}</button></div>
   </form>
 </section>
+{% else %}
+{% set s = a.session %}
+<section class="card" id="agent-request" aria-labelledby="h-agent-request">
+  <div class="ag-head">
+    <h2 id="h-agent-request">{{ 'Your words' if s.requests|length == 1 else 'Your words and replies' }}</h2>
+    {% if not s.running %}
+    <form class="inline" method="post" action="/bulk/agent/discard"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary" id="agent-restart">Start over</button></form>
+    {% endif %}
+  </div>
+  {% for text in s.requests %}<p class="cp-q"><span class="cp-who">You</span>{{ text }}</p>{% endfor %}
+</section>
 
-{% if ask_proposal %}
-<section class="card" id="bulk-ask-proposal" aria-labelledby="h-bulk-ask-proposal">
-  <h2 id="h-bulk-ask-proposal">Proposed change</h2>
-  {% if ask_proposal.cannot %}
-  <p id="ba-cannot">{{ ask_proposal.cannot }}</p>
-  <p class="muted" id="ba-cost">{{ ask_proposal.model }} &middot; {{ ask_proposal.tokens }} tokens{% if not ai_local() %} &middot; cost {{ ask_proposal.cost }}{% endif %}</p>
-  {% else %}
-  {% for line in ask_proposal.explain %}<p class="ba-explain">{{ line }}</p>{% endfor %}
-  <p class="muted" id="ba-cost">{{ ask_proposal.model }} &middot; {{ ask_proposal.tokens }} tokens{% if not ai_local() %} &middot; cost {{ ask_proposal.cost }}{% endif %}</p>
-  <form method="post" action="/bulk/ask/preview">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="request" value="{{ ask_proposal.request }}">
-    <input type="hidden" name="plan" value="{{ ask_proposal.plan_json }}">
-    <div class="actions"><button type="submit" class="button primary">Preview these changes</button></div>
-  </form>
+<section class="card ag-run" id="agent-run" aria-labelledby="h-agent-log">
+  <div class="ag-head">
+    <h2 id="h-agent-log">What it did</h2>
+    <span class="muted ag-staged" id="ag-staged" aria-live="polite">{{ s.staged }} video{{ '' if s.staged == 1 else 's' }} staged</span>
+    {% if s.running %}
+    <form class="inline" method="post" action="/bulk/agent/stop"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="button secondary" id="agent-stop"{% if s.stopping %} disabled{% endif %}>Stop</button></form>
+    {% endif %}
+  </div>
+  <ol class="ag-log{% if s.running %} live{% endif %}" id="ag-log" data-count="{{ s.log|length }}" tabindex="0" aria-label="What the agent did">
+    {% for line in s.log %}<li class="ag-line">{{ line }}</li>{% endfor %}
+    {% if s.running %}<li class="ag-now" id="ag-now"><span class="spinner" aria-hidden="true"></span><span id="bulk_agent-msg" role="status" aria-live="polite">{{ a.message or 'Starting…' }}</span>{% if s.stopping %}<span class="muted"> Stopping after this step.</span>{% endif %}</li>{% endif %}
+  </ol>
+  {% if s.running %}<p class="hint">This can take a few minutes. You can leave this page; the work goes on and the result is here when you come back.</p>{% endif %}
+</section>
+
+{% if not s.running %}
+<section class="card" id="agent-answer" aria-labelledby="h-agent-answer">
+  <h2 id="h-agent-answer">{{ ai_name() }} says</h2>
+  {% if s.error %}<div class="flash error" role="alert" id="agent-error">{{ s.error }}</div>{% endif %}
+  {% if s.closing %}<div class="cp-a" id="agent-closing">{{ s.closing }}</div>{% endif %}
+  {% if s.notes %}
+  <ul class="cp-notes muted" id="agent-notes">
+    {% for n in s.notes %}<li>{{ n }}</li>{% endfor %}
+  </ul>
   {% endif %}
-  <form method="post" action="/bulk/ask/discard">
+  <p class="muted cp-foot" id="agent-usage">{{ s.model }} &middot; {{ s.tokens }}{% if not ai_local() %} &middot; about {{ s.cost }}{% endif %}{% if s.tool_calls %} &middot; {{ s.tool_calls|length }} tool call{{ '' if s.tool_calls|length == 1 else 's' }}{% endif %}</p>
+  {% if s.tool_calls %}
+  <details class="backup">
+    <summary>Show what it looked at</summary>
+    <ul class="run-list">
+      {% for c in s.tool_calls %}<li><code>{{ c.name }}</code> <code>{{ c.arguments }}</code> <span class="muted">({{ c.result_chars }} characters returned)</span></li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+  <form class="edit-form ag-reply" method="post" action="/bulk/agent/continue" id="agent-reply-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <div class="actions"><button type="submit" class="button secondary">Discard</button></div>
+    <div class="field">
+      <label for="ag-reply">Reply to change the plan</label>
+      <textarea id="ag-reply" name="reply" rows="3" maxlength="{{ a.request_max }}" data-count-limit="{{ a.request_max }}" data-count-unit="characters" data-count-for="ag-reply-count" placeholder="For example: make them shorter, or skip the Shorts"{% if not a.has_key %} disabled{% endif %}></textarea>
+      <p class="hint counter" id="ag-reply-count" aria-live="off">Up to {{ a.request_max }} characters.</p>
+    </div>
+    <div class="actions"><button type="submit" class="button primary" id="agent-continue"{% if not a.has_key %} disabled{% endif %}>Continue</button></div>
   </form>
 </section>
 {% endif %}
+
+{% if a.review is not none %}
+{% set r = a.review %}
+<section id="agent-review" aria-label="Review">
+  <h2 class="bulk-summary" id="agent-summary">{{ r.summary }}</h2>
+  {% if r.too_many %}<p class="flash error" role="alert" id="agent-too-many">{{ r.too_many }}</p>{% endif %}
+  {% if r.rows %}
+  <form method="post" action="/bulk/agent/apply" id="agent-apply">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="tr-select" data-select-for="agent-rows" hidden>Select <button type="button" data-select="all">all</button><button type="button" data-select="none">none</button></p>
+    <ul class="ag-rows" id="agent-rows">
+      {% for row in r.rows %}
+      <li class="ag-row{% if row.blocked %} blocked{% endif %}" id="agv-{{ row.video_id }}">
+        <label class="ag-tick" data-state="{{ 'own' if row.blocked else '' }}"><input type="checkbox" name="video_id" value="{{ row.video_id }}" aria-label="Include {{ row.title }}"{% if row.blocked %} disabled{% else %} checked{% endif %}></label>
+        <a class="vthumb ag-thumb" href="/videos/{{ row.video_id|urlencode }}" tabindex="-1" aria-hidden="true">{{ thumb(row.thumb, 'sm') }}</a>
+        <div class="ag-info">
+          <p class="ag-title"><a href="/videos/{{ row.video_id|urlencode }}">{{ row.title }}</a>{% for f in row.fields %} <span class="pill">{{ f }}</span>{% endfor %}</p>
+          {% if row.reason %}<p class="ag-reason">{{ row.reason }}</p>{% endif %}
+          {% if row.blocked %}<p class="bulk-blocked"><strong>Blocked:</strong> {{ row.blocked }}</p>{% endif %}
+          {% for w in row.warnings %}<p class="issue warning bulk-warning"><strong>Warning:</strong> {{ w }}</p>{% endfor %}
+          <details class="ag-diff"><summary>Show the changes</summary>{{ diff_view(row.diff) }}</details>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="actions">
+      <button type="submit" class="button primary" id="agent-make-drafts"{% if not r.ready %} disabled{% endif %}>Make drafts</button>
+      <button type="submit" class="button secondary" id="agent-discard" formaction="/bulk/agent/discard" formnovalidate>Discard</button>
+      <span class="muted">Only the ticked videos get a draft. Nothing is sent to YouTube; review the drafts on <a href="/changes">Changes</a>.</span>
+    </div>
+  </form>
+  {% else %}
+  <p class="muted" id="agent-empty">Nothing is staged. Reply above to change the plan, or start over.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endif %}
+
+<section class="ag-diy" id="do-it-yourself" aria-labelledby="h-diy">
+  <h2 class="ag-h2" id="h-diy">Do it yourself</h2>
+  <p class="muted">Find &amp; replace and Footer block. No model is used here, and only drafts are made.</p>
 
 <form class="card bulk-form edit-form" method="get" action="/bulk" id="bulk-form">
   <fieldset class="bulk-kind">
@@ -105,13 +192,10 @@
   <h2 class="bulk-summary" id="bulk-summary">{{ preview.summary }}</h2>
   {% if preview.too_many %}<p class="flash error" role="alert" id="bulk-too-many">{{ preview.too_many }}</p>{% endif %}
   {% if preview.rows %}
-  <form method="post" action="{% if ask_preview %}/bulk/ask/apply{% else %}/bulk/apply{% endif %}" id="bulk-apply">
+  <form method="post" action="/bulk/apply" id="bulk-apply">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    {% if ask_preview %}<input type="hidden" name="request" value="{{ ask_request }}">
-    <input type="hidden" name="plan" value="{{ ask_plan_json }}">
-    {% else %}{% for name, value in hidden %}<input type="hidden" name="{{ name }}" value="{{ value }}">
+    {% for name, value in hidden %}<input type="hidden" name="{{ name }}" value="{{ value }}">
     {% endfor %}
-    {% endif %}
     <table class="vtable bulk-table">
       <thead>
         <tr>
@@ -147,4 +231,5 @@
   {% endif %}
 </section>
 {% endif %}
+</section>
 {% endblock %}

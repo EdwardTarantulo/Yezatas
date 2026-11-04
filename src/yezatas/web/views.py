@@ -20,7 +20,7 @@ from .. import edits
 from ..agent import estimate_cost
 from ..bulk import MAX_BULK, BulkChange, BulkResult, BulkSpec
 from ..copilot import REF, catalog_refs
-from ..diffs import DraftDiff, diff_row
+from ..diffs import DraftDiff, diff_draft, diff_row
 from ..links import SKIPPED_MESSAGE, LinkCheckSummary, LinkEntry
 from ..outliers import (BELOW_THRESHOLD, DESCRIPTION_CHARS, MAX_EXPLAINED, MAX_TYPICAL, MIN_AGE_DAYS,
                         OUTLIER_THRESHOLD, PEERS, OutlierScore, below_norm, outliers, ratio_label)
@@ -34,7 +34,7 @@ from ..store import (AdCheck, AgentRun, CopilotProposal, CopilotTurn, DraftRow, 
 from ..comments import CATEGORIES as COMMENT_CATEGORIES
 from ..postreply import posted_url
 from .. import affiliate as affiliate_mod
-from .. import bulkask as bulkask_mod
+from .. import bulkagent as bulkagent_mod
 from .. import customchecks as customchecks_mod
 from .. import glossary as glossary_mod
 from .. import replytemplates as replytemplates_mod
@@ -43,7 +43,7 @@ from ..soundtags import MODEL_NAME as SOUNDS_MODEL
 from ..transcribe import ASR_LANGUAGES, ASR_MODEL, ASR_PRICE_PER_HOUR, clock
 from ..translate import DEFAULT_TARGETS, LANGUAGES, same_language, source_hash, youtube_key
 from ..strategy import StrategyReport
-from ..validate import Issue, has_errors
+from ..validate import Draft, Issue, has_errors
 
 PAGE_SIZE = 50
 MAX_QUERY_CHARS = 200
@@ -501,7 +501,8 @@ def group_checks(card: Scorecard) -> list[CheckGroup]:
 
 
 # --- changes (drafts), push confirmation and history ------------------------------------------
-ORIGIN_LABELS = {"manual": "Edited by you", "restore": "Restored text"}
+ORIGIN_LABELS = {"manual": "Edited by you", "restore": "Restored text", "bulk-agent": "Bulk edit agent",
+                 "bulk-ask": "Bulk edit by asking"}
 
 # operation -> plain label, for the quota table on the push page
 QUOTA_LABELS = {
@@ -1860,21 +1861,106 @@ def bulk_apply_message(result: BulkResult) -> str:
     return text
 
 
-# --- bulk edit by asking: revalidating the posted plan ---------------------------------------
-def parse_ask_proposal(raw: str, request: str, digest: bulkask_mod.Digest) -> bulkask_mod.AskPlan:
-    """A plan re-validated from the posted proposal, or AskError.
+# --- the bulk edit agent -------------------------------------------------------------------------
+BULK_EXAMPLES = (
+    "Shorten every title over 60 characters",
+    "Swap my old Discord link for a new one on videos from 2024",
+    "Add a line at the top of every description about my new channel",
+)
+AGENT_ARGUMENT_CHARS = 300
 
-    The page never trusts the hidden fields: the plan is checked again in the
-    core with a fresh digest, and every written text must still be in the
-    creator's words, exactly as `propose` checks them.
-    """
-    try:
-        data = json.loads(raw)
-    except (TypeError, ValueError):
-        raise bulkask_mod.AskError("That plan cannot be used. Ask for it again.") from None
-    if not isinstance(data, dict):
-        raise bulkask_mod.AskError("That plan cannot be used. Ask for it again.")
-    return bulkask_mod.validate_plan(data, request, digest)
+
+@dataclass(frozen=True)
+class AgentReviewRow:
+    video_id: str
+    title: str
+    thumb: str
+    reason: str
+    fields: tuple[str, ...]  # labels: "Title", "Description", "Tags"
+    blocked: str
+    warnings: tuple[str, ...]
+    diff: DraftDiff
+
+
+@dataclass(frozen=True)
+class AgentReview:
+    rows: tuple[AgentReviewRow, ...]  # the videos that can be drafted first, then the blocked ones
+    ready: int
+    blocked: int
+    summary: str  # "N videos ready, M blocked", counted by code
+    too_many: str  # "" or the sentence about MAX_BULK
+
+
+def build_agent_review(reviewed: Sequence[bulkagent_mod.Reviewed]) -> AgentReview:
+    rows: list[AgentReviewRow] = []
+    for item in reviewed:
+        change, video = item.staged, item.video
+        rows.append(AgentReviewRow(
+            video_id=change.video_id,
+            title=(video.title if video is not None else change.title0) or change.video_id,
+            thumb=thumb_url(video) if video is not None else "",
+            reason=change.reason, fields=tuple(FIELD_LABELS[f] for f in change.fields),
+            blocked=item.blocked, warnings=item.warnings,
+            diff=diff_draft(Draft(change.title0, change.description0.replace("\r\n", "\n"),
+                                  change.tags0),
+                            Draft(change.title, change.description, change.tags))))
+    rows.sort(key=lambda r: bool(r.blocked))
+    blocked = sum(1 for r in rows if r.blocked)
+    ready = len(rows) - blocked
+    too_many = (f"{len(rows)} videos are staged, but at most {MAX_BULK} can be changed at once, so "
+                "Make drafts will refuse. Untick videos." if len(rows) > MAX_BULK else "")
+    return AgentReview(tuple(rows), ready, blocked, f"{_videos(ready)} ready, {blocked} blocked",
+                       too_many)
+
+
+@dataclass(frozen=True)
+class AgentToolCall:
+    name: str
+    arguments: str
+    result_chars: int
+
+
+@dataclass(frozen=True)
+class AgentSessionView:
+    requests: tuple[str, ...]  # what the creator wrote, oldest first (words just sent come last)
+    log: tuple[str, ...]  # what it did, one sentence per line, written by code
+    closing: Markup  # the model's closing message after the number guard, escaped
+    notes: tuple[str, ...]
+    error: str
+    model: str
+    tokens: str
+    cost: str
+    tool_calls: tuple[AgentToolCall, ...]
+    staged: int
+    stopping: bool
+    running: bool
+
+
+def build_agent_session(session: bulkagent_mod.BulkSession, titles: Mapping[str, str],
+                        running: bool) -> AgentSessionView:
+    with session.lock:
+        requests = (*session.requests, *([session.pending] if session.pending else []))
+        log, notes, error = tuple(session.log), tuple(session.notes), session.error
+        closing, refs, model = session.closing, dict(session.refs), session.model
+        calls = [dict(c) for c in session.calls]
+        staged = len(session.staged)
+    used, cached, out = session.tokens()
+    tool_calls = []
+    for call in calls:
+        args = call.get("arguments")
+        text = args if isinstance(args, str) else json.dumps(
+            args if args is not None else {}, separators=(",", ":"), ensure_ascii=False)
+        if len(text) > AGENT_ARGUMENT_CHARS:
+            text = text[:AGENT_ARGUMENT_CHARS - 1] + "…"
+        tool_calls.append(AgentToolCall(str(call.get("name") or ""), text,
+                                        int(call.get("result_chars") or 0)))
+    return AgentSessionView(
+        requests=requests, log=log,
+        closing=render_answer(closing, refs, titles) if closing else Markup(""),
+        notes=notes, error=error, model=model,
+        tokens=f"{used:,} tokens in ({cached:,} cached), {out:,} out",
+        cost=format_cost(estimate_cost(model, used, cached, out)), tool_calls=tuple(tool_calls),
+        staged=staged, stopping=session.stop.is_set(), running=running)
 
 
 # --- the copilot chat -----------------------------------------------------------------------------

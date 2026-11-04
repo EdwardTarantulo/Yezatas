@@ -56,7 +56,7 @@ from .. import primaryai, translate
 from ..catalog import NoChannelError, PullResult, pull_catalog
 from ..config import PRIMARY_AI_CHOICES, Config, ensure_dirs
 from .. import affiliate as affiliate_mod
-from .. import bulkask as bulkask_mod
+from .. import bulkagent as bulkagent_mod
 from .. import comments as comments_mod
 from .. import customchecks as customchecks_mod
 from .. import glossary as glossary_mod
@@ -88,14 +88,14 @@ from .jobs import Job, JobSnapshot, Report
 from .security import CSRF_FIELD, Sessions, install_security, load_session_key, verify_csrf
 from .steps import CheckState, compute_steps, estimate_pull_units
 from ..validate import DESCRIPTION_BYTE_LIMIT, TITLE_LIMIT
-from .views import (STARTER_QUESTIONS, build_posted_rows, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
+from .views import (BULK_EXAMPLES, STARTER_QUESTIONS, build_agent_session, build_posted_rows, Entry, PreviewChoice, RunView, SuggestBatch, SuggestItem,
                     affiliate_apply_message, build_adcheck_view, build_shorts_view, build_affiliate_preview,
-                    build_bulk_preview, build_channel_comments_view, build_checks_view, build_comments_view, build_copilot_turns, build_glossary_rows, build_links_view, build_listing,
+                    build_agent_review, build_bulk_preview, build_channel_comments_view, build_checks_view, build_comments_view, build_copilot_turns, build_glossary_rows, build_links_view, build_listing,
                     build_outlier_view, build_outdated_view, build_packaging_view, build_preview, build_strategy_view, build_subtitles_view,
                     build_transcript_view, build_translate_view, bulk_apply_message, change_cards,
                     chapters_blocker, dashboard_model, format_cost, format_count, format_date,
                     group_checks, history_groups, lang_name, links_check_line, make_entries,
-                    outlier_count, outlier_line, parse_affiliate_rule_form, parse_ask_proposal, parse_bulk_form,
+                    outlier_count, outlier_line, parse_affiliate_rule_form, parse_bulk_form,
                     parse_glossary_form, parse_rule_proposal, plan_lines, preview_card,
                     pull_moment, push_results, run_restore_summary, run_view, stops_batch,
                     thumb_url, top_other_videos)
@@ -174,6 +174,11 @@ STRATEGY_TIMEOUT_MESSAGE = (
 COPILOT_TIMEOUT_SECONDS = 5 * 60.0
 COPILOT_TIMEOUT_MESSAGE = (
     "The answer took more than 5 minutes, so Yezatas stopped waiting. Try a shorter question."
+)
+BULK_AGENT_TIMEOUT_SECONDS = 15 * 60.0
+BULK_AGENT_TIMEOUT_MESSAGE = (
+    "The bulk edit agent took more than 15 minutes, so Yezatas stopped waiting. What it had staged is "
+    "kept: reply to continue, or review it."
 )
 LINKS_TIMEOUT_SECONDS = 10 * 60.0
 LINKS_TIMEOUT_MESSAGE = (
@@ -266,8 +271,9 @@ AnalyticsReaderFactory = Callable[[Any], "searchgaps_mod.AnalyticsReader"]
 ChannelReaderFactory = Callable[[Any], "channelstats_mod.ChannelReader"]
 GapRankFn = Callable[["searchgaps_mod.SearchTerms", list["searchgaps_mod.SearchGap"], Report],
                      "searchgaps_mod.GapRanking"]
-# (store, the creator's words) -> the proposed bulk plan
-BulkAskerFn = Callable[[Store, str], "bulkask_mod.AskProposal"]
+# (store, the session, the creator's words, the time of the views, report) -> None: the staged changes
+# stay in the session, in memory
+BulkAgentFn = Callable[[Store, "bulkagent_mod.BulkSession", str, datetime, Report], None]
 
 
 def default_translate_tools(config: Config) -> "tuple[translate.Translator | None, translate.Verifier]":
@@ -414,6 +420,14 @@ def map_copilot_error(exc: BaseException) -> tuple[str, str]:
     if isinstance(exc, copilot_mod.CopilotError) or type(exc) is ValueError:
         return "copilot", str(exc)  # the plain sentences of the copilot's own checks
     return "copilot", f"The answer stopped unexpectedly ({exc.__class__.__name__})."
+
+
+def map_bulk_agent_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, agent.ModelError):
+        return exc.kind, str(exc)
+    if isinstance(exc, bulkagent_mod.BulkAgentError) or type(exc) is ValueError:
+        return "bulk_agent", str(exc)
+    return "bulk_agent", f"The bulk edit agent stopped unexpectedly ({exc.__class__.__name__})."
 
 
 def map_links_error(exc: BaseException) -> tuple[str, str]:
@@ -666,12 +680,14 @@ def make_default_rule_maker(config: Config) -> RuleMakerFn:
     return run
 
 
-def make_default_bulk_asker(config: Config) -> BulkAskerFn:
-    """The real bulk asker: Muse Spark through Meta's Model API, one client per ask."""
+def make_default_bulk_agent(config: Config) -> BulkAgentFn:
+    """The real bulk edit agent: the Primary AI's text model (Muse Spark through Meta's Model API by
+    default), one client per turn."""
 
-    def run(store: Store, request: str) -> "bulkask_mod.AskProposal":
+    def run(store: Store, session: "bulkagent_mod.BulkSession", text: str, as_of: datetime,
+            report: Report) -> None:
         client = primaryai.text_client(config)
-        return bulkask_mod.propose(client, store, request)
+        bulkagent_mod.run(store, client, session, text, as_of=as_of, report=report)
 
     return run
 
@@ -814,6 +830,7 @@ ACTIVITY: tuple[tuple[str, str, str, str, str, str, str], ...] = (
     ("shorts", "shorts_job", "_shorts_video", "Finding Shorts", "Shorts ideas ready", "Shorts finder stopped", "#tool-shorts"),
     ("comments", "comments_job", "_comments_video", "Reading comments", "Comments read", "Reading comments stopped", "#tool-comments"),
     ("assist", "assist_job", "_assist_video", "Sorting comments", "Comments sorted", "Sorting stopped", "#tool-comments"),
+    ("bulk_agent", "bulk_agent_job", "", "Changing videos", "Changes ready to review", "Bulk edit stopped", "/bulk"),
 )
 
 
@@ -843,7 +860,7 @@ class WebState:
         adcheck_fn: AdcheckFn | None = None,
         comment_reader: CommentReaderFactory | None = None,
         comments_assist: CommentsAssistFn | None = None,
-        rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
+        rule_maker: RuleMakerFn | None = None, bulk_agent: BulkAgentFn | None = None,
         strategy_fn: StrategyFn | None = None,
         shorts_fn: ShortsFn | None = None,
         analytics_sign_in: Callable[[Config], Any] | None = None,
@@ -880,7 +897,7 @@ class WebState:
         self._comment_writer_factory = comment_writer  # None: the real writer
         self._comments_assist = comments_assist or make_default_comments_assist(config)
         self._rule_maker = rule_maker or make_default_rule_maker(config)
-        self._bulk_asker = bulk_asker or make_default_bulk_asker(config)
+        self._bulk_agent = bulk_agent or make_default_bulk_agent(config)
         self._strategy = strategy_fn or make_default_strategy(config)
         self._shorts = shorts_fn or make_default_shorts(config)
         self._competitor_reader = competitor_reader  # None: the real reader
@@ -964,6 +981,10 @@ class WebState:
                                COPILOT_TIMEOUT_MESSAGE, clock)
         self._copilot_seen: JobSnapshot | None = None
         self._copilot_chat: int | None = None  # None: the chat of the newest turn
+        self.bulk_agent_job = Job(map_bulk_agent_error, BULK_AGENT_TIMEOUT_SECONDS,
+                                  BULK_AGENT_TIMEOUT_MESSAGE, clock)
+        self._bulk_agent_seen: JobSnapshot | None = None
+        self._bulk_session: bulkagent_mod.BulkSession | None = None  # in memory only, by design
         self.links_job = Job(map_links_error, LINKS_TIMEOUT_SECONDS, LINKS_TIMEOUT_MESSAGE, clock)
         self._links_seen: JobSnapshot | None = None
         self.adcheck_job = Job(map_adcheck_error, ADCHECK_TIMEOUT_SECONDS, ADCHECK_TIMEOUT_MESSAGE,
@@ -1817,6 +1838,77 @@ class WebState:
             with self._lock:
                 self._copilot_seen = snap
 
+    # --- bulk edit agent: plain words in, staged changes out (in memory) --------------------------
+    def bulk_session(self) -> "bulkagent_mod.BulkSession | None":
+        """The session on screen, if the creator started one that has not been discarded."""
+        with self._lock:
+            session = self._bulk_session
+        return session if session is not None and session.started else None
+
+    def start_bulk_agent(self, text: str, *, new: bool) -> str:
+        """Run one turn in the one bulk agent job. "" when it started, else a plain sentence."""
+        busy = "The bulk edit agent is still working. Wait for it to finish, or press Stop."
+        if self.bulk_agent_job.snapshot().running:
+            return busy
+        if new:
+            session = bulkagent_mod.BulkSession()
+        else:
+            found = self.bulk_session()
+            if found is None:
+                return "There is no session to continue. Start with your words."
+            session = found
+        session.pending = text.strip()
+        if not self.bulk_agent_job.start(lambda report: self._run_bulk_agent(session, text, report)):
+            session.pending = ""
+            return busy
+        with self._lock:
+            self._bulk_session = session
+        return ""
+
+    def _run_bulk_agent(self, session: "bulkagent_mod.BulkSession", text: str, report: Report) -> None:
+        report("Starting…")
+        with Store(self.config.catalog_db) as store:
+            pull = store.latest_pull()
+            if pull is None:
+                raise ValueError("There is no pulled catalog yet. Pull it in Configuration first.")
+            try:
+                self._bulk_agent(store, session, text, pull_moment(pull), report)
+            finally:
+                session.pending = ""  # a turn that never started leaves no half-sent words
+
+    def stop_bulk_agent(self) -> bool:
+        """Ask the running turn to stop after its current step. What is staged is kept."""
+        session = self.bulk_session()
+        if session is None or not self.bulk_agent_job.snapshot().running:
+            return False
+        session.stop.set()
+        return True
+
+    def discard_bulk_agent(self) -> bool:
+        """Forget the session and everything staged in it. Refused while a turn is running."""
+        if self.bulk_agent_job.snapshot().running:
+            return False
+        with self._lock:
+            self._bulk_session = None
+        return True
+
+    def bulk_agent_state(self) -> JobSnapshot:
+        """The job snapshot. A finished job the page already showed is idle. A turn that timed out is
+        told to stop, so its abandoned thread does not keep working on the session."""
+        snap = self.bulk_agent_job.snapshot()
+        if snap.error_kind == "timeout":
+            session = self.bulk_session()
+            if session is not None:
+                session.stop.set()
+        with self._lock:
+            return JobSnapshot("idle") if snap is self._bulk_agent_seen else snap
+
+    def dismiss_bulk_agent_result(self) -> None:
+        snap = self.bulk_agent_job.snapshot()
+        if not snap.running:
+            with self._lock:
+                self._bulk_agent_seen = snap
+
     # --- links: visit each external link once ----------------------------------------------------
     def start_links(self) -> bool:
         """Check the links in the one links job."""
@@ -2073,10 +2165,6 @@ class WebState:
         """Turn the creator's words into a proposed rule. Short: callers use a worker thread."""
         return self._rule_maker(request)
 
-    def propose_bulk(self, store: Store, request: str) -> "bulkask_mod.AskProposal":
-        """Turn the creator's words into a proposed bulk plan. Short: callers use a worker thread."""
-        return self._bulk_asker(store, request)
-
     def sign_out(self) -> bool:
         removed = auth.sign_out(self.config)
         self.reset_check()
@@ -2117,7 +2205,7 @@ def create_app(
     adcheck: AdcheckFn | None = None,
     comment_reader: CommentReaderFactory | None = None,
     comments_assist: CommentsAssistFn | None = None,
-    rule_maker: RuleMakerFn | None = None, bulk_asker: BulkAskerFn | None = None,
+    rule_maker: RuleMakerFn | None = None, bulk_agent: BulkAgentFn | None = None,
     strategy: StrategyFn | None = None,
     shorts: ShortsFn | None = None, shorts_key: Callable[[Config], bool] | None = None,
     analytics_sign_in: Callable[[Config], Any] | None = None,
@@ -2145,7 +2233,7 @@ def create_app(
                      packaging_tools or packaging_mod.packaging_tools_from_config,
                      packaging_fetch or packaging_mod.fetch_thumbnail,
                      packaging_key or (None if packaging_tools else has_meta_key), copilot,
-                     link_fetch, adcheck, comment_reader, comments_assist, rule_maker, bulk_asker,
+                     link_fetch, adcheck, comment_reader, comments_assist, rule_maker, bulk_agent,
                      strategy_fn=strategy, shorts_fn=shorts,
                      competitor_reader=competitor_reader, competitor_explain=competitor_explain,
                      analytics_sign_in=analytics_sign_in, analytics_credentials_loader=analytics_credentials_loader,
@@ -3324,6 +3412,7 @@ def create_app(
             "channel_stats": _job_json(state.channel_stats_job.snapshot()),
             "video_stats": _job_json(state.video_stats_job.snapshot()),
             "copilot": _job_json(state.copilot_job.snapshot()),
+            "bulk_agent": _job_json(state.bulk_agent_job.snapshot()),
             "links": _job_json(state.links_job.snapshot()),
             "adcheck": _job_json(state.adcheck_job.snapshot()),
             "category": _job_json(state.category_job.snapshot()),
@@ -3748,16 +3837,33 @@ def create_app(
         flash(request, kind, message)
         return see_other(target)
 
-    # --- bulk edit (no model: drafts only) -----------------------------------------------------
-    def bulk_data(form: Any, error: str, preview: Any, proposal: Any = None,
-                  ask_preview: bool = False, ask_request: str = "",
-                  ask_plan_json: str = "") -> dict[str, Any]:
+    # --- bulk edit: the plain-words agent, and two forms that use no model -------------------------
+    def agent_data() -> dict[str, Any]:
+        """What the agent part of the Bulk edit page shows (worker thread: it opens its own Store)."""
+        snap = state.bulk_agent_state()
+        failed = snap.message if snap.status == "failed" else ""
+        if snap.status == "failed":
+            state.dismiss_bulk_agent_result()  # shown once
+        session = state.bulk_session()
+        data: dict[str, Any] = {
+            "has_key": has_packaging_key(), "model": text_model_name(), "failed": failed,
+            "request_max": bulkagent_mod.REQUEST_MAX, "examples": BULK_EXAMPLES, "session": None,
+            "running": snap.running, "message": snap.message, "poll": snap.running,
+            "review": None, "max_bulk": bulk.MAX_BULK}
+        if session is None:
+            return data
+        with Store(config.catalog_db) as store:
+            titles = {v.video_id: v.title for v in store.list_videos()}
+            review = (None if snap.running
+                      else build_agent_review(bulkagent_mod.check_staged(store, session)))
+        data["session"] = build_agent_session(session, titles, snap.running)
+        data["review"] = review
+        return data
+
+    def bulk_data(form: Any, error: str, preview: Any) -> dict[str, Any]:
         return {"active": "bulk", "form": form, "error": error, "preview": preview,
-                "hidden": form.pairs(), "max_bulk": bulk.MAX_BULK,
-                "has_key": has_packaging_key(), "model": text_model_name(),
-                "request_max": bulkask_mod.REQUEST_MAX, "ask_proposal": proposal,
-                "ask_preview": ask_preview, "ask_request": ask_request,
-                "ask_plan_json": ask_plan_json}
+                "hidden": form.pairs(), "max_bulk": bulk.MAX_BULK, "agent": agent_data(),
+                "poll": state.bulk_agent_job.snapshot().running}
 
     @app.get("/bulk")
     def bulk_page(request: Request) -> Response:
@@ -3802,83 +3908,87 @@ def create_app(
         flash(request, kind, message)
         return see_other(target)
 
-    @app.post("/bulk/ask")
-    async def bulk_ask(request: Request) -> Response:
-        posted = await read_form(request)
-        text = str(posted.get("request") or "")
-        if not await run_in_threadpool(has_packaging_key):
+    # --- the bulk edit agent: every route is a POST with the csrf check; drafts only ---------------
+    BULK_BUSY = "The bulk edit agent is still working. Wait for it to finish, or press Stop."
+
+    def check_words(request: Request, text: str) -> bool:
+        """Flash why the words cannot be sent; True when they are fine."""
+        limit = bulkagent_mod.REQUEST_MAX
+        if not text:
+            flash(request, "error", "Describe the change in a few words first. Nothing was sent.")
+        elif len(text) > limit:
+            flash(request, "error", f"Your words have {len(text):,} characters; at most {limit:,} are "
+                  "allowed. Nothing was sent.")
+        elif not has_packaging_key():
             flash(request, "error", NO_PACKAGING_KEY, "ai")
-            return see_other("/bulk")
+        else:
+            return True
+        return False
 
-        def work() -> "bulkask_mod.AskProposal":
-            with Store(config.catalog_db) as store:
-                return state.propose_bulk(store, text)
+    def has_pull() -> bool:
+        with Store(config.catalog_db) as store:
+            return store.latest_pull() is not None
 
-        try:
-            proposal_core = await run_in_threadpool(work)
-        except (bulkask_mod.AskError, agent.ModelError) as exc:
-            flash(request, "error", str(exc))
-            return see_other("/bulk")
-        plan_json = ""
-        if proposal_core.plan is not None:
-            plan_json = json.dumps(bulkask_mod.plan_to_dict(proposal_core.plan),
-                                   ensure_ascii=False, sort_keys=True)
-        total = proposal_core.input_tokens + proposal_core.output_tokens
-        cost = agent.estimate_cost(proposal_core.model, proposal_core.input_tokens,
-                                   proposal_core.cached_tokens, proposal_core.output_tokens)
-        proposal = {"explain": proposal_core.explain, "cannot": proposal_core.cannot,
-                    "model": proposal_core.model, "tokens": f"{total:,}",
-                    "cost": format_cost(cost), "request": text.strip(),
-                    "plan_json": plan_json}
-        return render(request, "bulk.html",
-                      bulk_data(parse_bulk_form(posted, submitted=False), "", None,
-                                proposal=proposal, ask_request=text.strip(),
-                                ask_plan_json=plan_json))
-
-    @app.post("/bulk/ask/preview")
-    async def bulk_ask_preview(request: Request) -> Response:
+    @app.post("/bulk/agent")
+    async def bulk_agent_start(request: Request) -> Response:
+        """Start a new session from the creator's words."""
         posted = await read_form(request)
-        req_text = str(posted.get("request") or "")
-        plan_raw = str(posted.get("plan") or posted.get("plan_json") or "")
+        text = str(posted.get("request") or "").strip()
+        if not await run_in_threadpool(has_pull):
+            return back_to_setup()
+        if state.bulk_agent_job.snapshot().running:
+            flash(request, "error", BULK_BUSY)
+        elif state.bulk_session() is not None:
+            flash(request, "error", "A session is already open. Reply to it, or discard it first.")
+        elif await run_in_threadpool(check_words, request, text):
+            problem = state.start_bulk_agent(text, new=True)
+            if problem:
+                flash(request, "error", problem)
+        return see_other("/bulk")
 
-        def work() -> tuple[Any, str]:
-            with Store(config.catalog_db) as store:
-                digest = bulkask_mod.catalog_digest(store)
-                plan = parse_ask_proposal(plan_raw, req_text, digest)
-                changes = bulkask_mod.plan_ask(store, plan)
-                videos = {c.video_id: store.get_video(c.video_id) for c in changes}
-                preview = build_bulk_preview(
-                    changes, {k: v for k, v in videos.items() if v is not None})
-                plan_json = json.dumps(bulkask_mod.plan_to_dict(plan),
-                                       ensure_ascii=False, sort_keys=True)
-                return preview, plan_json
-
-        try:
-            preview, plan_json = await run_in_threadpool(work)
-        except bulkask_mod.AskError as exc:
-            flash(request, "error", str(exc))
-            return see_other("/bulk")
-        return render(request, "bulk.html",
-                      bulk_data(parse_bulk_form(posted, submitted=False), "", preview,
-                                ask_preview=True, ask_request=req_text.strip(),
-                                ask_plan_json=plan_json))
-
-    @app.post("/bulk/ask/apply")
-    async def bulk_ask_apply(request: Request) -> Response:
+    @app.post("/bulk/agent/continue")
+    async def bulk_agent_continue(request: Request) -> Response:
+        """A reply in the same session: the agent goes on from what is staged."""
         posted = await read_form(request)
-        req_text = str(posted.get("request") or "")
-        plan_raw = str(posted.get("plan") or posted.get("plan_json") or "")
+        text = str(posted.get("reply") or "").strip()
+        if not await run_in_threadpool(has_pull):
+            return back_to_setup()
+        if state.bulk_agent_job.snapshot().running:
+            flash(request, "error", BULK_BUSY)
+        elif state.bulk_session() is None:
+            flash(request, "error", "There is no session to continue. Start with your words.")
+        elif await run_in_threadpool(check_words, request, text):
+            problem = state.start_bulk_agent(text, new=False)
+            if problem:
+                flash(request, "error", problem)
+        return see_other("/bulk")
+
+    @app.post("/bulk/agent/stop")
+    async def bulk_agent_stop(request: Request) -> Response:
+        """Stop after the current step. Everything staged so far is kept."""
+        await read_form(request)
+        if state.stop_bulk_agent():
+            flash(request, "info", "Stopping after the current step. What is staged is kept.")
+        return see_other("/bulk")
+
+    @app.post("/bulk/agent/apply")
+    async def bulk_agent_apply(request: Request) -> Response:
+        """Make drafts for the ticked videos. Drafts only: they still need approval on Changes."""
+        posted = await read_form(request)
         ids = [str(i) for i in posted.getlist("video_id") if str(i)]
+        session = state.bulk_session()
 
         def work() -> tuple[str, str, str]:
+            if session is None:
+                return "error", "There is nothing to make drafts from. Start with your words.", "/bulk"
+            if state.bulk_agent_job.snapshot().running:
+                return "error", BULK_BUSY, "/bulk"
             if not ids:
                 return "error", "Tick at least one video to make drafts.", "/bulk"
             with Store(config.catalog_db) as store:
                 try:
-                    digest = bulkask_mod.catalog_digest(store)
-                    plan = parse_ask_proposal(plan_raw, req_text, digest)
-                    result = bulkask_mod.apply_ask(store, plan, ids)
-                except ValueError as exc:
+                    result = bulkagent_mod.apply(store, session, ids)
+                except bulkagent_mod.BulkAgentError as exc:
                     return "error", str(exc), "/bulk"
             message = bulk_apply_message(result)
             if result.drafted:
@@ -3889,10 +3999,23 @@ def create_app(
         flash(request, kind, message)
         return see_other(target)
 
-    @app.post("/bulk/ask/discard")
-    async def bulk_ask_discard(request: Request) -> Response:
+    @app.post("/bulk/agent/discard")
+    async def bulk_agent_discard(request: Request) -> Response:
+        """Forget the session and what is staged in it. Nothing was written, so nothing is undone."""
         await read_form(request)
+        if not state.discard_bulk_agent():
+            flash(request, "error", "The agent is still working. Press Stop first.")
         return see_other("/bulk")
+
+    @app.get("/api/bulk-agent")
+    def api_bulk_agent(after: int = 0) -> JSONResponse:
+        """The log lines written since line `after`, for the page that follows a running turn."""
+        snap = state.bulk_agent_job.snapshot()
+        session = state.bulk_session()
+        lines, total, staged = ([], 0, 0) if session is None else session.log_page(max(after, 0))
+        return JSONResponse({"status": snap.status, "message": snap.message, "log": lines,
+                             "total": total, "staged": staged,
+                             "stopping": bool(session is not None and session.stop.is_set())})
 
     # --- comments of the whole channel (/comments) ------------------------------------------------
     @app.get("/comments")

@@ -414,6 +414,12 @@ class _Toolbox:
         return row
 
     def _find(self, args: dict[str, Any]) -> dict[str, Any]:
+        found, limit = self._select(args)
+        return {"count": len(found), "shown": min(len(found), limit),
+                "videos": [r.summary() for r in found[:limit]]}
+
+    def _select(self, args: dict[str, Any]) -> tuple[list[_Row], int]:
+        """(every video the `find_videos` filters match, in the asked order; the row limit)."""
         _only(args, _FIND_PROPERTIES)
         visibility = _choice(args, "visibility", _VISIBILITY)
         min_views, max_views = _whole(args, "min_views"), _whole(args, "max_views")
@@ -453,8 +459,7 @@ class _Toolbox:
             found.sort(key=lambda r: -(r.score.ratio if r.score.ratio is not None else -1.0))
         elif sort == "score":
             found.sort(key=lambda r: r.card.score)
-        return {"count": len(found), "shown": min(len(found), limit),
-                "videos": [r.summary() for r in found[:limit]]}
+        return found, limit
 
     def _search(self, args: dict[str, Any]) -> dict[str, Any]:
         _only(args, ("query",))

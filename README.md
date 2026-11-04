@@ -57,7 +57,7 @@ Built for the Meta Global AI Developer Hackathon (Indie Dev track, "Build for Yo
 | **Transcribe** | Transcript, Shorts finder | Transcripts from the captions already on YouTube (free to read, times taken from YouTube's file) or from the creator's own video file picked in the browser; music and sound captions such as [Music] or [Applause] for videos without speech (PANNs, on this computer, with times from the real audio); chapter starts chosen by segment number (code sets the times), SRT downloads, and moments that could stand alone as a Short (picked by segment number; times and quotes from the transcript). |
 | **Packaging** | Packaging | The title and thumbnail judged together, measured by code and SAM 3.1, with variant ideas to download, preview in a feed or set as the thumbnail after a confirmation (the old one is saved in History). |
 | **Insights** | Outliers, Strategy, Competitors, Search gaps | Which videos beat the channel's own norm for their age, and what the winners share; a strategy report with next video ideas, each tied to the channel's own videos; the same outlier rule on up to 5 other public channels; and the real YouTube search terms whose words are missing from the titles. |
-| **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check, and find & replace or footer blocks over many videos, previewed first, or described in plain words. |
+| **Links and bulk** | Links, Bulk edit | Every link ranked by reach with a dead-link check. **Bulk edit works like a coding agent for your channel:** say what to change in plain words, and Muse Spark searches every video with tools, stages the edits and shows every diff. Find & replace and footer blocks are there too, with no model. |
 | **Ad safety** | Video | An advertiser-friendly check of the title, description, tags and transcript; every quote is checked by code. Advice only. |
 | **Community** | Video, Comments, Replies, Affiliate, Checks | Comments sorted with reply drafts to copy, or to post to YouTube after you check the exact text and confirm (each post is listed in History) (the API cannot pin a comment, so a pinned draft is pinned in Studio), reply templates, the creator's own affiliate rules as drafts, and custom checks described in plain words. |
 
@@ -69,14 +69,14 @@ Only models that Yezatas really calls, or that really wrote part of it, are list
 
 | Model | Where it runs | What Yezatas uses it for |
 |---|---|---|
-| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule, and a bulk change described in words into fixed steps. The strategy report: what works, the gaps and next video ideas, from tables made by code (every ref and number is checked by code). Explaining why other channels' outliers did well, and ranking the search gaps worth fixing. |
+| Muse Spark 1.3 | Meta's Model API | The suggestion agent (tool calls, schema-checked JSON). Choosing where chapters start, by transcript segment number (code sets the times). Translating when no Baseten key is set. Explaining what the channel's outlier videos share. The channel copilot: the whole catalog as a table in one context, read-only tools, edits only as proposals. The advertiser-friendly check. Sorting comments and drafting replies. Turning a check described in words into one fixed rule. The bulk edit agent: plain words in, ten tools over the whole catalog, staged edits out, each one through the validator and the fact guard. The strategy report: what works, the gaps and next video ideas, from tables made by code (every ref and number is checked by code). Explaining why other channels' outliers did well, and ranking the search gaps worth fixing. |
 | Muse Spark Open | Baseten | Translating titles, descriptions and subtitles, and the Shorts finder (Muse Spark 1.3 as the fallback for both). At build time it wrote much of Yezatas from briefs by Claude Code as orchestrator, which reviewed and tested every change before the developer approved it: the glossary, the Translations page, the Shorts finder, Competitors, Search gaps, the Comments page, the Today and Analytics pages, the redesigned video page with its Category and Pinned comment checks, and the sidebar counts (see the log). |
 | Muse Glimmer (30B) | The creator's own PC, through Ollama | Checking every translation, subtitles included: a blind back-translation, then a comparison with the original and a score. With Primary AI set to Local, it also runs every text feature above in place of Muse Spark, with no key and nothing leaving the computer. |
 | Muse Voice Transcribe | Meta's Model API | Transcripts of the creator's own video file, for chapters and SRT subtitles. |
 | Muse Spark 1.3 (vision) | Meta's Model API | The packaging check: reading the thumbnail (text, subject, face), the critique of title and thumbnail together, and reading the text back on each variant. Looking at the outliers' thumbnails next to typical ones. |
 | SAM 3.1 | Meta's Model API | The packaging check: the subject's and a face's share of the thumbnail, and whether they reach the duration-badge corner (code turns the boxes into numbers). |
 | Muse Image 1.0 | Meta's Model API | Thumbnail variant ideas: edits of the creator's current thumbnail, to download, or to set as the thumbnail only after the creator confirms it. |
-| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs, and the comments, reply-template, affiliate-link and custom-check modules (with store v12) and their pages, bulk edit by asking and the strategy report. |
+| Muse Code | The developer's PC, headless (build time only) | Wrote the edit validator and the draft diff model from written specs, and the comments, reply-template, affiliate-link and custom-check modules (with store v12) and their pages, bulk edit by asking (later replaced by the bulk edit agent) and the strategy report. |
 | Muse Wonder 1.0 | Inside Muse Code (build time only) | Orchestrated the Muse Code build of those four modules, their pages, bulk edit by asking and the strategy report: planned, briefed Muse Spark 1.3 builders, reviewed their work and fixed what the audits found. |
 
 ---
@@ -156,7 +156,7 @@ src/yezatas/
   seo.py                     # the SEO scorecard
   validate.py, facts.py      # the edit validator and the fact guard
   edits.py, diffs.py, push.py, bulk.py   # drafts, diffs, approve and push, bulk edits
-  bulkask.py                 # bulk edit by asking: fixed steps from plain words
+  bulkagent.py               # the bulk edit agent: plain words in, tools over the catalog, staged edits out
   agent.py, copilot.py       # the suggestion agent and the channel copilot (Muse Spark 1.3)
   translate.py, subtitle_translate.py    # verified translations (Muse Spark Open + Muse Glimmer)
   transcribe.py, chapters.py, subtitles.py   # transcripts, chapters, SRT
@@ -545,6 +545,17 @@ as it lands; the git history is the detailed record.
   the number guards tell 4.2 from 42. Translations no check passed are named on Changes and Push. Every model setting
   refuses Contributor models. Deleted videos leave the lists, Shorts and long videos are no longer compared as
   outliers, a file of the wrong length is refused for transcripts, and writers wait instead of hitting a locked database.
+- **2026-11-04**: **The bulk edit agent** replaces bulk edit by asking, which could only pick up to three fixed steps.
+  The creator says what to change in plain words ("swap my old subscribe link for this one everywhere, and shorten
+  every title over 60 characters"). **Muse Spark 1.3** works through it with ten tools: find videos by any filter,
+  find exact text, read a video or its transcript, apply small edits by code to every match, write per-video text,
+  look at what is staged and take things back. A live log says what it did, one line per step, written by code, and
+  Stop keeps what is staged. Every change goes through the validator and the fact guard before it is staged: new
+  numbers and links must be in the creator's words or in text a tool really returned. A refused change goes back to
+  the model with the reason. The creator reads every diff, can reply to change the plan, ticks videos and makes
+  drafts; those still need approval and a push on Changes. A session is capped at $2 of model use and lives in
+  memory only. Titles, descriptions and tags only: chapters, translations and thumbnails stay on their own pages.
+  Built by Claude Code's builder and reviewed by the orchestrator; tested with a scripted model over the real tools.
 
 ---
 

@@ -9,13 +9,16 @@ A video that already has a draft is blocked, so a bulk edit never mixes with ano
 text with an error-level validation issue is blocked too; warnings are shown but do not block.
 Matching is plain text and case-sensitive (no regex). Line breaks are compared as "\\n", the way
 drafts store them.
+
+The step helpers at the end (`Step`, `step_from_dict`, `apply_step`) are the small edits the bulk edit
+agent (`bulkagent.py`) applies by code to many videos; they are pure and need no model.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Sequence
+from typing import Any, Sequence
 
 from .edits import DraftError, save_draft
 from .store import Store, Video
@@ -30,6 +33,24 @@ MARKER_LIMIT = 500
 MAX_BULK = 500  # videos per apply
 
 BLOCKED_HAS_DRAFT = "This video already has a draft: push or discard it first."
+
+# The steps of the bulk edit agent: small edits that code applies the same way to many videos.
+STEP_KINDS = ("replace", "footer", "insert_after_first_paragraph", "remove_line", "add_first_line",
+              "title_prefix", "title_suffix", "add_tags", "remove_tags")
+_STEP_KEYS: dict[str, tuple[str, ...]] = {
+    "replace": ("find", "replace_with", "fields"),
+    "footer": ("footer", "marker"),
+    "insert_after_first_paragraph": ("text",),
+    "remove_line": ("contains",),
+    "add_first_line": ("text",),
+    "title_prefix": ("text",),
+    "title_suffix": ("text",),
+    "add_tags": ("tags",),
+    "remove_tags": ("tags",),
+}
+LINE_LIMIT = 200  # one added line
+TITLE_TEXT_LIMIT = 100
+TAGS_PER_STEP = 50
 
 
 @dataclass(frozen=True)
@@ -268,3 +289,149 @@ def apply_bulk(
         not_in_plan=sum(i.status == "not_in_plan" for i in items),
         items=tuple(items),
     )
+
+
+# --- steps: one small edit applied the same way to many videos --------------------------------------
+@dataclass(frozen=True)
+class Step:
+    """One edit by code. Which fields matter depends on `kind` (see `STEP_KINDS`)."""
+
+    kind: str
+    find: str = ""  # replace
+    replace_with: str = ""  # replace
+    fields: tuple[str, ...] = ("description",)  # replace
+    footer: str = ""  # footer
+    marker: str = ""  # footer
+    text: str = ""  # insert_after_first_paragraph, add_first_line, title_prefix, title_suffix
+    contains: str = ""  # remove_line
+    tags: tuple[str, ...] = ()  # add_tags, remove_tags
+
+
+def _empty(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == ()
+
+
+def _string(data: dict[str, Any], key: str, label: str) -> str:
+    value = data.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"The {label} must be text.")
+    return _newlines(value)
+
+
+def step_from_dict(data: Any) -> Step:
+    """A step from decoded JSON, checked; raises ValueError with a plain sentence."""
+    if not isinstance(data, dict):
+        raise ValueError('A step must be an object with a "kind".')
+    kind = data.get("kind")
+    if not isinstance(kind, str) or kind not in STEP_KINDS:
+        raise ValueError(f'A step needs a "kind", one of: {", ".join(STEP_KINDS)}.')
+    stray = sorted(k for k, v in data.items()
+                   if k != "kind" and k not in _STEP_KEYS[kind] and not _empty(v))
+    if stray:
+        raise ValueError(f'The step "{kind}" does not take: {", ".join(stray)}. '
+                         f'It takes: {", ".join(_STEP_KEYS[kind])}.')
+    if kind == "replace":
+        find = _string(data, "find", "text to find")
+        replace_with = _string(data, "replace_with", "replacement")
+        if not find.strip():
+            raise ValueError("Enter the text to find.")
+        raw_fields = data.get("fields") or ["description"]
+        if (not isinstance(raw_fields, (list, tuple)) or not all(isinstance(f, str) for f in raw_fields)
+                or any(f not in FIELDS for f in raw_fields)):
+            raise ValueError("Choose the title, the description or both to change.")
+        fields = tuple(f for f in FIELDS if f in raw_fields)
+        check_spec(BulkSpec(kind="replace", find=find, replace_with=replace_with, fields=fields))
+        return Step("replace", find=find, replace_with=replace_with, fields=fields)
+    if kind == "footer":
+        footer = _string(data, "footer", "footer").strip()
+        marker = _string(data, "marker", "footer marker").strip()
+        check_spec(BulkSpec(kind="footer", footer=footer, footer_marker=marker))
+        return Step("footer", footer=footer, marker=marker)
+    if kind == "remove_line":
+        contains = _string(data, "contains", "text in the line to remove").strip()
+        if not contains:
+            raise ValueError("Enter the text in the line to remove.")
+        if len(contains) > FIND_LIMIT:
+            raise ValueError(f"The text in the line to remove is {len(contains)} characters; "
+                             f"the limit is {FIND_LIMIT}.")
+        return Step("remove_line", contains=contains)
+    if kind in ("add_tags", "remove_tags"):
+        raw_tags = data.get("tags")
+        if (not isinstance(raw_tags, (list, tuple)) or not raw_tags
+                or not all(isinstance(t, str) for t in raw_tags)):
+            raise ValueError('"tags" must be a list of text with at least one tag.')
+        if len(raw_tags) > TAGS_PER_STEP:
+            raise ValueError(f"At most {TAGS_PER_STEP} tags per step.")
+        tags = tuple(dict.fromkeys(t.strip() for t in raw_tags if t.strip()))
+        if not tags:
+            raise ValueError('"tags" must be a list of text with at least one tag.')
+        if kind == "add_tags" and any(c in t for t in tags for c in "<>,"):
+            raise ValueError("A tag cannot contain <, > or a comma.")
+        return Step(kind, tags=tags)
+    text = _string(data, "text", "text to add").strip()
+    if not text:
+        raise ValueError("Enter the text to add.")
+    if kind in ("add_first_line", "title_prefix", "title_suffix") and "\n" in text:
+        raise ValueError("This text must be one line.")
+    limit = {"add_first_line": LINE_LIMIT, "title_prefix": TITLE_TEXT_LIMIT,
+             "title_suffix": TITLE_TEXT_LIMIT}.get(kind, FOOTER_LIMIT)
+    if len(text) > limit:
+        raise ValueError(f"The text is {len(text)} characters; the limit is {limit}.")
+    return Step(kind, text=text)
+
+
+def apply_step(step: Step, title: str, description: str, tags: Sequence[str]
+               ) -> tuple[str, str, tuple[str, ...]]:
+    """The title, description and tags after one step. Pure, and a step that already took effect
+    changes nothing."""
+    description = _newlines(description)
+    kept = tuple(tags)
+    kind = step.kind
+    if kind == "replace":
+        find, replacement = _newlines(step.find), _newlines(step.replace_with)
+        if "title" in step.fields and find in title:
+            title = title.replace(find, replacement).strip()
+        if "description" in step.fields and find in description:
+            description = description.replace(find, replacement)
+    elif kind == "footer":
+        new = _footer_text(description, step.footer, step.marker)
+        if new.rstrip() != description.rstrip():
+            description = new
+    elif kind == "insert_after_first_paragraph":
+        if step.text not in description:
+            index = description.find("\n\n")
+            if index >= 0:
+                description = description[:index] + "\n\n" + step.text + description[index:]
+            else:
+                body = description.rstrip()
+                description = (body + "\n\n" + step.text) if body else step.text
+    elif kind == "remove_line":
+        lines = description.split("\n")
+        left = [line for line in lines if step.contains not in line]
+        if left != lines:
+            collapsed: list[str] = []
+            for line in left:
+                if line.strip() == "" and collapsed and collapsed[-1].strip() == "":
+                    continue  # one blank line where the removed line was
+                collapsed.append(line if line.strip() else "")
+            description = "\n".join(collapsed)
+    elif kind == "add_first_line":
+        if description.split("\n", 1)[0].strip() != step.text:
+            description = step.text + "\n" + description if description else step.text
+    elif kind == "title_prefix":
+        if not title.startswith(step.text):
+            title = f"{step.text} {title}".strip()
+    elif kind == "title_suffix":
+        if not title.endswith(step.text):
+            title = f"{title} {step.text}".strip()
+    elif kind == "add_tags":
+        have = {t.casefold() for t in kept}
+        kept += tuple(t for t in step.tags if t.casefold() not in have)
+    elif kind == "remove_tags":
+        gone = {t.casefold() for t in step.tags}
+        kept = tuple(t for t in kept if t.casefold() not in gone)
+    else:
+        raise ValueError(f'Unknown step "{kind}".')
+    return title, description, kept

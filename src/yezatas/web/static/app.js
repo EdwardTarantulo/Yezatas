@@ -1,4 +1,4 @@
-// Polls /api/status while a sign-in, a catalog pull, a push, a suggestion, a translation, subtitles, a transcript, chapters, a packaging check, variants, an outlier explanation, a strategy report, a copilot answer, a link check, an advertiser-friendly check, a comments fetch or a comment sort are running, then reloads the page when a job finishes.
+// Polls /api/status while a sign-in, a catalog pull, a push, a suggestion, a translation, subtitles, a transcript, chapters, a packaging check, variants, an outlier explanation, a strategy report, a copilot answer, a bulk edit agent turn, a link check, an advertiser-friendly check, a comments fetch or a comment sort are running, then reloads the page when a job finishes.
 // Copy buttons copy the text of the element named by data-copy-target. Also stops double submits, shows character counters and wires the theme toggle. No external code.
 (function () {
   "use strict";
@@ -136,10 +136,53 @@
     });
   });
 
+  // Example chips (Bulk edit): put the example into the textarea named by data-fill-target.
+  document.querySelectorAll("[data-fill-text]").forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      var field = document.getElementById(chip.getAttribute("data-fill-target"));
+      if (!field) return;
+      field.value = chip.getAttribute("data-fill-text");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.focus();
+    });
+  });
+
   if (document.body.dataset.poll !== "1") return;
 
   var csrf = document.body.dataset.csrf || "";
   var seenRunning = false;
+
+  // Bulk edit agent: add the log lines written since the page was drawn (text only, never HTML), so the
+  // panel keeps its size and nothing below it moves.
+  var agentLog = document.getElementById("ag-log");
+  var agentLines = agentLog ? Number(agentLog.getAttribute("data-count") || 0) : 0;
+  function followAgentLog() {
+    if (!agentLog) return;
+    fetch("/api/bulk-agent?after=" + agentLines, { credentials: "same-origin", headers: { "X-CSRF-Token": csrf } })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("status " + r.status)); })
+      .then(function (d) {
+        var now = document.getElementById("ag-now");
+        var atEnd = agentLog.scrollTop + agentLog.clientHeight >= agentLog.scrollHeight - 24;
+        (d.log || []).forEach(function (line) {
+          var item = document.createElement("li");
+          item.className = "ag-line";
+          item.textContent = line;
+          agentLog.insertBefore(item, now);
+        });
+        agentLines = d.total;
+        if (atEnd) agentLog.scrollTop = agentLog.scrollHeight;
+        var staged = document.getElementById("ag-staged");
+        if (staged) staged.textContent = d.staged + (d.staged === 1 ? " video" : " videos") + " staged";
+        if (d.stopping && now && !now.querySelector(".ag-stopping")) {
+          var note = document.createElement("span");
+          note.className = "muted ag-stopping";
+          note.textContent = " Stopping after this step.";
+          now.appendChild(note);
+        }
+      })
+      .catch(function () { /* the next poll tries again */ });
+  }
+  if (agentLog) agentLog.scrollTop = agentLog.scrollHeight;
 
   function show(id, text) {
     var el = document.getElementById(id);
@@ -150,13 +193,14 @@
     fetch("/api/status", { credentials: "same-origin", headers: { "X-CSRF-Token": csrf } })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("status " + r.status)); })
       .then(function (s) {
-        var jobs = ["signin", "pull", "write", "push", "suggest", "translate", "subtitles", "transcribe", "chapters", "packaging", "variants", "outliers", "strategy", "competitors", "competitors_explain", "searchgaps_signin", "searchgaps", "searchgaps_rank", "channel_stats", "video_stats", "copilot", "links", "adcheck", "category", "pinned", "shorts", "comments", "assist", "channel_comments", "channel_sort", "thumb"];
+        var jobs = ["signin", "pull", "write", "push", "suggest", "translate", "subtitles", "transcribe", "chapters", "packaging", "variants", "outliers", "strategy", "competitors", "competitors_explain", "searchgaps_signin", "searchgaps", "searchgaps_rank", "channel_stats", "video_stats", "copilot", "bulk_agent", "links", "adcheck", "category", "pinned", "shorts", "comments", "assist", "channel_comments", "channel_sort", "thumb"];
         var running = jobs.some(function (name) { return s[name] && s[name].status === "running"; });
         if (running) {
           seenRunning = true;
           jobs.forEach(function (name) {
             show(name + "-msg", s[name] && s[name].status === "running" ? s[name].message : "");
           });
+          followAgentLog();
           setTimeout(poll, 1500);
         } else {
           keepScroll();
