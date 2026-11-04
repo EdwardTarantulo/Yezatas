@@ -826,9 +826,11 @@ def test_there_is_no_upload_button_or_form_on_either_page(tmp_path: Path) -> Non
     video_page = page(ui)
     section = card(video_page)
     actions = set(re.findall(r'<form[^>]*action="([^"]*)"', section))
-    assert actions == {f"/videos/{V1}/packaging", "/packaging/done",
-                       f"/videos/{V1}/packaging/variants"} | ({"/packaging/variants/done"}
-                                                              & actions)
+    removes = {a for a in actions if re.fullmatch(rf"/videos/{V1}/packaging/variants/\d+/remove", a)}
+    assert len(removes) == len(stored_variants(ui))
+    assert actions - removes == {f"/videos/{V1}/packaging", "/packaging/done",
+                                 f"/videos/{V1}/packaging/variants"} | ({"/packaging/variants/done"}
+                                                                        & actions)
     assert 'type="file"' not in section
     preview = ui.client.get(f"/videos/{V1}/packaging?variant=1").text
     assert set(re.findall(r'<form[^>]*action="([^"]*)"', preview)) == {"/videos"}  # only the search box
