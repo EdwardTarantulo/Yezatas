@@ -48,7 +48,7 @@
     <a class="chip{% if choice.active %} active{% endif %}" href="{{ choice.href }}"{% if choice.active %} aria-current="page"{% endif %}>{{ choice.label }}</a>
     {% endfor %}
   </div>
-  {% if chosen %}<p class="hint" id="preview-note">Showing a variant idea. It is an AI-made image: check that the product and the scene match your video. Yezatas does not upload thumbnails; download it from the video page and upload it in YouTube Studio.</p>
+  {% if chosen %}<p class="hint" id="preview-note">Showing a variant idea. It is an AI-made image: check that the product and the scene match your video. To use it, download it or replace the current thumbnail on the video page. Nothing changes on YouTube until you confirm.</p>
   {% elif bad_variant %}<p class="hint" id="preview-note">That variant is not available for this video, so the current thumbnail is shown.</p>
   {% else %}<p class="hint" id="preview-note">Showing the thumbnail YouTube shows now.{% if choices|length == 1 %} Make variant ideas on the video page to compare them here.{% endif %}</p>{% endif %}
   {% if draft_title %}<p class="hint">The title is the one in your draft.</p>{% endif %}

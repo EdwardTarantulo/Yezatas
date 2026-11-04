@@ -28,7 +28,7 @@ from yezatas.web.app import NO_PACKAGING_KEY
 V1, V2 = "vid00000001", "vid00000002"
 MAXRES = f"https://i.ytimg.com/vi/{V1}/maxresdefault.jpg"
 DESCRIPTION = "How to repot a cactus without hurting its roots."
-KEEP_SENTENCE = "Yezatas does not upload thumbnails; download one and upload it in YouTube Studio."
+KEEP_SENTENCE = "Nothing changes on YouTube until you confirm. Download a variant idea, or replace the current thumbnail; the old one is kept in History so you can put it back."
 AI_NOTE = "AI-made image: check that the product and the scene match your video"
 
 
@@ -686,7 +686,8 @@ def test_the_preview_shows_a_chosen_variant_and_a_picker(tmp_path: Path) -> None
     assert re.search(rf'class="chip active" href="/videos/{V1}/packaging\?variant=2" aria-current="page">'
                      r"Variant 2<", html)
     assert f'href="/videos/{V1}/packaging?variant=1">Variant 1<' in html
-    assert AI_NOTE in html and "Yezatas does not upload thumbnails" in html
+    assert AI_NOTE in html and "To use it, download it or replace the current thumbnail on the video page. Nothing changes on YouTube until you confirm." in html
+    assert "does not upload thumbnails" not in html
     search_mine = html.split('id="preview-search-mine"')[1].split("</article>")[0]
     assert f'/videos/{V1}/packaging/variants/2.jpg' in search_mine
     plain = ui.client.get(f"/videos/{V1}/packaging").text
