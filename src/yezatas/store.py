@@ -1942,6 +1942,10 @@ class Store:
             "SELECT * FROM thumbnail_variants WHERE id = ?", (variant_id,)).fetchone()
         return self._row_to_thumbnail_variant(row) if row else None
 
+    def delete_thumbnail_variant(self, variant_id: int) -> None:
+        with self._conn:
+            self._conn.execute("DELETE FROM thumbnail_variants WHERE id = ?", (variant_id,))
+
     # --- outlier reports --------------------------------------------------
     @staticmethod
     def _row_to_outlier_report(row: sqlite3.Row) -> OutlierReport:

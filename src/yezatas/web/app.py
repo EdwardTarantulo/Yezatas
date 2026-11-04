@@ -3026,6 +3026,30 @@ def create_app(
             flash(request, "error", "A thumbnail change is already running.")
         return back
 
+    @app.post("/videos/{video_id}/packaging/variants/{variant_id}/remove")
+    async def packaging_variant_remove(request: Request, video_id: str, variant_id: str) -> Response:
+        """Delete one variant idea and its picture here. YouTube and the thumbnail history are not touched."""
+        await read_form(request)
+        back = see_other(f"/videos/{quote(video_id)}#thumbnail")
+        variant = None
+        if variant_id.isascii() and variant_id.isdigit() and len(variant_id) <= MAX_ID_DIGITS:
+            with Store(config.catalog_db) as store:
+                variant = store.get_thumbnail_variant(int(variant_id))
+        if variant is None or variant.video_id != video_id:
+            flash(request, "error", "There is no such variant idea.")
+            return back
+        if variant.image_file:
+            try:
+                packaging_mod.stored_image_path(
+                    state.images_dir, video_id, variant.image_file).unlink(missing_ok=True)
+            except (packaging_mod.PackagingError, OSError):
+                flash(request, "error", "The picture could not be deleted, so the variant idea was kept.")
+                return back
+        with Store(config.catalog_db) as store:
+            store.delete_thumbnail_variant(variant.id)
+        flash(request, "ok", "Variant idea removed. Nothing changed on YouTube.")
+        return back
+
     @app.get("/history/thumbnails/{swap_id}/backup.jpg")
     def history_thumb_backup(request: Request, swap_id: int) -> Response:
         missing = Response("There is no such picture.", status_code=404, media_type="text/plain")
