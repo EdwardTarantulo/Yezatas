@@ -501,7 +501,9 @@ a.chip:hover { background: var(--line); }
 .vnav a { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-weight: 500; text-decoration: none; white-space: nowrap; }
 .vnav a:hover { color: var(--text); }
 .vnav-n { padding: 0 7px; border-radius: 10px; background: var(--hover); font-size: var(--fs-xs); line-height: 20px; }
-#what-to-fix, #edit, #h-tools, #checks, [id^="check-"], [id^="tool-"] { scroll-margin-top: 112px; }
+/* Every jump on the video page lands below the two sticky bars, and a form field shows its label as well. */
+html:has(.vnav) { scroll-padding-top: 120px; }
+#edit input[id^="f-"], #edit textarea[id^="f-"] { scroll-margin-top: 32px; }
 @media (min-width: 1200px) {
   .vbody { display: grid; grid-template-columns: minmax(0, 1fr) 316px; column-gap: 20px; align-items: start; }
   .vbody > * { grid-column: 1; }
