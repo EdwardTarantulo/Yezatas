@@ -274,13 +274,30 @@ document.addEventListener("submit", function (e) {
     var open = folds.filter(function (d) { return d.open; }).map(function (d) { return d.id; });
     try { window.sessionStorage.setItem(key, JSON.stringify(open)); } catch (e) { /* storage off: nothing to keep */ }
   }
-  function openTarget() {
-    var id = decodeURIComponent(window.location.hash.slice(1));
+  function goTo(id) {
     var target = id && document.getElementById(id);
     if (!target) return;
-    var fold = target.closest("details[data-keep]");
-    if (fold) { fold.open = true; target.scrollIntoView({ behavior: "smooth", block: "start" }); }
+    // Open every fold around the target first, so the page has its final height before it scrolls.
+    var fold = target.closest("details");
+    var row = fold;
+    while (row) { row.open = true; row = row.parentElement && row.parentElement.closest("details"); }
+    // A card that fills a fold is shown with the fold's own heading above it.
+    var place = fold && target.parentElement === fold ? fold : target;
+    place.scrollIntoView({ block: "start" });
+    if (target.matches("input, textarea, select")) target.focus({ preventScroll: true });
   }
+  function openTarget() { goTo(decodeURIComponent(window.location.hash.slice(1))); }
+  // The browser's own jump ignores a closed fold and does nothing on a second click, so links on this page come here.
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest ? event.target.closest('a[href^="#"]') : null;
+    if (!link || link.getAttribute("href").length < 2 || event.defaultPrevented) return;
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    var id = decodeURIComponent(link.getAttribute("href").slice(1));
+    if (!document.getElementById(id)) return;
+    event.preventDefault();
+    if (window.location.hash !== link.getAttribute("href")) history.pushState(null, "", link.getAttribute("href"));
+    goTo(id);
+  });
   folds.forEach(function (d) {
     if (saved.indexOf(d.id) >= 0 || d.querySelector(".waiting, .flash.error")) d.open = true;
     d.addEventListener("toggle", remember);
