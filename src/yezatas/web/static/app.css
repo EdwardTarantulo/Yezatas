@@ -20,6 +20,7 @@
   --primary-text: #ffffff;
   --shadow: 0 1px 2px rgba(17, 24, 39, 0.05);
   --shadow-pop: 0 14px 36px rgba(17, 24, 39, 0.16);
+  --scrim: rgba(15, 15, 15, 0.45);
   --good: #2ba640;
   --good-bg: #e6f4ea;
   --good-text: #1e7a30;
@@ -60,6 +61,7 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --scrim: rgba(0, 0, 0, 0.65);
   --bg: #0f0f0f;
   --surface: #212121;
   --line: #3d3d3d;
@@ -1259,3 +1261,63 @@ html.yz-restoring body { visibility: hidden; }
 .job-toast .button { flex: none; }
 .job-toast-x { flex: none; border: 0; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; padding: 4px 6px; }
 @media (max-width: 599px) { .jobs-chip-text { display: none; } .jobs-chip { padding: 0 10px; } }
+
+/* The YouTube API limits pop-up (Bulk edit). The dialog is the scroller, so the arrow keys work from Close. */
+.lim-open { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: -4px 0 20px; }
+.lim-open .muted { font-size: var(--fs-sm); }
+.lim-dialog {
+  width: min(960px, calc(100vw - 48px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); color: var(--text); box-shadow: var(--shadow-pop);
+}
+.lim-dialog::backdrop { background: var(--scrim); }
+.lim-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 20px 24px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.lim-head h2 { margin: 0 0 4px; font-size: var(--fs-xl); text-wrap: balance; }
+.lim-head p { margin: 0; font-size: var(--fs-sm); max-width: 62ch; }
+.lim-head .button { flex: none; }
+.lim-table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); table-layout: fixed; }
+.lim-table thead th { width: 42%; padding: 12px 8px 4px; color: var(--muted); font-size: var(--fs-xs); font-weight: 500; text-align: left; }
+.lim-table thead th:first-child { width: 28%; padding-left: 24px; }
+.lim-table thead th:last-child { width: 30%; padding-right: 24px; }
+.lim-group th { padding: 16px 24px 8px; text-align: left; }
+.lim-row th, .lim-row td { padding: 10px 8px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; line-height: 1.4; }
+.lim-row th { padding-left: 24px; font-weight: 600; }
+.lim-row td:last-child { padding-right: 24px; }
+.lim-where { color: var(--muted); font-size: var(--fs-sm); }
+.lim-where-label { display: none; }
+.lim-quota {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 32px; align-items: start;
+  margin: 16px 0 0; padding: 20px 24px; background: var(--hover); border-top: 1px solid var(--line);
+}
+.lim-quota p { margin: 0; }
+.lim-quota-figure .muted { font-size: var(--fs-sm); line-height: 1.4; }
+.lim-quota .lim-quota-number { margin: 0 0 4px; font-size: var(--fs-2xl); font-weight: 600; line-height: 1.25; }
+.lim-costs { margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+.lim-costs li { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; }
+.lim-costs li + li { border-top: 1px solid var(--line); }
+.lim-cost { font-variant-numeric: tabular-nums; font-weight: 600; }
+.lim-foot { padding: 12px 24px 16px; border-top: 1px solid var(--line); font-size: var(--fs-xs); line-height: 1.5; }
+.lim-foot p { margin: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .lim-dialog[open] { animation: lim-in 160ms ease-out; }
+  .lim-dialog[open]::backdrop { animation: lim-fade 160ms ease-out; }
+}
+@keyframes lim-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes lim-fade { from { opacity: 0; } }
+@media (max-width: 720px) {
+  /* A phone column: the table becomes a list, and the pop-up fills the screen. */
+  .lim-dialog { width: 100vw; max-height: 100dvh; height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+  .lim-head { padding: 16px; }
+  .lim-head h2 { font-size: var(--fs-lg); }
+  .lim-table, .lim-table tbody, .lim-table tr, .lim-table th, .lim-table td { display: block; width: auto; }
+  .lim-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .lim-group th { padding: 16px 16px 8px; }
+  .lim-row { padding: 12px 16px; border-top: 1px solid var(--line); }
+  .lim-row th, .lim-row td, .lim-row td:last-child { padding: 0; border: 0; }
+  .lim-row td { margin-top: 4px; }
+  .lim-where-label { display: inline; font-weight: 500; }
+  .lim-quota { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+  .lim-foot { padding: 12px 16px 16px; }
+}

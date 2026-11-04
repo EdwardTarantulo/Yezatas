@@ -1,0 +1,54 @@
+{# The Bulk edit page's explainer: what YouTube's API allows, as one native dialog. Rows come from views.API_LIMITS. #}
+<p class="lim-open">
+  <button type="button" class="button secondary" id="api-limits-open" data-dialog-open="api-limits" aria-haspopup="dialog" hidden>YouTube API limits</button>
+  <span class="muted">What Yezatas can read and change, and what only YouTube can do.</span>
+</p>
+<dialog class="lim-dialog" id="api-limits" aria-labelledby="lim-title">
+  <div class="lim-sheet">
+    <header class="lim-head">
+      <div class="lim-head-text">
+        <h2 id="lim-title">What YouTube's API can and can't do</h2>
+        <p class="muted">Yezatas reaches YouTube through its official API. What the API does not offer, Yezatas cannot do either.</p>
+      </div>
+      <button type="button" class="button secondary" id="api-limits-close" data-dialog-close>Close</button>
+    </header>
+    <table class="lim-table">
+      <thead>
+        <tr>
+          <th scope="col">What</th>
+          <th scope="col">What it means</th>
+          <th scope="col">Where to do it</th>
+        </tr>
+      </thead>
+      {% for group in api_limits.groups %}
+      <tbody id="lim-{{ group.status }}">
+        <tr class="lim-group">
+          <th colspan="3" scope="rowgroup"><span class="pill {{ group.pill }}">{{ group.label }}</span></th>
+        </tr>
+        {% for row in group.rows %}
+        <tr class="lim-row">
+          <th scope="row">{{ row.name }}</th>
+          <td>{{ row.meaning }}</td>
+          <td class="lim-where"><span class="lim-where-label">Where: </span>{% if row.href %}<a href="{{ row.href }}">{{ row.where }}</a>{% else %}{{ row.where }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% endfor %}
+    </table>
+    <section class="lim-quota" id="lim-quota" aria-labelledby="lim-quota-title">
+      <div class="lim-quota-figure">
+        <p class="lim-quota-number" id="lim-quota-title">{{ api_limits.quota_units }} units a day</p>
+        <p class="muted">{{ api_limits.quota_note }}</p>
+      </div>
+      <ul class="lim-costs">
+        {% for action, cost in api_limits.quota_costs %}
+        <li><span>{{ action }}</span><span class="lim-cost">{{ cost }}</span></li>
+        {% endfor %}
+      </ul>
+    </section>
+    <footer class="lim-foot muted">
+      <p>{{ api_limits.checked }}
+      {% for label, url in api_limits.sources %}<a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ label }}</a>{{ ", " if not loop.last else "." }}{% endfor %}</p>
+    </footer>
+  </div>
+</dialog>
